@@ -78,7 +78,7 @@ export default function AdminLogin() {
     }}>
       {/* Header */}
       <header className="w-full py-4 px-8" style={{ backgroundColor: '#7A1F1F', color: '#FCF0E3' }}>
-        <h1 className="font-normal text-5xl text-center" style={{ fontFamily: 'Egyptienne MN, serif'}}>
+        <h1 className="font-normal text-4xl text-center" style={{ fontFamily: 'Egyptienne MN, serif'}}>
           Gelato Wholesale Collective
         </h1>
       </header>
@@ -91,7 +91,7 @@ export default function AdminLogin() {
         }}></div>
 
         {/* Admin Login Card */}
-        <div className="relative bg-white rounded-lg shadow-2xl p-8 w-full max-w-md">
+        <div className="relative bg-white rounded-lg shadow-2xl p-8 w-full max-w-sm">
 
           <h2 className="text-2xl font-bold mb-2 text-left" style={{ color: '#7d3c3c' }}>
             ADMIN LOGIN

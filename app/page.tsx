@@ -44,7 +44,7 @@ export default function Home() {
     }}>
       {/* Header */}
       <header className="w-full py-4 px-8" style={{ backgroundColor: '#7A1F1F', color: '#FCF0E3' }}>
-        <h1 className="font-normal text-5xl text-center" style={{ fontFamily: 'Egyptienne MN, serif'}}>
+        <h1 className="font-normal text-4xl text-center" style={{ fontFamily: 'Egyptienne MN, serif'}}>
           Gelato Wholesale Collective
         </h1>
       </header>
@@ -57,11 +57,11 @@ export default function Home() {
         }}></div>
 
         {/* Login Card */}
-        <div className="relative bg-white rounded-lg shadow-2xl p-8 w-full max-w-md">
+        <div className="relative bg-white rounded-lg shadow-2xl p-8 w-full max-w-sm">
           <h2 className="text-2xl font-bold mb-2 text-left" style={{ color: '#7d3c3c' }}>
             LOGIN
           </h2>
-          <p className="text-sm text-gray-600 mb-6 text-left">
+          <p className="text-sm text-gray-600 mb-4 text-left">
             Enter your credentials to login your account.
           </p>
 
@@ -125,7 +125,7 @@ export default function Home() {
             </div>
 
             {/* Forgot Password Link */}
-            <div className="mt-4 text-center">
+            <div className="mt-3 text-center">
               <a href="#" className="text-sm hover:underline" style={{ color: '#7d3c3c' }}>
                 Forgot Password?
               </a>
