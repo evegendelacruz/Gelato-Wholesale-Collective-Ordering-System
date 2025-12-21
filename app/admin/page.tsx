@@ -2,9 +2,12 @@
 
 import { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import client from '../../lib/client';
+import Link from 'next/link';
 
 export default function AdminLogin() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -58,13 +61,17 @@ export default function AdminLogin() {
         return;
       }
 
-      setSuccessMessage('Login successful!');
+      setSuccessMessage('Login successful! Redirecting...');
       console.log('Admin logged in:', data.user);
+      
+      // Navigate to dashboard after successful login
+      setTimeout(() => {
+        router.push('/admin/dashboard');
+      }, 1000);
       
     } catch (err) {
       setLoginError('An unexpected error occurred');
       console.error('Login error:', err);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -176,9 +183,9 @@ export default function AdminLogin() {
 
             {/* Back to User Login Link */}
             <div className="mt-4 text-center">
-              <a href="/" className="text-sm hover:underline" style={{ color: '#7d3c3c' }}>
+              <Link href="/" className="text-sm hover:underline" style={{ color: '#7d3c3c' }}>
                 Back
-              </a>
+              </Link>
             </div>
 
             {/* Forgot Password Link */}
