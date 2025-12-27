@@ -50,19 +50,55 @@ export default function AdminLogin() {
     setIsLoading(true);
 
     try {
+      // First, check if user exists in admin_user table
+      const { data: adminUser, error: queryError } = await client
+        .from('admin_user')
+        .select('*')
+        .eq('admin_email', email)
+        .single();
+
+      if (queryError || !adminUser) {
+        setLoginError('Invalid email or password');
+        setIsLoading(false);
+        return;
+      }
+
+      // Check if password matches (using the admin_password field from admin_user table)
+      if (adminUser.admin_password !== password) {
+        setLoginError('Invalid email or password');
+        setIsLoading(false);
+        return;
+      }
+
+      // Now sign in with Supabase Auth using the credentials
       const { data, error } = await client.auth.signInWithPassword({
         email: email,
         password: password,
       });
 
       if (error) {
-        setLoginError(error.message);
+        console.error('Auth error:', error);
+        setLoginError('Authentication failed. Please try again.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Check if the auth user matches the admin_user record
+      if (data.user && data.user.id !== adminUser.admin_auth_id) {
+        console.error('User ID mismatch');
+        await client.auth.signOut();
+        setLoginError('Account verification failed');
         setIsLoading(false);
         return;
       }
 
       setSuccessMessage('Login successful! Redirecting...');
-      console.log('Admin logged in:', data.user);
+      console.log('Admin logged in:', {
+        auth_id: data.user?.id,
+        account_id: adminUser.admin_acc_id,
+        name: adminUser.admin_fullName,
+        role: adminUser.admin_role
+      });
       
       // Navigate to dashboard after successful login
       setTimeout(() => {
@@ -200,7 +236,7 @@ export default function AdminLogin() {
 
       {/* Footer */}
       <footer className="w-full py-4 px-8 text-white text-sm" style={{ backgroundColor: '#7A1F1F', color: '#FCF0E3' }}>
-        <p>MOMOLATO PTE LTD | © 2025 All Rights Reserved</p>
+        <p>Gelato Wholesale Collective | © 2025 All Rights Reserved</p>
       </footer>
     </div>
   );

@@ -3,27 +3,91 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import supabase from '@/lib/client';
 
 interface User {
   id: string;
   name: string;
   email: string;
   profilePicture?: string;
+  admin_profile?: string;
 }
 
 export default function Header() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const response = await fetch('/api/auth/user');
-        if (response.ok) {
-          const userData = await response.json();
-          setUser(userData);
+        // Get current auth session
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+        
+        if (authError || !authUser) {
+          console.error('Auth error:', authError);
+          setLoading(false);
+          return;
+        }
+
+        // Fetch user details from admin_user table
+        const { data: userData, error: userError } = await supabase
+          .from('admin_user')
+          .select('admin_fullName, admin_email, admin_acc_id, admin_profile, admin_auth_id')
+          .eq('admin_auth_id', authUser.id)
+          .single();
+
+        if (userError) {
+          // If not found by auth_id, try by email
+          const { data: emailData, error: emailError } = await supabase
+            .from('admin_user')
+            .select('admin_fullName, admin_email, admin_acc_id, admin_profile, admin_auth_id')
+            .eq('admin_email', authUser.email)
+            .single();
+
+          if (emailError || !emailData) {
+            console.error('User not found:', emailError);
+            setLoading(false);
+            return;
+          }
+
+          setUser({
+            id: emailData.admin_acc_id,
+            name: emailData.admin_fullName,
+            email: emailData.admin_email,
+            admin_profile: emailData.admin_profile
+          });
+
+          // Set profile photo if exists
+          if (emailData.admin_profile) {
+            const { data: urlData } = supabase.storage
+              .from('gwc_files')
+              .getPublicUrl(emailData.admin_profile);
+            
+            if (urlData?.publicUrl) {
+              setProfilePhoto(`${urlData.publicUrl}?t=${Date.now()}`);
+            }
+          }
+        } else if (userData) {
+          setUser({
+            id: userData.admin_acc_id,
+            name: userData.admin_fullName,
+            email: userData.admin_email,
+            admin_profile: userData.admin_profile
+          });
+
+          // Set profile photo if exists
+          if (userData.admin_profile) {
+            const { data: urlData } = supabase.storage
+              .from('gwc_files')
+              .getPublicUrl(userData.admin_profile);
+            
+            if (urlData?.publicUrl) {
+              setProfilePhoto(`${urlData.publicUrl}?t=${Date.now()}`);
+            }
+          }
         }
       } catch (error) {
         console.error('Failed to fetch user:', error);
@@ -33,7 +97,56 @@ export default function Header() {
     };
 
     fetchUser();
-  }, []);
+  }, []); // Initial fetch only runs once
+
+  // Separate useEffect for real-time updates
+  useEffect(() => {
+    if (!user?.id) return; // Don't set up subscription until user is loaded
+
+    // Set up real-time subscription for profile updates
+    const channel = supabase
+      .channel('admin_user_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'admin_user',
+          filter: `admin_acc_id=eq.${user.id}` // Only listen to current user's updates
+        },
+        (payload) => {
+          console.log('Profile updated in real-time:', payload);
+          
+          const newData = payload.new as { admin_profile?: string; admin_fullName?: string };
+          
+          // Update profile photo
+          if (newData.admin_profile !== undefined) {
+            if (newData.admin_profile) {
+              const { data: urlData } = supabase.storage
+                .from('gwc_files')
+                .getPublicUrl(newData.admin_profile);
+              
+              if (urlData?.publicUrl) {
+                setProfilePhoto(`${urlData.publicUrl}?t=${Date.now()}`);
+              }
+            } else {
+              setProfilePhoto(null);
+            }
+          }
+
+          // Update user name if changed
+          if (newData.admin_fullName) {
+            setUser(prev => prev ? { ...prev, name: newData.admin_fullName || prev.name } : null);
+          }
+        }
+      )
+      .subscribe();
+
+    // Cleanup subscription on unmount
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]); 
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -62,12 +175,13 @@ export default function Header() {
           <div className="w-8 h-8 rounded-full flex items-center justify-center overflow-hidden relative" style={{ border: '2px solid #e84e1b' }}>
             {loading ? (
               <span className="text-gray-400 text-xs">...</span>
-            ) : user?.profilePicture ? (
+            ) : profilePhoto ? (
               <Image 
-                src={user.profilePicture} 
-                alt={user.name || 'User'} 
+                src={profilePhoto} 
+                alt={user?.name || 'User'} 
                 fill
                 className="object-cover"
+                unoptimized
               />
             ) : (
               <span className="font-semibold" style={{ color: '#e84e1b' }}>
