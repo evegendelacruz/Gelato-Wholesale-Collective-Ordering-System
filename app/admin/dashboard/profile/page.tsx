@@ -1069,27 +1069,29 @@ export default function ProfilePage() {
                 <Settings size={16} />
                 <span style={{ fontWeight: '500' }}>Account Settings</span>
               </button>
-              
-              <button
-                onClick={() => setActiveTab('access')}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '12px 16px',
-                  backgroundColor: activeTab === 'access' ? '#fce4d6' : 'transparent',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  color: '#333',
-                  fontSize: '14px',
-                  transition: 'background-color 0.2s'
-                }}
-              >
-                <Users size={16} />
-                <span style={{ fontWeight: '500' }}>Access Control</span>
-              </button>
+
+              {currentUser?.admin_role === 'Admin' && (
+                <button
+                  onClick={() => setActiveTab('access')}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    padding: '12px 16px',
+                    backgroundColor: activeTab === 'access' ? '#fce4d6' : 'transparent',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    color: '#333',
+                    fontSize: '14px',
+                    transition: 'background-color 0.2s'
+                  }}
+                >
+                  <Users size={16} />
+                  <span style={{ fontWeight: '500' }}>Access Control</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1356,7 +1358,7 @@ export default function ProfilePage() {
               </div>
             </div>
           </div>
-        ) : (
+        ) : activeTab === 'access' && currentUser?.admin_role === 'Admin' ? (
               <div style={{
                 backgroundColor: 'white',
                 borderRadius: '12px',
@@ -1424,6 +1426,7 @@ export default function ProfilePage() {
                     />
                   </div>
                 </div>
+                
 
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -1571,7 +1574,7 @@ export default function ProfilePage() {
                 </tbody>
               </table>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
