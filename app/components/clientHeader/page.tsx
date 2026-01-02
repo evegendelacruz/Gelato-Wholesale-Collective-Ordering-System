@@ -198,15 +198,17 @@ export default function ClientHeader() {
   return (
     <header className="bg-white border-b shadow-sm pt-2 pb-3 border-gray-200 px-6 py-4">
       <div className="flex items-center justify-between max-w-7xl mx-auto">
-        <h1 
-          className="text-2xl font-bold tracking-tight"
-          style={{ 
-            color: '#7d3c3c',
-            fontFamily: "'Roboto Condensed', sans-serif"
-          }}
-        >
-          Gelato Wholesale Collective
-        </h1>
+        <Link href="/client">
+          <h1 
+            className="text-2xl font-bold tracking-tight cursor-pointer hover:opacity-80 transition-opacity"
+            style={{ 
+              color: '#7d3c3c',
+              fontFamily: "'Roboto Condensed', sans-serif"
+            }}
+          >
+            Gelato Wholesale Collective
+          </h1>
+        </Link>
         
         <div className="flex items-center gap-6">
         <Link

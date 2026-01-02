@@ -5,6 +5,7 @@ import Header from '@/app/components/header/page';
 import { useState, useEffect } from 'react';
 import { Search, Filter, Plus, X, Upload, Check, UserMinus } from 'lucide-react';
 import supabase from '@/lib/client';
+import Image from 'next/image';
 
 interface Client {
   client_id: string;
@@ -26,6 +27,40 @@ interface Client {
   client_ACRA: string | null;
   client_created_at: string;
   is_online: boolean;
+}
+
+interface Product {
+  id: number;
+  product_id: string;
+  product_name: string;
+  product_type: string;
+  product_gelato_type: string;
+  product_weight: number;
+  product_milkbased: number | null;
+  product_sugarbased: number | null;
+  product_shelflife: string;
+  product_price: number;
+  product_allergen: string | null;
+  product_ingredient: string | null;
+  product_image: string | null;
+  product_created_at: string;
+}
+
+interface ClientProduct {
+  id: number;
+  client_auth_id: string;
+  product_id: number;
+  custom_price: number;
+  is_available: boolean;
+  created_at: string;
+  product_list: {
+    id: number;
+    product_id: string;
+    product_name: string;
+    product_type: string;
+    product_price: number;
+    product_image: string | null;
+  };
 }
 
 interface Message {
@@ -52,8 +87,17 @@ export default function ClientAccountPage() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isDeleteSuccessOpen, setIsDeleteSuccessOpen] = useState(false);
   const [isEditSuccessOpen, setIsEditSuccessOpen] = useState(false);
+  const [isClientProductModalOpen, setIsClientProductModalOpen] = useState(false);
+  const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
+  const [isClientProductSuccessOpen, setIsClientProductSuccessOpen] = useState(false);
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [selectedProducts, setSelectedProducts] = useState<Map<string, number>>(new Map());
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'business-asc' | 'business-desc'>('newest');
   const [filterBy, setFilterBy] = useState<'all' | 'online' | 'offline' | 'sole' | 'partnership' | 'private'>('all');
+  const [selectedClientAuthId, setSelectedClientAuthId] = useState<string | null>(null);
+  const [clientProducts, setClientProducts] = useState<ClientProduct[]>([]);
+  const [isClientProductListModalOpen, setIsClientProductListModalOpen] = useState(false);
+  const [editingProducts, setEditingProducts] = useState<Map<number, number>>(new Map());
   const itemsPerPage = 10;
   const [contactErrors, setContactErrors] = useState({
     business: '',
@@ -91,6 +135,163 @@ export default function ClientAccountPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Helper function to get full image URL from Supabase storage
+  const getImageUrl = (imagePath: string | null): string => {
+    if (!imagePath) return ''; 
+    
+    // If it's already a full URL, return it
+    if (imagePath.startsWith('http')) return imagePath;
+
+    return `https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${imagePath}`;
+  };
+
+  const fetchClientProducts = async (clientAuthId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('client_product')
+      .select(`
+        *,
+        product_list (
+          id,
+          product_id,
+          product_name,
+          product_type,
+          product_price,
+          product_image
+        )
+      `)
+      .eq('client_auth_id', clientAuthId)
+      .eq('is_available', true);
+
+    if (error) throw error;
+    setClientProducts(data || []);
+  } catch (error) {
+    console.error('Error fetching client products:', error);
+  }
+};
+
+  const openClientProductListModal = async () => {
+  if (selectedRows.size !== 1) {
+    setMessage({ type: 'error', text: 'Please select exactly one client' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    return;
+  }
+
+  try {
+    setLoading(true);
+    
+    const clientId = Array.from(selectedRows)[0];
+    
+    const { data: clientData, error: clientError } = await supabase
+      .from('client_user')
+      .select('client_auth_id')
+      .eq('client_id', clientId)
+      .single();
+    
+    if (clientError || !clientData) {
+      throw new Error('Selected client not found. Please refresh the page.');
+    }
+    
+    setSelectedClientAuthId(clientData.client_auth_id);
+    await fetchClientProducts(clientData.client_auth_id);
+    
+    // Initialize editing products map with current custom prices
+    const editMap = new Map();
+    clientProducts.forEach(cp => {
+      editMap.set(cp.product_id, cp.custom_price);
+    });
+    setEditingProducts(editMap);
+    
+    setIsClientProductListModalOpen(true);
+    
+  } catch (error) {
+    console.error('Error opening client product list:', error);
+    setMessage({ 
+      type: 'error', 
+      text: error instanceof Error ? error.message : 'Failed to load client products.' 
+    });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  } finally {
+    setLoading(false);
+  }
+};
+
+const handleUpdateProductPrice = (productId: number, newPrice: string) => {
+  const newEditingProducts = new Map(editingProducts);
+  newEditingProducts.set(productId, parseFloat(newPrice) || 0);
+  setEditingProducts(newEditingProducts);
+};
+
+const handleRemoveClientProduct = async (clientProductId: number) => {
+  try {
+    setLoading(true);
+    
+    const { error } = await supabase
+      .from('client_product')
+      .delete()
+      .eq('id', clientProductId);
+    
+    if (error) throw error;
+    
+    // Refresh the client products list
+    if (selectedClientAuthId) {
+      await fetchClientProducts(selectedClientAuthId);
+    }
+    
+    setMessage({ type: 'success', text: 'Product removed successfully!' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    
+  } catch (error) {
+    console.error('Error removing product:', error);
+    setMessage({ 
+      type: 'error', 
+      text: 'Failed to remove product. Please try again.' 
+    });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  } finally {
+    setLoading(false);
+  }
+};
+
+const handleSaveProductChanges = async () => {
+  try {
+    setLoading(true);
+    
+    // Prepare updates for all modified prices
+    const updates = clientProducts.map(cp => {
+      const newPrice = editingProducts.get(cp.product_id);
+      if (newPrice !== undefined && newPrice !== cp.custom_price) {
+        return supabase
+          .from('client_product')
+          .update({ custom_price: newPrice })
+          .eq('id', cp.id);
+      }
+      return null;
+    }).filter(Boolean);
+    
+    // Execute all updates
+    await Promise.all(updates);
+    
+    // Refresh the client products list
+    if (selectedClientAuthId) {
+      await fetchClientProducts(selectedClientAuthId);
+    }
+    
+    setMessage({ type: 'success', text: 'Product prices updated successfully!' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    
+  } catch (error) {
+    console.error('Error updating product prices:', error);
+    setMessage({ 
+      type: 'error', 
+      text: 'Failed to update prices. Please try again.' 
+    });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     fetchClients();
@@ -138,6 +339,168 @@ export default function ClientAccountPage() {
       setLoading(false);
     }
   };
+
+  const fetchAvailableProducts = async (clientAuthId: string) => {
+  try {
+    // Fetch all products
+    const { data: productsData, error: productsError } = await supabase
+      .from('product_list')
+      .select('*')
+      .order('product_name', { ascending: true });
+
+    if (productsError) throw productsError;
+
+    // Fetch products already assigned to this client using client_auth_id
+    const { data: assignedData, error: assignedError } = await supabase
+      .from('client_product')
+      .select('product_id')
+      .eq('client_auth_id', clientAuthId)
+      .eq('is_available', true);
+
+    if (assignedError) throw assignedError;
+
+    // Create a Set of assigned product IDs
+    const assignedProductIds = new Set(assignedData?.map(item => item.product_id) || []);
+
+    // Filter out already assigned products
+    const availableProductsFiltered = productsData?.filter(
+      product => !assignedProductIds.has(product.id)
+    ) || [];
+
+    setAvailableProducts(availableProductsFiltered);
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    setMessage({ 
+      type: 'error', 
+      text: error instanceof Error ? error.message : 'Failed to load products' 
+    });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    throw error;
+  }
+};
+
+const openClientProductModal = async () => {
+  if (selectedRows.size !== 1) {
+    setMessage({ type: 'error', text: 'Please select exactly one client' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    return;
+  }
+  
+  try {
+    setLoading(true);
+    
+    // Get the selected client ID
+    const clientId = Array.from(selectedRows)[0];
+    
+    // Fetch the client to get client_auth_id
+    const { data: clientData, error: clientError } = await supabase
+      .from('client_user')
+      .select('client_auth_id')
+      .eq('client_id', clientId)
+      .single();
+    
+    if (clientError || !clientData) {
+      throw new Error('Selected client not found. Please refresh the page.');
+    }
+    
+    // STORE THE CLIENT_AUTH_ID
+    setSelectedClientAuthId(clientData.client_auth_id);
+    
+    // Now fetch available products
+    await fetchAvailableProducts(clientData.client_auth_id);
+    setIsClientProductModalOpen(true);
+    
+  } catch (error) {
+    console.error('Error opening client product modal:', error);
+    setMessage({ 
+      type: 'error', 
+      text: error instanceof Error ? error.message : 'Failed to load client data. Please try again.' 
+    });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  } finally {
+    setLoading(false);
+  }
+};
+
+const handleProductSelection = (productListId: number, isSelected: boolean, defaultPrice: number) => {
+  const newSelected = new Map(selectedProducts);
+  if (isSelected) {
+    newSelected.set(productListId.toString(), defaultPrice);
+  } else {
+    newSelected.delete(productListId.toString());
+  }
+  setSelectedProducts(newSelected);
+};
+
+const handleCustomPriceChange = (productListId: string, price: string) => {
+  const newSelected = new Map(selectedProducts);
+  const numPrice = parseFloat(price) || 0;
+  newSelected.set(productListId, numPrice);
+  setSelectedProducts(newSelected);
+};
+
+const handleAddClientProducts = async () => {
+  if (selectedProducts.size === 0) {
+    setMessage({ type: 'error', text: 'Please select at least one product' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    return;
+  }
+
+  // Use the stored client_auth_id
+  if (!selectedClientAuthId) {
+    setMessage({ type: 'error', text: 'No client selected. Please try again.' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    return;
+  }
+
+  try {
+    setLoading(true);
+    
+    console.log('Using Client Auth ID:', selectedClientAuthId);
+
+    // Prepare data for insertion using client_auth_id and product_list.id
+    const clientProducts = Array.from(selectedProducts.entries()).map(([productListId, customPrice]) => ({
+      client_auth_id: selectedClientAuthId, // Use the stored client_auth_id directly
+      product_id: parseInt(productListId),
+      custom_price: customPrice,
+      is_available: true,
+      created_at: new Date().toISOString()
+    }));
+
+    console.log('Client Products to Insert:', clientProducts);
+
+    // Insert client products
+    const { error } = await supabase
+      .from('client_product')
+      .insert(clientProducts);
+
+    if (error) {
+      console.error('Supabase Insert Error:', error);
+      throw error;
+    }
+
+    // Close modal and show success
+    setIsClientProductModalOpen(false);
+    setIsClientProductSuccessOpen(true);
+    setSelectedProducts(new Map());
+    setProductSearchQuery('');
+    setSelectedClientAuthId(null); // Clear the stored client_auth_id
+
+    setMessage({ type: 'success', text: 'Products added to client successfully!' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+
+  } catch (error) {
+    console.error('Error adding client products:', error);
+    setMessage({ 
+      type: 'error', 
+      text: error instanceof Error ? error.message : 'Failed to add products. Please try again.' 
+    });
+    setTimeout(() => setMessage({ type: '', text: '' }), 5000);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   const generateClientId = async (): Promise<string> => {
     try {
@@ -715,10 +1078,11 @@ const handleUpdate = async () => {
   }
 };
 
-  const handleRowClick = (client: Client) => {
-    setSelectedClient(client);
-    setIsViewModalOpen(true);
-  };
+  const handleRowClick = async (client: Client) => {
+  setSelectedClient(client);
+  await fetchClientProducts(client.client_auth_id);
+  setIsViewModalOpen(true);
+};
 
   const closeViewModal = () => {
     setIsViewModalOpen(false);
@@ -817,71 +1181,86 @@ const handleUpdate = async () => {
 
           {/* Action Toast for Selected Rows */}
           {selectedRows.size > 0 && (
-            <div 
-              style={{
-                position: 'fixed',
-                bottom: '30px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                backgroundColor: '#4A5568',
-                color: 'white',
-                padding: '8px 16px',
-                borderRadius: '6px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '16px',
-                zIndex: 9999,
-                minWidth: 'auto'
-              }}
+          <div 
+            style={{
+              position: 'fixed',
+              bottom: '30px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              backgroundColor: '#4A5568',
+              color: 'white',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+              zIndex: 9999,
+              minWidth: 'auto'
+            }}
+          >
+            <button
+              onClick={() => setSelectedRows(new Set())}
+              className="text-white hover:text-gray-300 transition-colors"
+              aria-label="Close"
+              style={{ padding: '2px' }}
             >
-              <button
-                onClick={() => setSelectedRows(new Set())}
-                className="text-white hover:text-gray-300 transition-colors"
-                aria-label="Close"
-                style={{ padding: '2px' }}
-              >
-                <X size={16} />
-              </button>
-              
-              <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
-              
-              <span className="text-sm" style={{ minWidth: '100px' }}>
-                {selectedRows.size} item{selectedRows.size === 1 ? '' : 's'} selected
-              </span>
-              
-              <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
-              
-              {selectedRows.size === 1 && (
-                <>
-                  <button
-                    onClick={handleEdit}
-                    disabled={loading}
-                    className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ padding: '2px 6px' }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
-                    <span className="text-sm">Edit</span>
-                  </button>
-                  
-                  <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
-                </>
-              )}
-              
-              <button
-                onClick={() => setIsDeleteConfirmOpen(true)}
-                disabled={loading}
-                className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ padding: '2px 6px' }}
-              >
-                <UserMinus size={16} />
-                <span className="text-sm">Remove</span>
-              </button>
-            </div>
-          )}
+              <X size={16} />
+            </button>
+            
+            <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
+            
+            <span className="text-sm" style={{ minWidth: '100px' }}>
+              {selectedRows.size} item{selectedRows.size === 1 ? '' : 's'} selected
+            </span>
+            
+            <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
+            
+            {selectedRows.size === 1 && (
+              <>
+                <button
+                  onClick={handleEdit}
+                  disabled={loading}
+                  className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ padding: '2px 6px' }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                  <span className="text-sm">Edit</span>
+                </button>
+                
+                <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
+
+                <button
+                  onClick={openClientProductListModal}
+                  disabled={loading}
+                  className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ padding: '2px 6px' }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                  </svg>
+                  <span className="text-sm">Products</span>
+                </button>
+                
+                <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
+              </>
+            )}
+            
+            <button
+              onClick={() => setIsDeleteConfirmOpen(true)}
+              disabled={loading}
+              className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ padding: '2px 6px' }}
+            >
+              <UserMinus size={16} />
+              <span className="text-sm">Remove</span>
+            </button>
+          </div>
+        )}
 
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex items-center justify-between mb-6">
@@ -890,189 +1269,199 @@ const handleUpdate = async () => {
               </h1>
               
               <div className="flex items-center gap-4">
-                {/* Search Bar */}
-                <div className="relative">
-                  <Search 
-                    className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" 
-                    size={20} 
-                  />
-                  <input
-                    type="text"
-                    placeholder="Search"
-                    value={searchQuery}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-64 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  />
-                </div>
+              {/* Search Bar */}
+              <div className="relative">
+                <Search 
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" 
+                  size={20} 
+                />
+                <input
+                  type="text"
+                  placeholder="Search"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-64 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
 
-                {/* Sort By Button */}
-<div className="relative">
-  <button 
-    onClick={() => {
-      setIsSortDropdownOpen(!isSortDropdownOpen);
-      setIsFilterDropdownOpen(false);
-    }}
-    className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-  >
-    <Filter size={20} />
-    <span>Sort by</span>
-  </button>
-  
-  {isSortDropdownOpen && (
-    <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-300 rounded-lg shadow-lg z-10">
-      <div className="py-1">
-        <button
-          onClick={() => {
-            setSortBy('newest');
-            setIsSortDropdownOpen(false);
-            setCurrentPage(1);
-          }}
-          className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'newest' ? 'bg-orange-50 text-orange-600' : ''}`}
-        >
-          Newest First
-        </button>
-        <button
-          onClick={() => {
-            setSortBy('oldest');
-            setIsSortDropdownOpen(false);
-            setCurrentPage(1);
-          }}
-          className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'oldest' ? 'bg-orange-50 text-orange-600' : ''}`}
-        >
-          Oldest First
-        </button>
-        <button
-          onClick={() => {
-            setSortBy('name-asc');
-            setIsSortDropdownOpen(false);
-            setCurrentPage(1);
-          }}
-          className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'name-asc' ? 'bg-orange-50 text-orange-600' : ''}`}
-        >
-          Name (A-Z)
-        </button>
-        <button
-          onClick={() => {
-            setSortBy('name-desc');
-            setIsSortDropdownOpen(false);
-            setCurrentPage(1);
-          }}
-          className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'name-desc' ? 'bg-orange-50 text-orange-600' : ''}`}
-        >
-          Name (Z-A)
-        </button>
-        <button
-          onClick={() => {
-            setSortBy('business-asc');
-            setIsSortDropdownOpen(false);
-            setCurrentPage(1);
-          }}
-          className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'business-asc' ? 'bg-orange-50 text-orange-600' : ''}`}
-        >
-          Business Name (A-Z)
-        </button>
-        <button
-          onClick={() => {
-            setSortBy('business-desc');
-            setIsSortDropdownOpen(false);
-            setCurrentPage(1);
-          }}
-          className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'business-desc' ? 'bg-orange-50 text-orange-600' : ''}`}
-        >
-          Business Name (Z-A)
-        </button>
-      </div>
-    </div>
-  )}
-</div>
+              {/* Sort By Button */}
+              <div className="relative">
+                <button 
+                  onClick={() => {
+                    setIsSortDropdownOpen(!isSortDropdownOpen);
+                    setIsFilterDropdownOpen(false);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  <Filter size={20} />
+                  <span>Sort by</span>
+                </button>
+                
+                {isSortDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-300 rounded-lg shadow-lg z-10">
+                    <div className="py-1">
+                      <button
+                        onClick={() => {
+                          setSortBy('newest');
+                          setIsSortDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'newest' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Newest First
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSortBy('oldest');
+                          setIsSortDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'oldest' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Oldest First
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSortBy('name-asc');
+                          setIsSortDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'name-asc' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Name (A-Z)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSortBy('name-desc');
+                          setIsSortDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'name-desc' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Name (Z-A)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSortBy('business-asc');
+                          setIsSortDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'business-asc' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Business Name (A-Z)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSortBy('business-desc');
+                          setIsSortDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${sortBy === 'business-desc' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Business Name (Z-A)
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
-    {/* Filter Button */}
-    <div className="relative">
-      <button 
-        onClick={() => {
-          setIsFilterDropdownOpen(!isFilterDropdownOpen);
-          setIsSortDropdownOpen(false);
-        }}
-        className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-      >
-        <Filter size={20} />
-        <span>Filter</span>
-      </button>
-      
-      {isFilterDropdownOpen && (
-        <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-300 rounded-lg shadow-lg z-10">
-          <div className="py-1">
-            <button
-              onClick={() => {
-                setFilterBy('all');
-                setIsFilterDropdownOpen(false);
-                setCurrentPage(1);
-              }}
-              className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'all' ? 'bg-orange-50 text-orange-600' : ''}`}
-            >
-              All Clients
-            </button>
-            <div className="border-t border-gray-200 my-1"></div>
-            <div className="px-4 py-2 text-xs text-gray-500 font-medium">Status</div>
-            <button
-              onClick={() => {
-                setFilterBy('online');
-                setIsFilterDropdownOpen(false);
-                setCurrentPage(1);
-              }}
-              className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'online' ? 'bg-orange-50 text-orange-600' : ''}`}
-            >
-              Online
-            </button>
-            <button
-              onClick={() => {
-                setFilterBy('offline');
-                setIsFilterDropdownOpen(false);
-                setCurrentPage(1);
-              }}
-              className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'offline' ? 'bg-orange-50 text-orange-600' : ''}`}
-            >
-              Offline
-            </button>
-            <div className="border-t border-gray-200 my-1"></div>
-            <div className="px-4 py-2 text-xs text-gray-500 font-medium">Business Type</div>
-            <button
-              onClick={() => {
-                setFilterBy('sole');
-                setIsFilterDropdownOpen(false);
-                setCurrentPage(1);
-              }}
-              className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'sole' ? 'bg-orange-50 text-orange-600' : ''}`}
-            >
-              Sole Proprietor
-            </button>
-            <button
-              onClick={() => {
-                setFilterBy('partnership');
-                setIsFilterDropdownOpen(false);
-                setCurrentPage(1);
-              }}
-              className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'partnership' ? 'bg-orange-50 text-orange-600' : ''}`}
-            >
-              Partnership
-            </button>
-            <button
-              onClick={() => {
-                setFilterBy('private');
-                setIsFilterDropdownOpen(false);
-                setCurrentPage(1);
-              }}
-              className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'private' ? 'bg-orange-50 text-orange-600' : ''}`}
-            >
-              Private Limited
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+              {/* Filter Button */}
+              <div className="relative">
+                <button 
+                  onClick={() => {
+                    setIsFilterDropdownOpen(!isFilterDropdownOpen);
+                    setIsSortDropdownOpen(false);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  <Filter size={20} />
+                  <span>Filter</span>
+                </button>
+                
+                {isFilterDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-300 rounded-lg shadow-lg z-10">
+                    <div className="py-1">
+                      <button
+                        onClick={() => {
+                          setFilterBy('all');
+                          setIsFilterDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'all' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        All Clients
+                      </button>
+                      <div className="border-t border-gray-200 my-1"></div>
+                      <div className="px-4 py-2 text-xs text-gray-500 font-medium">Status</div>
+                      <button
+                        onClick={() => {
+                          setFilterBy('online');
+                          setIsFilterDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'online' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Online
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFilterBy('offline');
+                          setIsFilterDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'offline' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Offline
+                      </button>
+                      <div className="border-t border-gray-200 my-1"></div>
+                      <div className="px-4 py-2 text-xs text-gray-500 font-medium">Business Type</div>
+                      <button
+                        onClick={() => {
+                          setFilterBy('sole');
+                          setIsFilterDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'sole' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Sole Proprietor
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFilterBy('partnership');
+                          setIsFilterDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'partnership' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Partnership
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFilterBy('private');
+                          setIsFilterDropdownOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'private' ? 'bg-orange-50 text-orange-600' : ''}`}
+                      >
+                        Private Limited
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+                {/* Add Client Product Button*/}
+                <button 
+                  onClick={openClientProductModal}
+                  disabled={loading || selectedRows.size !== 1}
+                  className="flex items-center gap-2 px-4 py-2 border border-orange-500 text-orange-600 rounded-lg hover:bg-orange-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Plus size={20} />
+                  <span>Add Client Product</span>
+                </button>
 
                 {/* Add New Client Button */}
                 <button 
@@ -1198,6 +1587,335 @@ const handleUpdate = async () => {
           </div>
         </main>
       </div>
+
+      {/* Add Client Product Modal */}
+      {isClientProductModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+          <div className="bg-white rounded-lg w-full max-w-5xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold" style={{ color: '#5C2E1F' }}>
+                    Add Products to Client
+                  </h2>
+                  <p className="text-gray-500 mt-1">
+                    Select products and set custom prices for this client
+                  </p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsClientProductModalOpen(false);
+                    setSelectedProducts(new Map());
+                    setProductSearchQuery('');
+                    setSelectedClientAuthId(null); // Clear the stored client_auth_id
+                  }} 
+                  disabled={loading} 
+                  className="text-gray-400 hover:text-gray-600 disabled:cursor-not-allowed"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              {/* Message Display in Modal */}
+              {message.text && (
+                <div style={{
+                  marginBottom: '20px',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                  backgroundColor: message.type === 'success' ? '#d4edda' : '#f8d7da',
+                  color: message.type === 'success' ? '#155724' : '#721c24',
+                  fontSize: '14px',
+                  border: `1px solid ${message.type === 'success' ? '#c3e6cb' : '#f5c6cb'}`
+                }}>
+                  {message.text}
+                </div>
+              )}
+
+              {/* Search Bar */}
+              <div className="mb-4">
+                <div className="relative">
+                  <Search 
+                    className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" 
+                    size={20} 
+                  />
+                  <input
+                    type="text"
+                    placeholder="Search products..."
+                    value={productSearchQuery}
+                    onChange={(e) => setProductSearchQuery(e.target.value)}
+                    className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+
+              {/* Products Table */}
+              <div className="overflow-x-auto max-h-96 border border-gray-200 rounded-lg">
+                <table className="w-full">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr className="border-b">
+                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F', width: '50px' }}>
+                        SELECT
+                      </th>
+                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                        PRODUCT ID
+                      </th>
+                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                        PRODUCT NAME
+                      </th>
+                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                        TYPE
+                      </th>
+                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                        DEFAULT PRICE
+                      </th>
+                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                        CUSTOM PRICE
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {availableProducts
+                      .filter(product => 
+                        product.product_name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+                        product.product_id.toLowerCase().includes(productSearchQuery.toLowerCase())
+                      )
+                      .map((product) => (
+                      <tr key={product.product_id} className="border-b hover:bg-gray-50">
+                        <td className="py-3 px-4">
+                          <input 
+                            type="checkbox" 
+                            className="w-4 h-4 cursor-pointer"
+                            checked={selectedProducts.has(product.id.toString())}
+                            onChange={(e) => handleProductSelection(product.id, e.target.checked, product.product_price)}
+                          />
+                        </td>
+                        <td className="py-3 px-4 text-sm">{product.product_id}</td>
+                        <td className="py-3 px-4 text-sm">{product.product_name}</td>
+                        <td className="py-3 px-4 text-sm">{product.product_type}</td>
+                        <td className="py-3 px-4 text-sm">S$ {product.product_price.toFixed(2)}</td>
+                        <td className="py-3 px-4">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={selectedProducts.get(product.id.toString()) || ''}
+                            onChange={(e) => handleCustomPriceChange(product.id.toString(), e.target.value)}
+                            disabled={!selectedProducts.has(product.id.toString())}
+                            placeholder="0.00"
+                            className="w-32 px-3 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Selected Count */}
+              <div className="mt-4 text-sm text-gray-600">
+                {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''} selected
+              </div>
+
+              <div className="flex justify-center mt-6">
+                <button
+                  onClick={handleAddClientProducts}
+                  disabled={loading || selectedProducts.size === 0}
+                  className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: '#FF5722' }}
+                >
+                  {loading ? 'Adding Products...' : 'Add Products to Client'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Client Product Success Modal */}
+      {isClientProductSuccessOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+          <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
+            <button
+              onClick={() => setIsClientProductSuccessOpen(false)}
+              className="float-right text-gray-400 hover:text-gray-600"
+            >
+              <X size={24} />
+            </button>
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center">
+                <Check size={32} className="text-white" />
+              </div>
+            </div>
+            <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
+              Products Added Successfully!
+            </h2>
+            <p className="text-gray-600 mb-6">
+              {selectedProducts.size} product{selectedProducts.size !== 1 ? 's have' : ' has'} been added to the client with custom pricing.
+            </p>
+            <button
+              onClick={() => setIsClientProductSuccessOpen(false)}
+              className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"
+              style={{ backgroundColor: '#FF5722' }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Client Product List Modal */}
+      {isClientProductListModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+          <div className="bg-white rounded-lg w-full max-w-6xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold" style={{ color: '#5C2E1F' }}>
+                    Client Products
+                  </h2>
+                  <p className="text-gray-500 mt-1">
+                    Manage products assigned to this client
+                  </p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsClientProductListModalOpen(false);
+                    setClientProducts([]);
+                    setEditingProducts(new Map());
+                    setSelectedClientAuthId(null);
+                  }} 
+                  disabled={loading} 
+                  className="text-gray-400 hover:text-gray-600 disabled:cursor-not-allowed"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              {/* Message Display in Modal */}
+              {message.text && (
+                <div style={{
+                  marginBottom: '20px',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                  backgroundColor: message.type === 'success' ? '#d4edda' : '#f8d7da',
+                  color: message.type === 'success' ? '#155724' : '#721c24',
+                  fontSize: '14px',
+                  border: `1px solid ${message.type === 'success' ? '#c3e6cb' : '#f5c6cb'}`
+                }}>
+                  {message.text}
+                </div>
+              )}
+
+              {clientProducts.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  No products assigned to this client yet.
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr className="border-b">
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          PRODUCT
+                        </th>
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          TYPE
+                        </th>
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          DEFAULT PRICE
+                        </th>
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          CUSTOM PRICE
+                        </th>
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          ACTIONS
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {clientProducts.map((cp) => (
+                        <tr key={cp.id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-3">
+                              {cp.product_list.product_image ? (
+                                <Image 
+                                src={getImageUrl(cp.product_list.product_image)} 
+                                alt={cp.product_list.product_name}
+                                width={48}
+                                height={48}
+                                className="w-12 h-12 object-cover rounded"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  target.style.display = 'none';
+                                  target.parentElement?.querySelector('.no-img-fallback')?.classList.remove('hidden');
+                                }}
+                              />
+                              ) : (
+                                <div className="w-12 h-12 bg-gray-200 rounded flex items-center justify-center">
+                                  <span className="text-gray-400 text-xs">No img</span>
+                                </div>
+                              )}
+                              <div>
+                                <p className="font-medium text-sm">{cp.product_list.product_id}</p>
+                                <p className="text-sm text-gray-600">{cp.product_list.product_name}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-sm">{cp.product_list.product_type}</td>
+                          <td className="py-3 px-4 text-sm">S$ {cp.product_list.product_price.toFixed(2)}</td>
+                          <td className="py-3 px-4">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={editingProducts.get(cp.product_id) || cp.custom_price || ''}
+                              onChange={(e) => handleUpdateProductPrice(cp.product_id, e.target.value)}
+                              className="w-32 px-3 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                            />
+                          </td>
+                          <td className="py-3 px-4">
+                            <button
+                              onClick={() => handleRemoveClientProduct(cp.id)}
+                              disabled={loading}
+                              className="text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
+                            >
+                              <X size={18} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="flex justify-center gap-4 mt-6">
+                <button
+                  onClick={() => {
+                    setIsClientProductListModalOpen(false);
+                    setClientProducts([]);
+                    setEditingProducts(new Map());
+                    setSelectedClientAuthId(null);
+                  }}
+                  className="px-12 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Close
+                </button>
+                {clientProducts.length > 0 && (
+                  <button
+                    onClick={handleSaveProductChanges}
+                    disabled={loading}
+                    className="px-12 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    {loading ? 'Saving...' : 'Save Changes'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add New Client Modal */}
       {isModalOpen && (
@@ -1497,6 +2215,8 @@ const handleUpdate = async () => {
         </div>
       )}
 
+        
+
       {/* Success Modal */}
       {isSuccessModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
@@ -1752,6 +2472,47 @@ const handleUpdate = async () => {
                       <p className="font-medium">{selectedClient.client_password}</p>
                     </div>
                   </div>
+                </div>
+
+                {/* Client Products */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>Assigned Products</h3>
+                  {clientProducts.length === 0 ? (
+                    <div className="bg-gray-50 p-4 rounded-lg text-center text-gray-500">
+                      No products assigned to this client yet.
+                    </div>
+                  ) : (
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <div className="space-y-3">
+                        {clientProducts.map((cp) => (
+                          <div key={cp.id} className="flex items-center gap-4 bg-white p-3 rounded border border-gray-200">
+                            {cp.product_list.product_image ? (
+                            <Image 
+                              src={getImageUrl(cp.product_list.product_image)} 
+                              alt={cp.product_list.product_name}
+                              width={64}
+                              height={64}
+                              className="w-16 h-16 object-cover rounded"
+                            />
+                          ) : (
+                            <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center">
+                              <span className="text-gray-400 text-xs">No image</span>
+                            </div>
+                          )}
+                            <div className="flex-1">
+                              <p className="font-medium">{cp.product_list.product_id}</p>
+                              <p className="text-sm text-gray-600">{cp.product_list.product_name}</p>
+                              <p className="text-xs text-gray-500">{cp.product_list.product_type}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm text-gray-600">Default: S$ {cp.product_list.product_price.toFixed(2)}</p>
+                              <p className="text-sm font-medium" style={{ color: '#FF5722' }}>Custom: S$ {cp.custom_price.toFixed(2)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* ACRA Document */}
