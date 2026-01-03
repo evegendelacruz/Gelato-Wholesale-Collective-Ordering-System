@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import ClientHeader from '@/app/components/clientHeader/page';
 import supabase from '@/lib/client';
 import ClientInvoice from '@/app/components/clientInvoice/page';
+import Image from 'next/image';
 
 interface OrderItem {
   id: number;
@@ -196,7 +197,7 @@ export default function OrderPage() {
 
       // Add logo - Convert image to base64 and embed
       try {
-        const logo = new Image();
+        const logo = document.createElement('img') as HTMLImageElement;
         logo.crossOrigin = 'anonymous';
         logo.src = '/assets/Picture1.jpg';
         await new Promise((resolve, reject) => {
@@ -498,20 +499,23 @@ export default function OrderPage() {
                     <div key={item.id} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-3 flex-1">
                         {item.product_image ? (
-                          <img 
-                            src={getImageUrl(item.product_image)}
-                            alt={item.product_name}
-                            className="w-12 h-12 object-cover rounded border border-gray-200"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          <div className="w-12 h-12 bg-gray-100 rounded border border-gray-200 flex items-center justify-center">
-                            <span className="text-xs text-gray-400">No img</span>
-                          </div>
-                        )}
+                        <Image 
+                          src={getImageUrl(item.product_image)}
+                          alt={item.product_name}
+                          width={48}
+                          height={48}
+                          className="w-12 h-12 object-cover rounded border border-gray-200"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <div className="w-12 h-12 bg-gray-100 rounded border border-gray-200 flex items-center justify-center">
+                          <span className="text-xs text-gray-400">No img</span>
+                        </div>
+                      )}
+             
                         <span className="text-gray-600">
                           {item.product_name} ({formatPackaging(item.packaging_type)}) x{item.quantity}
                         </span>

@@ -1,4 +1,5 @@
 'use client';
+import Image from "next/image";
 
 interface OrderItem {
   id: number;
@@ -317,12 +318,13 @@ export default function ClientInvoice({
               <div>201319550R</div>
             </div>
             <div className="logo">
-              <img 
+            <Image 
                 src="/assets/Picture1.jpg" 
                 alt="Momolato" 
-                crossOrigin="anonymous"
+                width={120}
+                height={50}
                 style={{ maxWidth: '100%', height: 'auto' }}
-              />
+            />
             </div>
           </div>
 
