@@ -21,6 +21,9 @@ interface ClientProduct {
     product_gelato_type: string;
     product_price: number;
     product_image: string | null;
+    product_ingredient: string | null;
+    product_allergen: string | null;
+    
   };
 }
 
@@ -140,7 +143,9 @@ export default function ClientPage() {
             product_type,
             product_gelato_type,
             product_price,
-            product_image
+            product_image,
+            product_ingredient,
+            product_allergen
           )
         `)
         .eq('client_auth_id', user.id)
