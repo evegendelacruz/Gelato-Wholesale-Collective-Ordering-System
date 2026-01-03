@@ -5,6 +5,7 @@ import ClientHeader from '@/app/components/clientHeader/page';
 import supabase from '@/lib/client';
 import Image from 'next/image';
 import ProductView from '../components/productView/page';
+import LoadingSpinner from '../components/loader/page';
 
 interface ClientProduct {
   id: number;
@@ -32,7 +33,7 @@ interface Message {
   text: string;
 }
 
-function ProductCard({ product }: { product: ClientProduct }) {
+function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBasketAdded: (productName: string) => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Helper function to get full image URL from Supabase storage
@@ -106,15 +107,61 @@ function ProductCard({ product }: { product: ClientProduct }) {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         product={product}
+        onBasketAdded={onBasketAdded}
       />
     </>
   );
 }
 
+function ConfirmationModal({ isOpen, onClose, productName }: { isOpen: boolean; onClose: () => void; productName: string }) {
+  if (!isOpen) return null;
+
+  return (
+    <div 
+      className="fixed inset-0 flex items-center justify-center z-50"
+      style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+      onClick={onClose}
+    >
+      <div 
+        className="bg-white rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-center">
+          {/* Success Icon */}
+          <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full mb-4" style={{ backgroundColor: '#d4edda' }}>
+            <svg className="h-6 w-6" style={{ color: '#155724' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          
+          <h3 className="text-lg font-bold mb-2" style={{ color: '#7d3c3c' }}>
+            Added to Basket!
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            {productName} has been added to your basket.
+          </p>
+          
+          <button
+            onClick={onClose}
+            className="w-full py-2 px-4 rounded text-white font-medium hover:opacity-90 transition-opacity"
+            style={{ backgroundColor: '#e84e1b' }}
+          >
+            Continue Shopping
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 export default function ClientPage() {
   const [products, setProducts] = useState<ClientProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<Message>({ type: '', text: '' });
+  const [isProcessing, setIsProcessing] = useState(false); // Add this state
+  const [showConfirmation, setShowConfirmation] = useState(false); // Add this state
+  const [addedProductName, setAddedProductName] = useState(''); 
 
   useEffect(() => {
     fetchClientProducts();
@@ -177,6 +224,17 @@ export default function ClientPage() {
     }
   };
 
+   const handleBasketAdded = (productName: string) => {
+    setIsProcessing(true);
+    
+    // Show loader for 3 seconds
+    setTimeout(() => {
+      setIsProcessing(false);
+      setAddedProductName(productName);
+      setShowConfirmation(true);
+    }, 3000);
+  };
+
   return (
     <div className="min-h-screen flex flex-col" style={{ fontFamily: '"Roboto Condensed"', backgroundColor: '#f5e6d3' }}>
       <ClientHeader />
@@ -221,10 +279,10 @@ export default function ClientPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-            {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
+          {products.map((product) => (
+            <ProductCard key={product.id} product={product} onBasketAdded={handleBasketAdded} />
+          ))}
+        </div>
         )}
       </main>
       
@@ -236,6 +294,20 @@ export default function ClientPage() {
           Gelato Wholesale Collective | © 2025 All Rights Reserved
         </div>
       </footer>
+    {/* Loading Spinner */}
+      {isProcessing && (
+        <LoadingSpinner 
+          duration={3000}
+          onComplete={() => {}}
+        />
+      )}
+
+      {/* Confirmation Modal */}
+      <ConfirmationModal 
+        isOpen={showConfirmation}
+        onClose={() => setShowConfirmation(false)}
+        productName={addedProductName}
+      />
     </div>
   );
 }

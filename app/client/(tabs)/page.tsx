@@ -1,6 +1,8 @@
 'use client';
 
+import { Suspense } from 'react';
 import ClientHeader from '@/app/components/clientHeader/page';
+import LoadingSpinner from '@/app/components/loader/page';
 
 export default function ClientTabsLayout({
   children,
@@ -14,7 +16,14 @@ export default function ClientTabsLayout({
 
       {/* Main Content */}
       <main className="flex-1" style={{ backgroundColor: '#f5ebe0' }}>
-        {children}
+        <Suspense fallback={
+          <LoadingSpinner 
+            duration={1000}
+            onComplete={() => {}}
+          />
+        }>
+          {children}
+        </Suspense>
       </main>
     </div>
   );

@@ -5,6 +5,8 @@ import { ShoppingCart, Truck, User, ChevronDown } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import supabase from '@/lib/client';
+import { usePathname } from 'next/navigation';
+import LoadingSpinner from '../loader/page';
 
 interface User {
   id: string;
@@ -20,6 +22,73 @@ export default function ClientHeader() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
+  const [basketCount, setBasketCount] = useState(0);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  useEffect(() => {
+  setIsNavigating(true);
+  const timer = setTimeout(() => {
+    setIsNavigating(false);
+  }, 500);
+
+  return () => clearTimeout(timer);
+}, [pathname]);
+
+   useEffect(() => {
+    const fetchBasketCount = async () => {
+      try {
+        // Get current auth user
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+        
+        if (authError || !authUser) return;
+
+        const { data, error } = await supabase
+          .from('client_basket')
+          .select('quantity')
+          .eq('client_auth_id', authUser.id);
+
+        if (!error && data) {
+          const totalCount = data.reduce((sum, item) => sum + (item.quantity || 0), 0);
+          setBasketCount(totalCount);
+        }
+      } catch (error) {
+        console.error('Failed to fetch basket count:', error);
+      }
+    };
+
+    fetchBasketCount();
+
+    // Set up real-time subscription for basket changes
+    const setupRealtimeSubscription = async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      
+      if (authUser) {
+        const channel = supabase
+          .channel('basket_changes')
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'client_basket',
+              filter: `client_auth_id=eq.${authUser.id}`
+            },
+            () => {
+              fetchBasketCount();
+            }
+          )
+          .subscribe();
+
+        return () => {
+          supabase.removeChannel(channel);
+        };
+      }
+    };
+
+    setupRealtimeSubscription();
+  }, []);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -195,10 +264,27 @@ export default function ClientHeader() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    setIsDropdownOpen(false);
+    
+    // Show loader for 2 seconds
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Perform logout
+    await supabase.auth.signOut();
+    
+    // Navigate to home
+    window.location.href = '/';
+  };
+
   return (
     <header className="bg-white border-b shadow-sm pt-2 pb-3 border-gray-200 px-6 py-4">
       <div className="flex items-center justify-between max-w-7xl mx-auto">
-        <Link href="/client">
+        <Link 
+          href="/client"
+          onClick={() => setIsNavigating(true)}
+        >
           <h1 
             className="text-2xl font-bold tracking-tight cursor-pointer hover:opacity-80 transition-opacity"
             style={{ 
@@ -209,24 +295,50 @@ export default function ClientHeader() {
             Gelato Wholesale Collective
           </h1>
         </Link>
-        
+                
         <div className="flex items-center gap-6">
-        <Link
-          href="/client/basket"
-          className="hover:opacity-70 transition-opacity"
-          aria-label="Cart"
-        >
-          <ShoppingCart size={24} style={{ color: '#e84e1b', strokeWidth: 1.5 }} />
-        </Link>
+          <Link
+            href="/client/basket"
+            className={`hover:opacity-70 transition-opacity relative ${
+              pathname === '/client/basket' ? 'after:absolute after:-bottom-3 after:left-0 after:right-0 after:h-0.5 after:bg-[#e84e1b]' : ''
+            }`}
+            aria-label="Cart"
+          >
+            <div className="relative">
+              <ShoppingCart 
+                size={24} 
+                style={{ 
+                  color: '#e84e1b', 
+                  strokeWidth: pathname === '/client/basket' ? 2.5 : 1.5 
+                }} 
+              />
+              {/* Badge - only show when not on basket page and count > 0 */}
+              {pathname !== '/client/basket' && basketCount > 0 && (
+              <span 
+                className="absolute -top-2 -right-2 flex items-center justify-center min-w-4.5 h-4.5 text-[10px] font-bold text-white rounded-full px-1"
+                style={{ backgroundColor: '#e84e1b' }}
+              >
+                {basketCount > 99 ? '99+' : basketCount}
+              </span>
+            )}
+            </div>
+          </Link>
 
-        <Link
-          href="/client/order"
-          className="hover:opacity-70 transition-opacity"
-          aria-label="Orders"
-        >
-          <Truck size={24} style={{ color: '#e84e1b', strokeWidth: 1.5 }} />
-        </Link>
-
+          <Link
+            href="/client/order"
+            className={`hover:opacity-70 transition-opacity relative ${
+              pathname === '/client/order' ? 'after:absolute after:-bottom-3 after:left-0 after:right-0 after:h-0.5 after:bg-[#e84e1b]' : ''
+            }`}
+            aria-label="Orders"
+          >
+            <Truck 
+              size={24} 
+              style={{ 
+                color: '#e84e1b', 
+                strokeWidth: pathname === '/client/order' ? 2.5 : 1.5 
+              }} 
+            />
+          </Link>
           
           <div className="relative" ref={dropdownRef}>
             <button
@@ -269,7 +381,10 @@ export default function ClientHeader() {
                 <Link
                   href="/client/profile"
                   className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                  onClick={() => setIsDropdownOpen(false)}
+                  onClick={() => {
+                    setIsDropdownOpen(false);
+                    setIsNavigating(true);
+                  }}
                 >
                   <User size={16} />
                   My Profile
@@ -277,21 +392,33 @@ export default function ClientHeader() {
                 
                 <hr className="my-1 border-gray-200" />
                 
-                <Link
-                  href="/"
-                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                  onClick={() => setIsDropdownOpen(false)}
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors w-full text-left"
+                  disabled={isLoggingOut}
                 >
                   <svg className="w-4 h-4" fill="none" strokeWidth="2" stroke="currentColor" viewBox="0 0 24 24">
                     <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                   </svg>
-                  Logout
-                </Link>
+                  {isLoggingOut ? 'Logging out...' : 'Logout'}
+                </button>
               </div>
             )}
           </div>
         </div>
       </div>
+      {(loading || isNavigating || isLoggingOut) && (
+        <LoadingSpinner 
+          duration={loading ? 2000 : isLoggingOut ? 2000 : 500}
+          onComplete={() => {
+            setLoading(false);
+            setIsNavigating(false);
+            if (!isLoggingOut) {
+              setIsLoggingOut(false);
+            }
+          }}
+        />
+      )}
     </header>
   );
 }

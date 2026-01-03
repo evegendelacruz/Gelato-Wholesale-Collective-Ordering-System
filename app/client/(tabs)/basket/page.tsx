@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ClientHeader from '@/app/components/clientHeader/page';
 import OrderForm from '@/app/components/orderForm/page';
+import LoadingSpinner from '@/app/components/loader/page';
 import supabase from '@/lib/client';
 import Image from 'next/image';
 
@@ -138,6 +139,8 @@ export default function BasketPage() {
   const [message, setMessage] = useState<Message>({ type: '', text: '' });
   const [isOrderFormOpen, setIsOrderFormOpen] = useState(false);
   const [processingOrder, setProcessingOrder] = useState(false);
+  const [isRemovingItem, setIsRemovingItem] = useState(false);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
 
   useEffect(() => {
     fetchBasketItems();
@@ -216,39 +219,55 @@ export default function BasketPage() {
   };
 
   const removeItem = async (id: number) => {
-    try {
-      const { error } = await supabase
-        .from('client_basket')
-        .delete()
-        .eq('id', id);
+  try {
+    setIsRemovingItem(true);
+    
+    // Show loader for 3 seconds
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    const { error } = await supabase
+      .from('client_basket')
+      .delete()
+      .eq('id', id);
 
-      if (error) throw error;
+    if (error) throw error;
 
-      setBasketItems(items => items.filter(item => item.id !== id));
-      setMessage({ 
-        type: 'success', 
-        text: 'Item removed from basket.' 
-      });
-      
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    setBasketItems(items => items.filter(item => item.id !== id));
+    setMessage({ 
+      type: 'success', 
+      text: 'Item removed from basket.' 
+    });
+    
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
 
-    } catch (error) {
-      console.error('Error removing item:', error);
-      setMessage({ 
-        type: 'error', 
-        text: 'Failed to remove item. Please try again.' 
-      });
-    }
-  };
+  } catch (error) {
+    console.error('Error removing item:', error);
+    setMessage({ 
+      type: 'error', 
+      text: 'Failed to remove item. Please try again.' 
+    });
+  } finally {
+    setIsRemovingItem(false);
+  }
+};
 
   const handlePlaceOrderClick = () => {
-    if (basketItems.length === 0) return;
+  if (basketItems.length === 0) return;
+  setIsPlacingOrder(true);
+  
+  // Show loader for 3 seconds
+  setTimeout(() => {
+    setIsPlacingOrder(false);
     setIsOrderFormOpen(true);
-  };
+  }, 3000);
+};
 
-  const handleOrderFormSubmit = async (formData: OrderFormData) => {
+ const handleOrderFormSubmit = async (formData: OrderFormData) => {
   try {
     setProcessingOrder(true);
+    
+    // Wait for 3 seconds to show the loader
+    await new Promise(resolve => setTimeout(resolve, 3000));
     
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
@@ -260,17 +279,14 @@ export default function BasketPage() {
     const gst = totalAmount * 0.09;
     const finalTotal = totalAmount + gst;
 
-    // Generate order ID
-    const { data: orderIdData, error: orderIdError } = await supabase
-      .rpc('generate_order_id');
+    // Generate a temporary unique order_id
+    const tempOrderId = `TEMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    if (orderIdError) throw orderIdError;
-
-    // Create the order with form data
+    // Create the order with temporary order_id
     const { data: orderData, error: orderError } = await supabase
       .from('client_order')
       .insert({
-        order_id: orderIdData,
+        order_id: tempOrderId, // Temporary, will be updated by trigger
         client_auth_id: user.id,
         order_date: new Date(formData.orderDate).toISOString(),
         delivery_address: formData.deliveryAddress,
@@ -281,7 +297,12 @@ export default function BasketPage() {
       .select()
       .single();
 
-    if (orderError) throw orderError;
+    if (orderError) {
+      console.error('Order creation error:', orderError);
+      throw new Error(`Failed to create order: ${orderError.message}`);
+    }
+
+    console.log('Order created successfully:', orderData);
 
     // Create order items from basket
     const orderItems = basketItems.map(item => ({
@@ -291,14 +312,18 @@ export default function BasketPage() {
       quantity: item.quantity,
       unit_price: item.unit_price,
       packaging_type: item.packaging_type,
-      subtotal: item.subtotal
+      subtotal: item.subtotal,
+      product_notes: item.notes || null
     }));
 
     const { error: itemsError } = await supabase
       .from('client_order_item')
       .insert(orderItems);
 
-    if (itemsError) throw itemsError;
+    if (itemsError) {
+      console.error('Order items creation error:', itemsError);
+      throw new Error(`Failed to create order items: ${itemsError.message}`);
+    }
 
     // Clear the basket
     const { error: clearError } = await supabase
@@ -306,25 +331,35 @@ export default function BasketPage() {
       .delete()
       .eq('client_auth_id', user.id);
 
-    if (clearError) throw clearError;
+    if (clearError) {
+      console.error('Basket clear error:', clearError);
+      console.warn('Warning: Could not clear basket, but order was created successfully');
+    }
 
     setMessage({ 
       type: 'success', 
-      text: `Order ${orderIdData} created successfully!` 
+      text: `Order ${orderData.order_id} created successfully!` 
     });
 
     setIsOrderFormOpen(false);
     
     setTimeout(() => {
-      router.push('/client');
+      router.push(`/client/order?viewInvoice=${orderData.id}`);
     }, 2000);
 
   } catch (error) {
     console.error('Error creating order:', error);
+    
+    let errorMessage = 'Failed to create order. Please try again.';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    }
+    
     setMessage({ 
       type: 'error', 
-      text: error instanceof Error ? error.message : 'Failed to create order. Please try again.' 
+      text: errorMessage
     });
+    setIsOrderFormOpen(false);
   } finally {
     setProcessingOrder(false);
   }
@@ -455,6 +490,27 @@ export default function BasketPage() {
         totalAmount={total}
         loading={processingOrder}
       />
+
+      {loading && !isOrderFormOpen && (
+        <LoadingSpinner 
+          duration={3000}
+          onComplete={() => {}}
+        />
+      )}
+
+      {isRemovingItem && (
+        <LoadingSpinner 
+          duration={3000}
+          onComplete={() => {}}
+        />
+      )}
+
+      {isPlacingOrder && (
+        <LoadingSpinner 
+          duration={3000}
+          onComplete={() => {}}
+        />
+      )}
       
       <footer 
         className="mt-auto py-4 px-6 text-white text-sm"

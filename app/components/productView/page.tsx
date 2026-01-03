@@ -22,6 +22,7 @@ interface ProductViewProps {
       product_allergen?: string | null;
     };
   };
+  onBasketAdded: (productName: string) => void; 
 }
 
 const packagingOptions = [
@@ -32,7 +33,7 @@ const packagingOptions = [
   { value: 'bulk_5l', label: '5L Bulk' },
 ];
 
-export default function ProductView({ isOpen, onClose, product }: ProductViewProps) {
+export default function ProductView({ isOpen, onClose, product, onBasketAdded }: ProductViewProps) {
   const [quantity, setQuantity] = useState(1);
   const [packaging, setPackaging] = useState(packagingOptions[0].value);
   const [notes, setNotes] = useState('');
@@ -48,86 +49,87 @@ export default function ProductView({ isOpen, onClose, product }: ProductViewPro
   };
 
   const handleAddToBasket = async () => {
-    try {
-      setLoading(true);
-      setMessage({ type: '', text: '' });
+  try {
+    setLoading(true);
+    setMessage({ type: '', text: '' });
 
-      // Get current user
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      
-      if (authError || !user) {
-        throw new Error('Not authenticated. Please log in.');
-      }
-
-      const subtotal = product.custom_price * quantity;
-
-      // Check if item with same product and packaging already exists in basket
-      const { data: existingItem, error: checkError } = await supabase
-        .from('client_basket')
-        .select('*')
-        .eq('client_auth_id', user.id)
-        .eq('product_id', product.product_list.id)
-        .eq('packaging_type', packaging)
-        .maybeSingle();
-
-      if (checkError && checkError.code !== 'PGRST116') {
-        throw checkError;
-      }
-
-      if (existingItem) {
-        // Update existing basket item
-        const newQuantity = existingItem.quantity + quantity;
-        const newSubtotal = product.custom_price * newQuantity;
-        
-        const { error: updateError } = await supabase
-          .from('client_basket')
-          .update({
-            quantity: newQuantity,
-            subtotal: newSubtotal,
-            notes: notes || existingItem.notes
-          })
-          .eq('id', existingItem.id);
-
-        if (updateError) throw updateError;
-      } else {
-        // Insert new basket item
-        const { error: insertError } = await supabase
-          .from('client_basket')
-          .insert({
-            client_auth_id: user.id,
-            product_id: product.product_list.id,
-            product_name: product.product_list.product_name,
-            quantity: quantity,
-            unit_price: product.custom_price,
-            packaging_type: packaging,
-            subtotal: subtotal,
-            notes: notes || null
-          });
-
-        if (insertError) throw insertError;
-      }
-
-      setMessage({ type: 'success', text: 'Added to basket successfully!' });
-      
-      // Reset form and close after a delay
-      setTimeout(() => {
-        setQuantity(1);
-        setPackaging(packagingOptions[0].value);
-        setNotes('');
-        setMessage({ type: '', text: '' });
-        onClose();
-      }, 1500);
-
-    } catch (error) {
-      console.error('Error adding to basket:', error);
-      setMessage({ 
-        type: 'error', 
-        text: error instanceof Error ? error.message : 'Failed to add to basket. Please try again.' 
-      });
-    } finally {
-      setLoading(false);
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      throw new Error('Not authenticated. Please log in.');
     }
-  };
+
+    const subtotal = product.custom_price * quantity;
+
+    // Check if item with same product and packaging already exists in basket
+    const { data: existingItem, error: checkError } = await supabase
+      .from('client_basket')
+      .select('*')
+      .eq('client_auth_id', user.id)
+      .eq('product_id', product.product_list.id)
+      .eq('packaging_type', packaging)
+      .maybeSingle();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      throw checkError;
+    }
+
+    if (existingItem) {
+      // Update existing basket item
+      const newQuantity = existingItem.quantity + quantity;
+      const newSubtotal = product.custom_price * newQuantity;
+      
+      const { error: updateError } = await supabase
+        .from('client_basket')
+        .update({
+          quantity: newQuantity,
+          subtotal: newSubtotal,
+          notes: notes || existingItem.notes
+        })
+        .eq('id', existingItem.id);
+
+      if (updateError) throw updateError;
+    } else {
+      // Insert new basket item
+      const { error: insertError } = await supabase
+        .from('client_basket')
+        .insert({
+          client_auth_id: user.id,
+          product_id: product.product_list.id,
+          product_name: product.product_list.product_name,
+          quantity: quantity,
+          unit_price: product.custom_price,
+          packaging_type: packaging,
+          subtotal: subtotal,
+          notes: notes || null
+        });
+
+      if (insertError) throw insertError;
+    }
+
+    // Call the callback with product name to trigger loader and confirmation
+    onBasketAdded(product.product_list.product_name);
+    
+    // Reset form
+    setQuantity(1);
+    setPackaging(packagingOptions[0].value);
+    setNotes('');
+    setMessage({ type: '', text: '' });
+    
+    // Close modal
+    onClose();
+
+  } catch (error) {
+    console.error('Error adding to basket:', error);
+    setMessage({ 
+      type: 'error', 
+      text: error instanceof Error ? error.message : 'Failed to add to basket. Please try again.' 
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const incrementQuantity = () => setQuantity(prev => prev + 1);
   const decrementQuantity = () => setQuantity(prev => prev > 1 ? prev - 1 : 1);

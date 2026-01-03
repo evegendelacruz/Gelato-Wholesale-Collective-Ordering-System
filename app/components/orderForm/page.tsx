@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { X, Calendar } from 'lucide-react';
 import supabase from '@/lib/client';
+import LoadingSpinner from '../loader/page';
 
 interface OrderFormProps {
   isOpen: boolean;
@@ -73,33 +74,44 @@ export default function OrderForm({
 };
 
   const loadLastOrderDate = async () => {
-    try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) return;
+
+    // Get all order dates for this user
+    const { data: orders, error: orderError } = await supabase
+      .from('client_order')
+      .select('order_date')
+      .eq('client_auth_id', user.id)
+      .order('order_date', { ascending: false });
+
+    if (orderError) throw orderError;
+
+    if (orders && orders.length > 0) {
+      const disabledDatesList: string[] = [];
       
-      if (authError || !user) return;
-
-      const { data: orders, error: orderError } = await supabase
-        .from('client_order')
-        .select('created_at')
-        .eq('client_auth_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (orderError) throw orderError;
-
-      if (orders && orders.length > 0) {
-        const lastOrderDate = new Date(orders[0].created_at);
-        const nextDay = new Date(lastOrderDate);
+      // For each order date, disable the next day only
+      orders.forEach(order => {
+        const orderDate = new Date(order.order_date);
+        const nextDay = new Date(orderDate);
         nextDay.setDate(nextDay.getDate() + 1);
         
         // Format as YYYY-MM-DD for input comparison
         const nextDayStr = nextDay.toISOString().split('T')[0];
-        setDisabledDates([nextDayStr]);
-      }
-    } catch (error) {
-      console.error('Error loading last order date:', error);
+        
+        // Only add if not already in the list (avoid duplicates)
+        if (!disabledDatesList.includes(nextDayStr)) {
+          disabledDatesList.push(nextDayStr);
+        }
+      });
+      
+      setDisabledDates(disabledDatesList);
     }
-  };
+  } catch (error) {
+    console.error('Error loading last order date:', error);
+  }
+};
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -122,7 +134,7 @@ export default function OrderForm({
     }
 
     if (isDateDisabled(formData.orderDate)) {
-      alert('This date is not available. Please select a different date.');
+      alert('This date is not available. Orders cannot be placed on the day immediately after an existing order. Please select a different date.');
       return;
     }
 
@@ -133,9 +145,10 @@ export default function OrderForm({
     return new Date().toISOString().split('T')[0];
   };
 
-  if (!isOpen) return null;
+if (!isOpen) return null;
 
   return (
+    <>
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
@@ -154,6 +167,17 @@ export default function OrderForm({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6">
+          <style jsx>{`
+            input[type="date"]::-webkit-calendar-picker-indicator {
+              cursor: pointer;
+            }
+            
+            ${disabledDates.map(date => `
+              input[type="date"][value="${date}"] {
+                color: #9ca3af;
+              }
+            `).join('\n')}
+          `}</style>
           {loadingUserData ? (
             <div className="text-center py-8 text-gray-600">
               Loading your information...
@@ -162,36 +186,44 @@ export default function OrderForm({
             <div className="space-y-5">
               {/* Order Date */}
               <div>
-                <label className="block text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>
-                  Order Date <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <Calendar 
-                    className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" 
-                    size={20} 
-                  />
-                  <input
-                    type="date"
-                    name="orderDate"
-                    value={formData.orderDate}
-                    onChange={handleInputChange}
-                    min={getMinDate()}
-                    required
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    disabled={loading}
-                  />
-                </div>
-                {disabledDates.length > 0 && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Note: Orders must be at least 1 day apart. Next available date is after {disabledDates[0]}.
-                  </p>
-                )}
-                {formData.orderDate && isDateDisabled(formData.orderDate) && (
-                  <p className="text-xs text-red-500 mt-1">
-                    This date is not available. Please select a different date.
-                  </p>
-                )}
+              <label className="block text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>
+                Pre-Order Date <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Calendar 
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" 
+                  size={20} 
+                />
+                <input
+                  type="date"
+                  name="orderDate"
+                  value={formData.orderDate}
+                  onChange={handleInputChange}
+                  min={getMinDate()}
+                  required
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  disabled={loading}
+                  onKeyDown={(e) => {
+                    // Prevent manual typing
+                    e.preventDefault();
+                  }}
+                  onClick={(e) => {
+                    const input = e.target as HTMLInputElement;
+                    input.showPicker?.();
+                  }}
+                />
               </div>
+              {disabledDates.length > 0 && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Note: You cannot place orders on dates immediately after existing orders. Disabled: {disabledDates.join(', ')}.
+                </p>
+              )}
+              {formData.orderDate && isDateDisabled(formData.orderDate) && (
+                <p className="text-xs text-red-500 mt-1">
+                  This date is not available. Please select a different date.
+                </p>
+              )}
+            </div>
 
               {/* Client Name */}
               <div>
@@ -279,7 +311,15 @@ export default function OrderForm({
             </button>
           </div>
         </form>
-      </div>
+       </div>
     </div>
-  );
+    {/* Loading Spinner - outside modal */}
+    {loading && (
+      <LoadingSpinner 
+        duration={3000}
+        onComplete={() => {}}
+      />
+    )}
+  </>
+);
 }
