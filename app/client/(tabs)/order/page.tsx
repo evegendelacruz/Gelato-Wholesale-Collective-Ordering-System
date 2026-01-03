@@ -499,7 +499,7 @@ export default function OrderPage() {
                     <div key={item.id} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-3 flex-1">
                         {item.product_image ? (
-                        <Image 
+                        <Image
                           src={getImageUrl(item.product_image)}
                           alt={item.product_name}
                           width={48}
