@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ClientHeader from '@/app/components/clientHeader/page';
+import ClientInvoice from '@/app/components/clientInvoice';
 import supabase from '@/lib/client';
-import ClientInvoice from '@/app/components/clientInvoice/page';
 import Image from 'next/image';
 
 interface OrderItem {
