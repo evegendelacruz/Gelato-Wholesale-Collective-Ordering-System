@@ -379,9 +379,10 @@ export default function OrderPage() {
     doc.text('PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)', 105, footerY + 8, { align: 'center' });
     doc.text('OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd', 105, footerY + 12, { align: 'center' });
 
+    // Enable auto-print
     doc.autoPrint();
     
-    // Open in new window with print focus
+    // Generate blob and open in new window - FIXED LINE
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
     window.open(blobUrl, '_blank');
