@@ -33,84 +33,78 @@ export default function Home() {
   };
 
   const handleSubmit = async () => {
-    setLoginError('');
-    setSuccessMessage('');
+  setLoginError('');
+  setSuccessMessage('');
+  setIsLoading(true);
 
-    if (!validateEmail(email)) {
-      setEmailError('Invalid email');
+  const trimmedEmail = email.trim();
+  const trimmedPassword = password.trim();
+
+  if (!validateEmail(trimmedEmail)) {
+    setEmailError('Invalid email');
+    setIsLoading(false);
+    return;
+  }
+
+  if (!trimmedPassword) {
+    setLoginError('Password is required');
+    setIsLoading(false);
+    return;
+  }
+
+  try {
+    // 1️⃣ AUTH FIRST (this creates auth.uid for RLS)
+    const { error: authError } =
+      await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password: trimmedPassword,
+      });
+
+    if (authError) {
+      setLoginError('Invalid email or password');
+      setIsLoading(false);
       return;
     }
 
-    if (!password) {
-      setLoginError('Password is required');
+    // 2️⃣ NOW query client_user (RLS-safe)
+    const { data: clientUser, error: queryError } = await supabase
+      .from('client_user')
+      .select('*')
+      .eq('client_email', trimmedEmail)
+      .maybeSingle();
+
+    if (queryError || !clientUser) {
+      setLoginError('Invalid email or password');
+      setIsLoading(false);
       return;
     }
 
-    setIsLoading(true);
+    // 3️⃣ Ensure auth user is linked
+    if (!clientUser.client_auth_id) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    try {
-      // First, check if user exists in client_user table
-      const { data: clientUser, error: queryError } = await supabase
-        .from('client_user')
-        .select('*')
-        .eq('client_email', email)
-        .single();
-
-      if (queryError || !clientUser) {
-        setLoginError('Invalid email or password');
-        setIsLoading(false);
-        return;
+      if (user) {
+        await supabase
+          .from('client_user')
+          .update({ client_auth_id: user.id })
+          .eq('client_email', trimmedEmail);
       }
-
-      // Check if password matches (using client_password field)
-      if (clientUser.client_password !== password) {
-        setLoginError('Invalid email or password');
-        setIsLoading(false);
-        return;
-      }
-
-      // Sign in with Supabase Auth
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email,
-        password: password,
-      });
-
-      if (error) {
-        console.error('Auth error:', error);
-        setLoginError('Authentication failed. Please try again.');
-        setIsLoading(false);
-        return;
-      }
-
-      // Verify auth user matches client record
-      if (data.user && data.user.id !== clientUser.client_auth_id) {
-        console.error('User ID mismatch');
-        await supabase.auth.signOut();
-        setLoginError('Account verification failed');
-        setIsLoading(false);
-        return;
-      }
-
-      setSuccessMessage('Login successful! Redirecting...');
-      console.log('Client logged in:', {
-        client_id: clientUser.client_id,
-        name: clientUser.client_person_incharge,
-        business: clientUser.client_businessName
-      });
-      
-      // Navigate to client dashboard after successful login
-       setTimeout(() => {
-      router.push('/client');
-    }, 1000);
-      
-    } catch (err) {
-      setLoginError('An unexpected error occurred');
-      console.error('Login error:', err);
-      setIsLoading(false);
-    } finally {
-      setIsLoading(false);
     }
-  };
+
+    // 4️⃣ SUCCESS
+    setSuccessMessage('Login successful! Redirecting...');
+    setTimeout(() => router.push('/client'), 1000);
+
+  } catch (err) {
+    console.error(err);
+    setLoginError('An unexpected error occurred');
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {

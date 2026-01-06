@@ -50,7 +50,7 @@ export default function AdminLogin() {
     setIsLoading(true);
 
     try {
-      // First, check if user exists in admin_user table
+      // Check if user exists in admin_user table
       const { data: adminUser, error: queryError } = await client
         .from('admin_user')
         .select('*')
@@ -63,28 +63,75 @@ export default function AdminLogin() {
         return;
       }
 
-      // Check if password matches (using the admin_password field from admin_user table)
+      // Check if password matches
       if (adminUser.admin_password !== password) {
         setLoginError('Invalid email or password');
         setIsLoading(false);
         return;
       }
 
-      // Now sign in with Supabase Auth using the credentials
-      const { data, error } = await client.auth.signInWithPassword({
+      // Try to sign in with Supabase Auth
+      const { data: authData, error: signInError } = await client.auth.signInWithPassword({
         email: email,
         password: password,
       });
 
-      if (error) {
-        console.error('Auth error:', error);
-        setLoginError('Authentication failed. Please try again.');
-        setIsLoading(false);
-        return;
+      // If sign in fails because user doesn't exist in Auth, create the auth user
+      if (signInError) {
+        if (signInError.message.includes('Invalid login credentials') || 
+            signInError.message.includes('Email not confirmed')) {
+          
+          // Create auth user
+          const { data: signUpData, error: signUpError } = await client.auth.signUp({
+            email: email,
+            password: password,
+            options: {
+              emailRedirectTo: undefined, // Skip email confirmation
+            }
+          });
+
+          if (signUpError) {
+            console.error('Sign up error:', signUpError);
+            setLoginError('Authentication setup failed. Please contact support.');
+            setIsLoading(false);
+            return;
+          }
+
+          // Update admin_user with the new auth_id
+          if (signUpData.user) {
+            const { error: updateError } = await client
+              .from('admin_user')
+              .update({ admin_auth_id: signUpData.user.id })
+              .eq('admin_email', email);
+
+            if (updateError) {
+              console.error('Update error:', updateError);
+            }
+          }
+
+          setSuccessMessage('Login successful! Redirecting...');
+          console.log('Admin logged in (new auth):', {
+            auth_id: signUpData.user?.id,
+            account_id: adminUser.admin_acc_id,
+            name: adminUser.admin_fullName,
+            role: adminUser.admin_role
+          });
+          
+          setTimeout(() => {
+            router.push('/admin/dashboard');
+          }, 1000);
+          
+          return;
+        } else {
+          console.error('Auth error:', signInError);
+          setLoginError('Authentication failed. Please try again.');
+          setIsLoading(false);
+          return;
+        }
       }
 
-      // Check if the auth user matches the admin_user record
-      if (data.user && data.user.id !== adminUser.admin_auth_id) {
+      // Verify auth user matches admin record (if auth_id exists)
+      if (authData.user && adminUser.admin_auth_id && authData.user.id !== adminUser.admin_auth_id) {
         console.error('User ID mismatch');
         await client.auth.signOut();
         setLoginError('Account verification failed');
@@ -92,15 +139,22 @@ export default function AdminLogin() {
         return;
       }
 
+      // Update admin_auth_id if it's null
+      if (authData.user && !adminUser.admin_auth_id) {
+        await client
+          .from('admin_user')
+          .update({ admin_auth_id: authData.user.id })
+          .eq('admin_email', email);
+      }
+
       setSuccessMessage('Login successful! Redirecting...');
       console.log('Admin logged in:', {
-        auth_id: data.user?.id,
+        auth_id: authData.user?.id,
         account_id: adminUser.admin_acc_id,
         name: adminUser.admin_fullName,
         role: adminUser.admin_role
       });
       
-      // Navigate to dashboard after successful login
       setTimeout(() => {
         router.push('/admin/dashboard');
       }, 1000);
