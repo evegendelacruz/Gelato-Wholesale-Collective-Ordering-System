@@ -486,39 +486,62 @@ const LabelGenerator = ({ orderItems, clientData }) => {
     setPreviewBlobUrl(null);
   };
 
-  return (
-    <>
-      {showPreview && previewBlobUrl && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }} onClick={closePreview}> 
-          <div className="bg-white rounded-lg max-w-4xl w-full h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center shrink-0">
-              <div>
-                <h3 className="text-xl font-bold text-gray-800">
-                  Label Preview - {orderItems.length} {orderItems.length === 1 ? 'Label' : 'Labels'}
-                </h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  Preview how your labels will look when printed (90mm × 50mm at 300 DPI)
-                </p>
-              </div>
-              <button onClick={closePreview} className="text-gray-500 hover:text-gray-700 text-2xl">×</button>
-            </div>
-            
-            <div className="flex-1 overflow-hidden bg-gray-100">
-              <iframe src={previewBlobUrl} className="w-full h-full border-0" title="Label Preview" />
-            </div>
+  if (!showPreview || !previewBlobUrl) {
+    return null;
+  }
 
-            <div className="px-6 py-4 border-t border-gray-200 flex gap-3 shrink-0">
-              <button onClick={handleDownloadImages} disabled={isGenerating} className="flex-1 px-4 py-3 bg-green-600 text-white rounded font-medium hover:bg-green-700 disabled:opacity-50">
-                {isGenerating ? 'Generating Images...' : `Download ${orderItems.length} JPEG Labels`}
-              </button>
-              <button onClick={closePreview} className="px-6 py-3 border-2 border-gray-800 text-gray-800 rounded font-medium hover:bg-gray-50">
-                Close Preview
-              </button>
-            </div>
+  return (
+    <div 
+      className="fixed inset-0 flex items-center justify-center z-50 p-4" 
+      style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }} 
+      onClick={closePreview}
+    > 
+      <div 
+        className="bg-white rounded-lg max-w-4xl w-full h-[90vh] flex flex-col" 
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center shrink-0">
+          <div>
+            <h3 className="text-xl font-bold text-gray-800">
+              Label Preview - {orderItems.length} {orderItems.length === 1 ? 'Label' : 'Labels'}
+            </h3>
+            <p className="text-sm text-gray-600 mt-1">
+              Preview how your labels will look when printed (90mm × 50mm at 300 DPI)
+            </p>
           </div>
+          <button 
+            onClick={closePreview} 
+            className="text-gray-500 hover:text-gray-700 text-2xl"
+          >
+            ×
+          </button>
         </div>
-      )}
-    </>
+        
+        <div className="flex-1 overflow-hidden bg-gray-100">
+          <iframe 
+            src={previewBlobUrl} 
+            className="w-full h-full border-0" 
+            title="Label Preview" 
+          />
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 flex gap-3 shrink-0">
+          <button 
+            onClick={handleDownloadImages} 
+            disabled={isGenerating} 
+            className="flex-1 px-4 py-3 bg-green-600 text-white rounded font-medium hover:bg-green-700 disabled:opacity-50"
+          >
+            {isGenerating ? 'Generating Images...' : `Download ${orderItems.length} JPEG Labels`}
+          </button>
+          <button 
+            onClick={closePreview} 
+            className="px-6 py-3 border-2 border-gray-800 text-gray-800 rounded font-medium hover:bg-gray-50"
+          >
+            Close Preview
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
 
