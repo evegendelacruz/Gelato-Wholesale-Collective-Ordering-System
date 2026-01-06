@@ -45,6 +45,109 @@ export default function OrderPage() {
   const [clientData, setClientData] = useState<ClientData | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
+  // Add this useEffect to set up real-time subscription
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        setLoading(true);
+        
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        
+        if (authError || !user) {
+          throw new Error('Not authenticated. Please log in.');
+        }
+
+        const { data: ordersData, error: ordersError } = await supabase
+          .from('client_order')
+          .select('*')
+          .eq('client_auth_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (ordersError) throw ordersError;
+
+        const ordersWithItems = await Promise.all(
+          (ordersData || []).map(async (order) => {
+            const { data: itemsData, error: itemsError } = await supabase
+              .from('client_order_item')
+              .select('*')
+              .eq('order_id', order.id);
+
+            if (itemsError) throw itemsError;
+
+            const itemsWithImages = await Promise.all(
+              (itemsData || []).map(async (item) => {
+                const { data: productData } = await supabase
+                  .from('product_list')
+                  .select('product_image')
+                  .eq('id', item.product_id)
+                  .single();
+
+                return {
+                  ...item,
+                  product_image: productData?.product_image || null
+                };
+              })
+            );
+
+            return {
+              ...order,
+              items: itemsWithImages
+            };
+          })
+        );
+
+        setOrders(ordersWithItems);
+
+      } catch (error) {
+        console.error('Error fetching orders:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchOrders();
+
+    // Set up real-time subscription for order status changes
+    const setupRealtimeSubscription = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const channel = supabase
+        .channel('client_order_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'client_order',
+            filter: `client_auth_id=eq.${user.id}`
+          },
+          (payload) => {
+            console.log('Order status updated:', payload);
+            // Update the specific order in state
+            setOrders(prevOrders =>
+              prevOrders.map(order =>
+                order.id === payload.new.id
+                  ? { ...order, ...payload.new }
+                  : order
+              )
+            );
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    };
+
+    const cleanup = setupRealtimeSubscription();
+
+    return () => {
+      cleanup.then(unsubscribe => unsubscribe?.());
+    };
+  }, []);
+
   useEffect(() => {
     fetchOrders();
   }, []);

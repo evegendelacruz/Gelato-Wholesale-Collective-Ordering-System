@@ -1450,7 +1450,7 @@ const filteredProducts = products
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1 text-gray-700">
-                      Shelf Life (No. of Days) <span className="text-red-500">*</span>
+                      Shelf Life (No. of Months) <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="number"
