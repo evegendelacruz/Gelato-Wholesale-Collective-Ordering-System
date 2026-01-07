@@ -1,11 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import supabase from '@/lib/client';
 
-// Calendar Component - Export this to use in your dashboard
 export default function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const months = [
     'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
@@ -13,6 +15,73 @@ export default function Calendar() {
   ];
 
   const daysOfWeek = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+
+  // Fetch orders when component mounts or month changes
+  useEffect(() => {
+    fetchOrders();
+  }, [currentDate]);
+
+  const fetchOrders = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch orders with client information
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('client_order')
+        .select(`
+          id,
+          order_id,
+          client_auth_id,
+          order_date,
+          client_user!client_order_client_auth_id_fkey(client_businessName)
+        `)
+        .order('order_date', { ascending: true });
+
+      if (ordersError) throw ordersError;
+
+      // For each order, fetch its items to calculate total quantity
+      const ordersWithQuantities = await Promise.all(
+        (ordersData || []).map(async (order: {
+          id: string;
+          order_id: string;
+          client_auth_id: string;
+          order_date: string;
+          client_user: { client_businessName: string } | { client_businessName: string }[] | null;
+        }) => {
+          const { data: items } = await supabase
+            .from('client_order_item')
+            .select('quantity')
+            .eq('order_id', order.id);
+
+          const totalQuantity = (items || []).reduce((sum: number, item: { quantity?: number }) => sum + (item.quantity || 0), 0);
+
+          let companyName = 'N/A';
+          if (order.client_user) {
+            if (Array.isArray(order.client_user)) {
+              companyName = order.client_user[0]?.client_businessName || 'N/A';
+            } else {
+              companyName = order.client_user.client_businessName || 'N/A';
+            }
+          }
+
+          return {
+            id: order.id,
+            order_id: order.order_id,
+            companyName,
+            date: new Date(order.order_date),
+            totalQuantity
+          };
+        })
+      );
+
+      setOrders(ordersWithQuantities);
+    } catch (err) {
+      console.error('Error fetching orders:', err);
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const getDaysInMonth = (date) => {
     const year = date.getFullYear();
@@ -24,7 +93,6 @@ export default function Calendar() {
     const year = date.getFullYear();
     const month = date.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
-    // Convert Sunday (0) to 6, and shift Monday to 0
     return firstDay === 0 ? 6 : firstDay - 1;
   };
 
@@ -33,7 +101,6 @@ export default function Calendar() {
     const firstDay = getFirstDayOfMonth(currentDate);
     const days = [];
 
-    // Previous month days
     const prevMonthDays = getDaysInMonth(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
     for (let i = firstDay - 1; i >= 0; i--) {
       days.push({
@@ -43,7 +110,6 @@ export default function Calendar() {
       });
     }
 
-    // Current month days
     for (let i = 1; i <= daysInMonth; i++) {
       days.push({
         day: i,
@@ -52,8 +118,7 @@ export default function Calendar() {
       });
     }
 
-    // Next month days
-    const remainingDays = 42 - days.length; // 6 rows * 7 days
+    const remainingDays = 42 - days.length;
     for (let i = 1; i <= remainingDays; i++) {
       days.push({
         day: i,
@@ -63,6 +128,24 @@ export default function Calendar() {
     }
 
     return days;
+  };
+
+  const getOrdersForDate = (date) => {
+    return orders.filter(order => 
+      order.date.getDate() === date.getDate() &&
+      order.date.getMonth() === date.getMonth() &&
+      order.date.getFullYear() === date.getFullYear()
+    );
+  };
+
+  const getColorForQuantity = (quantity) => {
+    if (quantity < 100) {
+      return '#FCD34D'; // Yellow
+    } else if (quantity >= 100 && quantity < 500) {
+      return '#34D399'; // Green
+    } else {
+      return '#F87171'; // Red
+    }
   };
 
   const previousMonth = () => {
@@ -100,6 +183,22 @@ export default function Calendar() {
         </button>
       </div>
 
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-6 mb-4 text-xs">
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded" style={{ backgroundColor: '#FCD34D' }}></div>
+          <span>Under 100 units</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded" style={{ backgroundColor: '#34D399' }}></div>
+          <span>100-499 units</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded" style={{ backgroundColor: '#F87171' }}></div>
+          <span>500+ units</span>
+        </div>
+      </div>
+
       {/* Days of Week */}
       <div className="grid grid-cols-7 gap-1 mb-2">
         {daysOfWeek.map(day => (
@@ -117,6 +216,7 @@ export default function Calendar() {
       <div className="grid grid-cols-7 gap-1">
         {calendarDays.map((dayInfo, index) => {
           const isToday = dayInfo.date.toDateString() === new Date().toDateString();
+          const dayOrders = getOrdersForDate(dayInfo.date);
           
           return (
             <div
@@ -134,9 +234,25 @@ export default function Calendar() {
                 {dayInfo.day}
               </div>
               
-              {/* Orders will be displayed here when fetched from your database */}
+              {/* Orders for this date */}
               <div className="space-y-1">
-                {/* Future: Map through orders for this date */}
+                {loading && dayInfo.isCurrentMonth ? (
+                  <div className="text-xs text-gray-400">Loading...</div>
+                ) : (
+                  dayOrders.map((order) => (
+                    <div
+                      key={order.id}
+                      className="text-xs px-2 py-1 rounded font-medium truncate shadow-sm"
+                      style={{ 
+                        backgroundColor: getColorForQuantity(order.totalQuantity),
+                        color: '#1F2937'
+                      }}
+                      title={`${order.companyName} - ${order.totalQuantity} units (Order: ${order.order_id})`}
+                    >
+                      {order.companyName}
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           );

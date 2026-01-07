@@ -3,9 +3,46 @@ import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import supabase from '@/lib/client';
 import ClientInvoice from '@/app/components/clientInvoice';
+import ClientOrderModal from '@/app/components/clientOrderModal/page';
 import LabelGenerator from '@/app/components/orderLabel/page';
+import EditOrderModal from '@/app/components/editOrder/page';
 import { useState, useEffect, Fragment } from 'react';
-import { Search, Filter, Plus } from 'lucide-react';
+import { Search, Filter, Plus, X, Check } from 'lucide-react';
+
+interface Order {
+  id: number;
+  order_id: string;
+  client_auth_id: string;
+  order_date: string;
+  delivery_date: string;
+  delivery_address: string;
+  total_amount: number;
+  status: string;
+  notes: string | null;
+  invoice_id: string;
+  tracking_no: string;
+  created_at: string;
+  updated_at: string;
+  company_name: string;
+}
+
+// Add this type for Supabase response
+interface SupabaseOrderResponse {
+  id: number;
+  order_id: string;
+  client_auth_id: string;
+  order_date: string;
+  delivery_date: string;
+  delivery_address: string;
+  total_amount: number;
+  status: string;
+  notes: string | null;
+  invoice_id: string;
+  tracking_no: string;
+  created_at: string;
+  updated_at: string;
+  client_user?: { client_businessName?: string } | Array<{ client_businessName?: string }>;
+}
 
 export default function OrderPage() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,6 +66,12 @@ export default function OrderPage() {
   const [showLabelGenerator, setShowLabelGenerator] = useState(false);
   const [selectedOrderItems, setSelectedOrderItems] = useState([]);
   const [selectedClientData, setSelectedClientData] = useState(null);
+  const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isDeleteSuccessOpen, setIsDeleteSuccessOpen] = useState(false);
+  const [isEditSuccessOpen, setIsEditSuccessOpen] = useState(false);
+  const [showEditOrderModal, setShowEditOrderModal] = useState(false);
   
   const toggleRowExpansion = (orderId) => {
   setExpandedRows(prev => ({
@@ -178,6 +221,102 @@ useEffect(() => {
       return '-';
     }
   };
+
+  const handleSelectAll = (checked: boolean) => {
+  if (checked) {
+    const allIds = new Set(currentOrders.map(order => order.id));
+    setSelectedRows(allIds);
+  } else {
+    setSelectedRows(new Set());
+  }
+};
+
+const handleSelectRow = (orderId: number, checked: boolean) => {
+  const newSelected = new Set(selectedRows);
+  if (checked) {
+    newSelected.add(orderId);
+  } else {
+    newSelected.delete(orderId);
+  }
+  setSelectedRows(newSelected);
+};
+
+const handleEdit = () => {
+  const orderId = Array.from(selectedRows)[0];
+  const order = orders.find(o => o.id === orderId);
+  if (order) {
+    setSelectedOrder(order);
+    setShowEditOrderModal(true);
+  }
+};
+
+const handleDelete = async () => {
+  try {
+    setLoading(true);
+    const idsToDelete = Array.from(selectedRows);
+    
+    // Delete orders and their related items
+    const { error: itemsError } = await supabase
+      .from('client_order_item')
+      .delete()
+      .in('order_id', idsToDelete);
+    
+    if (itemsError) throw itemsError;
+    
+    const { error: ordersError } = await supabase
+      .from('client_order')
+      .delete()
+      .in('id', idsToDelete);
+    
+    if (ordersError) throw ordersError;
+    
+    // Refresh orders list
+    const { data, error: fetchError } = await supabase
+      .from('client_order')
+      .select(`
+        id,
+        order_id,
+        client_auth_id,
+        order_date,
+        delivery_date,
+        delivery_address,
+        total_amount,
+        status,
+        notes,
+        invoice_id,
+        tracking_no,
+        created_at,
+        updated_at,
+        client_user!client_order_client_auth_id_fkey(client_businessName)
+      `)
+      .order('order_date', { ascending: false });
+
+    if (!fetchError && data) {
+      const ordersWithCompany = data.map((order: SupabaseOrderResponse): Order => {
+        let companyName = 'N/A';
+        if (order.client_user) {
+          if (Array.isArray(order.client_user)) {
+            companyName = order.client_user[0]?.client_businessName || 'N/A';
+          } else {
+            companyName = order.client_user.client_businessName || 'N/A';
+          }
+        }
+        return { ...order, company_name: companyName };
+      });
+      setOrders(ordersWithCompany);
+    }
+    
+    setSelectedRows(new Set());
+    setIsDeleteConfirmOpen(false);
+    setIsDeleteSuccessOpen(true);
+    
+  } catch (error) {
+    console.error('Error deleting orders:', error);
+    alert('Failed to delete order(s). Please try again.');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleGenerateLabels = async (order) => {
   try {
@@ -1026,13 +1165,14 @@ const handleViewInvoice = async (order) => {
               </div>
 
                 {/* Create Order Button */}
-                <button 
-                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: '#FF5722' }}
-                >
-                  <Plus size={20} />
-                  <span>Create Order</span>
-                </button>
+               <button 
+                onClick={() => setShowCreateOrderModal(true)}
+                className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: '#FF5722' }}
+              >
+                <Plus size={20} />
+                <span>Create Order</span>
+              </button>
               </div>
             </div>
 
@@ -1050,7 +1190,12 @@ const handleViewInvoice = async (order) => {
               <thead>
                 <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
                   <th className="text-left py-3 px-2 w-10">
-                    <input type="checkbox" className="w-4 h-4" />
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 cursor-pointer"
+                      checked={selectedRows.size === currentOrders.length && currentOrders.length > 0}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                    />
                   </th>
                   <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
                     ORDER ID
@@ -1116,7 +1261,12 @@ const handleViewInvoice = async (order) => {
                       {/* Main Order Row */}
                       <tr className="border-b border-gray-200 hover:bg-gray-50">
                         <td className="py-3 px-2">
-                          <input type="checkbox" className="w-4 h-4" />
+                          <input 
+                            type="checkbox" 
+                            className="w-4 h-4 cursor-pointer"
+                            checked={selectedRows.has(order.id)}
+                            onChange={(e) => handleSelectRow(order.id, e.target.checked)}
+                          />
                         </td>
                         <td className="py-3 px-2 text-xs font-medium whitespace-nowrap">{order.order_id}</td>
                         <td className="py-3 px-3 text-xs max-w-37.5 truncate" title={order.company_name}>
@@ -1342,6 +1492,298 @@ const handleViewInvoice = async (order) => {
               clientData={selectedClientData}
             />
           )}
+
+          {showCreateOrderModal && (
+          <ClientOrderModal
+            isOpen={showCreateOrderModal}
+            onClose={() => setShowCreateOrderModal(false)}
+            onSuccess={() => {
+            setShowCreateOrderModal(false);
+            // Refresh orders after successful creation
+            const fetchOrders = async () => {
+              try {
+                setLoading(true);
+                const { data, error: supabaseError } = await supabase
+                  .from('client_order')
+                  .select(`
+                    id,
+                    order_id,
+                    client_auth_id,
+                    order_date,
+                    delivery_date,
+                    delivery_address,
+                    total_amount,
+                    status,
+                    notes,
+                    invoice_id,
+                    tracking_no,
+                    created_at,
+                    updated_at,
+                    client_user!client_order_client_auth_id_fkey(client_businessName)
+                  `)
+                  .order('order_date', { ascending: false });
+
+                if (supabaseError) throw supabaseError;
+
+                if (data) {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const ordersWithCompany = data.map((order: any) => {
+                    let companyName = 'N/A';
+                    if (order.client_user) {
+                      if (Array.isArray(order.client_user)) {
+                        companyName = order.client_user[0]?.client_businessName || 'N/A';
+                      } else {
+                        companyName = order.client_user.client_businessName || 'N/A';
+                      }
+                    }
+                    return { ...order, company_name: companyName };
+                  });
+                  setOrders(ordersWithCompany);
+                }
+                setError(null);
+              } catch (err) {
+                console.error('Error refreshing orders:', err);
+              } finally {
+                setLoading(false);
+              }
+            };
+            fetchOrders();
+          }}
+          />
+        )}
+
+          {/* Action Toast for Selected Rows */}
+          {selectedRows.size > 0 && (
+            <div 
+              style={{
+                position: 'fixed',
+                bottom: '30px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                backgroundColor: '#4A5568',
+                color: 'white',
+                padding: '8px 16px',
+                borderRadius: '6px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '16px',
+                zIndex: 9999,
+                minWidth: 'auto'
+              }}
+            >
+              <button
+                onClick={() => setSelectedRows(new Set())}
+                className="text-white hover:text-gray-300 transition-colors"
+                aria-label="Close"
+                style={{ padding: '2px' }}
+              >
+                <X size={16} />
+              </button>
+              
+              <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
+              
+              <span className="text-sm" style={{ minWidth: '100px' }}>
+                {selectedRows.size} item{selectedRows.size === 1 ? '' : 's'} selected
+              </span>
+              
+              <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
+              
+              {selectedRows.size === 1 && (
+                <>
+                  <button
+                    onClick={handleEdit}
+                    disabled={loading}
+                    className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ padding: '2px 6px' }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                    <span className="text-sm">Edit</span>
+                  </button>
+                  
+                  <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
+                </>
+              )}
+              
+              <button
+                onClick={() => setIsDeleteConfirmOpen(true)}
+                disabled={loading}
+                className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ padding: '2px 6px' }}
+              >
+                <X size={16} />
+                <span className="text-sm">Remove</span>
+              </button>
+            </div>
+          )}
+          
+          {showEditOrderModal && selectedOrder && (
+          <EditOrderModal
+            isOpen={showEditOrderModal}
+            onClose={() => {
+              setShowEditOrderModal(false);
+              setSelectedOrder(null);
+              setSelectedRows(new Set());
+            }}
+            onSuccess={() => {
+              setShowEditOrderModal(false);
+              setSelectedOrder(null);
+              setSelectedRows(new Set());
+              setIsEditSuccessOpen(true);
+              
+              // Refresh orders after successful update
+              const fetchOrders = async () => {
+                try {
+                  setLoading(true);
+                  const { data, error: supabaseError } = await supabase
+                    .from('client_order')
+                    .select(`
+                      id,
+                      order_id,
+                      client_auth_id,
+                      order_date,
+                      delivery_date,
+                      delivery_address,
+                      total_amount,
+                      status,
+                      notes,
+                      invoice_id,
+                      tracking_no,
+                      created_at,
+                      updated_at,
+                      client_user!client_order_client_auth_id_fkey(client_businessName)
+                    `)
+                    .order('order_date', { ascending: false });
+
+                  if (supabaseError) throw supabaseError;
+
+                  if (data) {
+                    const ordersWithCompany = data.map((order: SupabaseOrderResponse): Order => {
+                      let companyName = 'N/A';
+                      if (order.client_user) {
+                        if (Array.isArray(order.client_user)) {
+                          companyName = order.client_user[0]?.client_businessName || 'N/A';
+                        } else {
+                          companyName = order.client_user.client_businessName || 'N/A';
+                        }
+                      }
+                      return { ...order, company_name: companyName };
+                    });
+                    setOrders(ordersWithCompany);
+                  }
+                  setError(null);
+                } catch (err) {
+                  console.error('Error refreshing orders:', err);
+                } finally {
+                  setLoading(false);
+                }
+              };
+              fetchOrders();
+            }}
+            order={selectedOrder}
+          />
+        )}
+          {/* Delete Confirmation Modal */}
+          {isDeleteConfirmOpen && (
+            <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+              <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
+                    <X size={32} className="text-red-600" />
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
+                  Confirm Order Removal
+                </h2>
+                <p className="text-gray-600 mb-6">
+                  Are you sure you want to remove {selectedRows.size} {selectedRows.size === 1 ? 'order' : 'orders'}? This action cannot be undone.
+                </p>
+                <div className="flex gap-4 justify-center">
+                  <button
+                    onClick={() => setIsDeleteConfirmOpen(false)}
+                    className="px-8 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={loading}
+                    className="px-8 py-2 bg-red-500 text-white rounded font-medium hover:bg-red-600 transition-colors disabled:opacity-50"
+                  >
+                    {loading ? 'Removing...' : 'Remove'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Delete Success Modal */}
+          {isDeleteSuccessOpen && (
+            <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+              <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
+                <button
+                  onClick={() => setIsDeleteSuccessOpen(false)}
+                  className="float-right text-gray-400 hover:text-gray-600"
+                >
+                  <X size={24} />
+                </button>
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center">
+                    <Check size={32} className="text-white" />
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
+                  Successfully Removed!
+                </h2>
+                <p className="text-gray-600 mb-6">
+                  Order(s) have been removed from the system.
+                </p>
+                <button
+                  onClick={() => setIsDeleteSuccessOpen(false)}
+                  className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: '#FF5722' }}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Edit Success Modal */}
+          {isEditSuccessOpen && (
+            <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+              <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
+                <button
+                  onClick={() => setIsEditSuccessOpen(false)}
+                  className="float-right text-gray-400 hover:text-gray-600"
+                >
+                  <X size={24} />
+                </button>
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center">
+                    <Check size={32} className="text-white" />
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
+                  Successfully Updated!
+                </h2>
+                <p className="text-gray-600 mb-6">
+                  Order information has been updated successfully.
+                </p>
+                <button
+                  onClick={() => setIsEditSuccessOpen(false)}
+                  className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: '#FF5722' }}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          )}
+       
         </main>
       </div>
     </div>
