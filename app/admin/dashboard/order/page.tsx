@@ -1451,7 +1451,6 @@ const handleViewInvoice = async (order) => {
                     order={{...selectedOrder, items: orderItems}}
                     clientData={clientData}
                     formatDate={formatDate}
-                    formatPackaging={formatPackaging}
                     getSubtotal={() => getSubtotal(orderItems)}
                     getGST={() => getGST(orderItems)}
                   />
