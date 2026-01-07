@@ -6,7 +6,6 @@ interface OrderItem {
   product_name: string;
   quantity: number;
   unit_price: number;
-  packaging_type: string;
   subtotal: number;
 }
 
@@ -33,7 +32,6 @@ interface ClientInvoiceProps {
   order: Order;
   clientData: ClientData;
   formatDate: (dateString: string) => string;
-  formatPackaging: (packaging: string) => string;
   getSubtotal: (order: Order) => number;
   getGST: (order: Order) => number;
 }
@@ -42,7 +40,6 @@ export default function ClientInvoice({
   order,
   clientData,
   formatDate,
-  formatPackaging,
   getSubtotal,
   getGST
 }: ClientInvoiceProps) {
@@ -380,8 +377,8 @@ export default function ClientInvoice({
 
             {order.items.map((item) => (
               <div key={item.id} className="table-row">
-                <div className="table-col">{item.product_name} ({formatPackaging(item.packaging_type)})</div>
-                <div className="table-col">{item.product_name} ({formatPackaging(item.packaging_type)})</div>
+                <div className="table-col">{item.product_name} </div>
+                <div className="table-col">{item.product_name} </div>
                 <div className="table-col qty">{item.quantity}</div>
                 <div className="table-col price">{item.unit_price.toFixed(2)}</div>
                 <div className="table-col amount">{item.subtotal.toFixed(2)}</div>

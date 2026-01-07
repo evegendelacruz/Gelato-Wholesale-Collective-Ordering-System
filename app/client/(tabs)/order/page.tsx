@@ -5,16 +5,17 @@ import { useRouter } from 'next/navigation';
 import ClientHeader from '@/app/components/clientHeader/page';
 import ClientInvoice from '@/app/components/clientInvoice';
 import supabase from '@/lib/client';
-import Image from 'next/image';
 
 interface OrderItem {
   id: number;
   product_name: string;
   quantity: number;
   unit_price: number;
-  packaging_type: string;
   subtotal: number;
   product_image?: string;
+  product_list?: {
+    product_image: string | null;
+  };
 }
 
 interface Order {
@@ -27,6 +28,7 @@ interface Order {
   total_amount: number;
   status: string;
   notes: string | null;
+  client_order_item?: OrderItem[];
   items: OrderItem[];
 }
 
@@ -44,6 +46,7 @@ export default function OrderPage() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [clientData, setClientData] = useState<ClientData | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  
 
   // Add this useEffect to set up real-time subscription
   useEffect(() => {
@@ -147,82 +150,6 @@ export default function OrderPage() {
       cleanup.then(unsubscribe => unsubscribe?.());
     };
   }, []);
-
-  useEffect(() => {
-    fetchOrders();
-  }, []);
-
-  const fetchOrders = async () => {
-    try {
-      setLoading(true);
-      
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      
-      if (authError || !user) {
-        throw new Error('Not authenticated. Please log in.');
-      }
-
-      const { data: ordersData, error: ordersError } = await supabase
-        .from('client_order')
-        .select('*')
-        .eq('client_auth_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (ordersError) throw ordersError;
-
-      const ordersWithItems = await Promise.all(
-        (ordersData || []).map(async (order) => {
-          const { data: itemsData, error: itemsError } = await supabase
-            .from('client_order_item')
-            .select('*')
-            .eq('order_id', order.id);
-
-          if (itemsError) throw itemsError;
-
-          // Fetch product images separately for each item
-          const itemsWithImages = await Promise.all(
-            (itemsData || []).map(async (item) => {
-              const { data: productData } = await supabase
-                .from('product_list')
-                .select('product_image')
-                .eq('id', item.product_id)
-                .single();
-
-              return {
-                ...item,
-                product_image: productData?.product_image || null
-              };
-            })
-          );
-
-          return {
-            ...order,
-            items: itemsWithImages
-          };
-        })
-      );
-
-      setOrders(ordersWithItems);
-
-    } catch (error) {
-      console.error('Error fetching orders:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getImageUrl = (imagePath: string | null): string => {
-    if (!imagePath) return '';
-    if (imagePath.startsWith('http')) return imagePath;
-    return `https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${imagePath}`;
-  };
-
-  const formatPackaging = (packaging: string): string => {
-    return packaging
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-  };
 
   const formatDate = (dateString: string): string => {
     return new Date(dateString).toLocaleDateString('en-SG', {
@@ -402,7 +329,7 @@ export default function OrderPage() {
     let yPos = tableStartY + 13;
 
     selectedOrder.items.forEach((item) => {
-      const productText = `${item.product_name} (${formatPackaging(item.packaging_type)})`;
+      const productText = `${item.product_name}`;
       
       doc.setFont('helvetica', 'bold');
       const productLines = doc.splitTextToSize(productText, 30);
@@ -643,7 +570,7 @@ export default function OrderPage() {
       let yPos = tableStartY + 13;
 
       selectedOrder.items.forEach((item) => {
-        const productText = `${item.product_name} (${formatPackaging(item.packaging_type)})`;
+        const productText = `${item.product_name} `;
         
         // Product/Services column (wrapped text)
         doc.setFont('helvetica', 'bold');
@@ -816,34 +743,18 @@ export default function OrderPage() {
                 <div className="border-t border-gray-200 pt-4 mb-4">
                 <h4 className="text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>Order Items</h4>
                 <div className="space-y-2">
-                  {order.items.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-3 flex-1">
-                        {item.product_image ? (
-                        <Image
-                          src={getImageUrl(item.product_image)}
-                          alt={item.product_name}
-                          width={48}
-                          height={48}
-                          className="w-12 h-12 object-cover rounded border border-gray-200"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.style.display = 'none';
-                          }}
-                        />
-                      ) : (
-                        <div className="w-12 h-12 bg-gray-100 rounded border border-gray-200 flex items-center justify-center">
-                          <span className="text-xs text-gray-400">No img</span>
-                        </div>
-                      )}
-             
-                        <span className="text-gray-600">
-                          {item.product_name} ({formatPackaging(item.packaging_type)}) x{item.quantity}
+                  {order.items && order.items.length > 0 ? (
+                    order.items.map((item) => (
+                      <div key={item.id} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600 flex-1">
+                          {item.product_name} x{item.quantity}
                         </span>
+                        <span className="font-medium ml-2">S$ {item.subtotal.toFixed(2)}</span>
                       </div>
-                      <span className="font-medium ml-2">S$ {item.subtotal.toFixed(2)}</span>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500">No items found</p>
+                  )}
                 </div>
               </div>
 
@@ -911,7 +822,6 @@ export default function OrderPage() {
                 order={selectedOrder}
                 clientData={clientData}
                 formatDate={formatDate}
-                formatPackaging={formatPackaging}
                 getSubtotal={getSubtotal}
                 getGST={getGST}
               />

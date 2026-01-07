@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import ClientHeader from '@/app/components/clientHeader/page';
 import supabase from '@/lib/client';
 import Image from 'next/image';
-import ProductView from '../components/productView/page';
 import LoadingSpinner from '../components/loader/page';
 
 interface ClientProduct {
@@ -34,9 +33,8 @@ interface Message {
 }
 
 function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBasketAdded: (productName: string) => void }) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
-  // Helper function to get full image URL from Supabase storage
+  const [isAdding, setIsAdding] = useState(false);
+  const [quantity, setQuantity] = useState(1);
   const getImageUrl = (imagePath: string | null): string => {
     if (!imagePath) return ''; 
     
@@ -46,12 +44,162 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
     return `https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${imagePath}`;
   };
 
+  const handleAddToBasket = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    try {
+      setIsAdding(true);
+
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        throw new Error('Not authenticated. Please log in.');
+      }
+
+      const subtotal = product.custom_price * quantity;
+
+      const { data: existingItem, error: checkError } = await supabase
+        .from('client_basket')
+        .select('*')
+        .eq('client_auth_id', user.id)
+        .eq('product_id', product.product_list.id)
+        .maybeSingle();
+
+      if (checkError && checkError.code !== 'PGRST116') {
+        throw checkError;
+      }
+
+      if (existingItem) {
+        const newQuantity = existingItem.quantity + quantity;
+        const newSubtotal = product.custom_price * newQuantity;
+        
+        const { error: updateError } = await supabase
+          .from('client_basket')
+          .update({
+            quantity: newQuantity,
+            subtotal: newSubtotal,
+          })
+          .eq('id', existingItem.id);
+
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from('client_basket')
+          .insert({
+            client_auth_id: user.id,
+            product_id: product.product_list.id,
+            product_name: product.product_list.product_name,
+            quantity: quantity,
+            unit_price: product.custom_price,
+            subtotal: subtotal,
+          });
+
+        if (insertError) throw insertError;
+      }
+
+      onBasketAdded(product.product_list.product_name);
+      setQuantity(1); // Reset quantity after adding
+
+    } catch (error) {
+      console.error('Error adding to basket:', error);
+      alert('Failed to add to basket. Please try again.');
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const incrementQuantity = () => setQuantity(prev => prev + 1);
+  const decrementQuantity = () => setQuantity(prev => prev > 1 ? prev - 1 : 1);
+
   return (
     <>
-      <div 
-        className="bg-white rounded-lg border border-gray-200 p-4 flex flex-col cursor-pointer hover:shadow-lg transition-shadow"
-        onClick={() => setIsModalOpen(true)}
-      >
+      {/* Mobile View - Landscape Rectangle */}
+      <div className="sm:hidden bg-white rounded-lg border border-gray-200 p-3 flex gap-3 hover:shadow-lg transition-shadow">
+        {/* Product Image */}
+        <div className="w-24 h-24 shrink-0 bg-white rounded-lg overflow-hidden border border-gray-100">
+          {product.product_list.product_image ? (
+            <Image 
+              src={getImageUrl(product.product_list.product_image)} 
+              alt={product.product_list.product_name}
+              width={96}
+              height={96}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.display = 'none';
+                const parent = target.parentElement;
+                if (parent) {
+                  parent.innerHTML = '<div class="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400"><span class="text-xs">No Image</span></div>';
+                }
+              }}
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400">
+              <span className="text-xs">No Image</span>
+            </div>
+          )}
+        </div>
+        
+        {/* Product Details */}
+        <div className="flex-1 flex flex-col justify-between min-w-0">
+          <div>
+            <h3 className="text-sm font-semibold mb-1 line-clamp-1" style={{ color: '#7d3c3c' }}>
+              {product.product_list.product_name}
+            </h3>
+            <p className="text-xs text-gray-600 mb-1 line-clamp-1">
+              {product.product_list.product_gelato_type || product.product_list.product_type}
+            </p>
+            <p className="text-sm font-semibold mb-2" style={{ color: '#e84e1b' }}>
+              S$ {product.custom_price.toFixed(2)}
+            </p>
+          </div>
+          
+          {/* Quantity Controls */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                decrementQuantity();
+              }}
+              className="w-7 h-7 rounded border border-gray-300 flex items-center justify-center hover:bg-gray-50 text-lg font-semibold"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              value={quantity}
+              onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+              onClick={(e) => e.stopPropagation()}
+              className="w-12 text-center px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-500"
+              min="1"
+            />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                incrementQuantity();
+              }}
+              className="w-7 h-7 rounded border border-gray-300 flex items-center justify-center hover:bg-gray-50 text-lg font-semibold"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {/* Add to Order Button */}
+        <div className="flex items-center">
+          <button 
+            className="px-3 py-2 rounded text-white text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 whitespace-nowrap"
+            style={{ backgroundColor: '#e84e1b' }}
+            onClick={handleAddToBasket}
+            disabled={isAdding}
+          >
+            {isAdding ? 'Adding...' : 'Add to order'}
+          </button>
+        </div>
+      </div>
+
+      {/* Desktop View - Square Card */}
+      <div className="hidden sm:flex sm:flex-col bg-white rounded-lg border border-gray-200 p-4 hover:shadow-lg transition-shadow">
         <div className="aspect-square bg-white rounded-lg mb-3 overflow-hidden border border-gray-100">
           {product.product_list.product_image ? (
             <Image 
@@ -86,29 +234,47 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
           <p className="text-xs text-gray-600 mb-1">
             {product.product_list.product_gelato_type || product.product_list.product_type}
           </p>
-          <p className="text-xs text-gray-500 mb-3">
-            ID: {product.product_list.product_id}
-          </p>
+          
+          {/* Quantity Controls */}
+          <div className="flex items-center gap-3 mb-3 mt-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                decrementQuantity();
+              }}
+              className="w-8 h-8 rounded border border-gray-300 flex items-center justify-center hover:bg-gray-50 text-lg font-semibold"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              value={quantity}
+              onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+              onClick={(e) => e.stopPropagation()}
+              className="w-16 text-center px-3 py-1 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+              min="1"
+            />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                incrementQuantity();
+              }}
+              className="w-8 h-8 rounded border border-gray-300 flex items-center justify-center hover:bg-gray-50 text-lg font-semibold"
+            >
+              +
+            </button>
+          </div>
         </div>
         
         <button 
-          className="w-full py-2 rounded text-white text-sm font-medium hover:opacity-90 transition-opacity"
+          className="w-full py-2 rounded text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
           style={{ backgroundColor: '#e84e1b' }}
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsModalOpen(true);
-          }}
+          onClick={handleAddToBasket}
+          disabled={isAdding}
         >
-          Add to order
+          {isAdding ? 'Adding...' : 'Add to order'}
         </button>
       </div>
-
-      <ProductView 
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        product={product}
-        onBasketAdded={onBasketAdded}
-      />
     </>
   );
 }
@@ -297,7 +463,7 @@ export default function ClientPage() {
     {/* Loading Spinner */}
       {isProcessing && (
         <LoadingSpinner 
-          duration={3000}
+          duration={500}
           onComplete={() => {}}
         />
       )}

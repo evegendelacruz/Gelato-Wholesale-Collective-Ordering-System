@@ -409,7 +409,7 @@ export default function ClientHeader() {
       </div>
       {(loading || isNavigating || isLoggingOut) && (
         <LoadingSpinner 
-          duration={loading ? 2000 : isLoggingOut ? 2000 : 500}
+          duration={loading ? 500 : isLoggingOut ? 500 : 500}
           onComplete={() => {
             setLoading(false);
             setIsNavigating(false);

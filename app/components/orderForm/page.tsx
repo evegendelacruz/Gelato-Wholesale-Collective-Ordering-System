@@ -14,10 +14,14 @@ interface OrderFormProps {
 }
 
 export interface OrderFormData {
-  orderDate: string;
+  deliveryDate: string;
   clientName: string;
   companyName: string;
-  deliveryAddress: string;
+  streetName: string;
+  country: string;
+  postalCode: string;
+  additionalNotes: string;
+  saveAsPreferred: boolean;
 }
 
 export default function OrderForm({ 
@@ -28,18 +32,21 @@ export default function OrderForm({
   loading 
 }: OrderFormProps) {
   const [formData, setFormData] = useState<OrderFormData>({
-    orderDate: '',
+    deliveryDate: '',
     clientName: '',
     companyName: '',
-    deliveryAddress: ''
+    streetName: '',
+    country: 'Singapore',
+    postalCode: '',
+    additionalNotes: '',
+    saveAsPreferred: false
   });
-  const [disabledDates, setDisabledDates] = useState<string[]>([]);
+
   const [loadingUserData, setLoadingUserData] = useState(true);
 
   useEffect(() => {
     if (isOpen) {
       loadUserData();
-      loadLastOrderDate();
     }
   }, [isOpen]);
 
@@ -52,66 +59,82 @@ export default function OrderForm({
       throw new Error('Not authenticated');
     }
 
-    const { data: clientData, error: clientError } = await supabase
+    // First try to fetch with preferred_address, if it fails, try without it
+    let clientData;
+    let clientError;
+
+    // Try fetching with client_preferred_address
+    const result = await supabase
       .from('client_user')
-      .select('client_person_incharge, client_businessName, client_delivery_address')
+      .select('client_person_incharge, client_businessName, client_delivery_address, client_preferred_address')
       .eq('client_auth_id', user.id)
       .single();
 
-    if (clientError) throw clientError;
+    // If the column doesn't exist, try without it
+    if (result.error && result.error.message.includes('column')) {
+      const fallbackResult = await supabase
+        .from('client_user')
+        .select('client_person_incharge, client_businessName, client_delivery_address')
+        .eq('client_auth_id', user.id)
+        .single();
+      
+      clientData = fallbackResult.data;
+      clientError = fallbackResult.error;
+    } else {
+      clientData = result.data;
+      clientError = result.error;
+    }
+
+    if (clientError) {
+      console.error('Client data fetch error:', clientError);
+      throw clientError;
+    }
+
+    // Parse address - prioritize preferred_address if it exists, otherwise use delivery_address
+    let streetName = '';
+    let country = 'Singapore';
+    let postalCode = '';
+
+    // Check if client_preferred_address exists and use it, otherwise use client_delivery_address
+    const addressToUse = clientData?.client_preferred_address || clientData?.client_delivery_address;
+
+    if (addressToUse) {
+      // Format: "Street Name, Country, Postal Code"
+      const parts = addressToUse.split(',').map((p: string) => p.trim());
+      if (parts.length >= 3) {
+        streetName = parts[0];
+        country = parts[1];
+        postalCode = parts[2];
+      } else if (parts.length === 2) {
+        streetName = parts[0];
+        country = parts[1];
+      } else if (parts.length === 1) {
+        // If it's just a single address string, put it in streetName
+        streetName = parts[0];
+      }
+    }
 
     setFormData(prev => ({
       ...prev,
       clientName: clientData?.client_person_incharge || '',
       companyName: clientData?.client_businessName || '',
-      deliveryAddress: clientData?.client_delivery_address || ''
+      streetName: streetName,
+      country: country,
+      postalCode: postalCode
     }));
   } catch (error) {
     console.error('Error loading user data:', error);
+    // Set default values even if there's an error
+    setFormData(prev => ({
+      ...prev,
+      country: 'Singapore'
+    }));
   } finally {
     setLoadingUserData(false);
   }
 };
 
-  const loadLastOrderDate = async () => {
-  try {
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) return;
-
-    // Get all order dates for this user
-    const { data: orders, error: orderError } = await supabase
-      .from('client_order')
-      .select('order_date')
-      .eq('client_auth_id', user.id)
-      .order('order_date', { ascending: false });
-
-    if (orderError) throw orderError;
-
-    if (orders && orders.length > 0) {
-      const disabledDatesList: string[] = [];
-      
-      // For each order date, disable the next day only
-      orders.forEach(order => {
-        const orderDate = new Date(order.order_date);
-        const nextDay = new Date(orderDate);
-        nextDay.setDate(nextDay.getDate() + 1);
-        
-        // Format as YYYY-MM-DD for input comparison
-        const nextDayStr = nextDay.toISOString().split('T')[0];
-        
-        // Only add if not already in the list (avoid duplicates)
-        if (!disabledDatesList.includes(nextDayStr)) {
-          disabledDatesList.push(nextDayStr);
-        }
-      });
-      
-      setDisabledDates(disabledDatesList);
-    }
-  } catch (error) {
-    console.error('Error loading last order date:', error);
-  }
-};
+  
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -121,20 +144,18 @@ export default function OrderForm({
     }));
   };
 
-  const isDateDisabled = (dateString: string): boolean => {
-    return disabledDates.includes(dateString);
+  const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData(prev => ({
+      ...prev,
+      saveAsPreferred: e.target.checked
+    }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.orderDate) {
-      alert('Please select an order date');
-      return;
-    }
-
-    if (isDateDisabled(formData.orderDate)) {
-      alert('This date is not available. Orders cannot be placed on the day immediately after an existing order. Please select a different date.');
+    if (!formData.deliveryDate) {
+      alert('Please select a delivery date');
       return;
     }
 
@@ -167,27 +188,17 @@ if (!isOpen) return null;
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6">
-          <style jsx>{`
-            input[type="date"]::-webkit-calendar-picker-indicator {
-              cursor: pointer;
-            }
-            
-            ${disabledDates.map(date => `
-              input[type="date"][value="${date}"] {
-                color: #9ca3af;
-              }
-            `).join('\n')}
-          `}</style>
+    
           {loadingUserData ? (
             <div className="text-center py-8 text-gray-600">
               Loading your information...
             </div>
           ) : (
             <div className="space-y-5">
-              {/* Order Date */}
+              {/* Delivery Date */}
               <div>
               <label className="block text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>
-                Pre-Order Date <span className="text-red-500">*</span>
+                Delivery Date <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Calendar 
@@ -196,33 +207,19 @@ if (!isOpen) return null;
                 />
                 <input
                   type="date"
-                  name="orderDate"
-                  value={formData.orderDate}
+                  name="deliveryDate"
+                  value={formData.deliveryDate}
                   onChange={handleInputChange}
                   min={getMinDate()}
                   required
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   disabled={loading}
-                  onKeyDown={(e) => {
-                    // Prevent manual typing
-                    e.preventDefault();
-                  }}
                   onClick={(e) => {
                     const input = e.target as HTMLInputElement;
                     input.showPicker?.();
                   }}
                 />
               </div>
-              {disabledDates.length > 0 && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Note: You cannot place orders on dates immediately after existing orders. Disabled: {disabledDates.join(', ')}.
-                </p>
-              )}
-              {formData.orderDate && isDateDisabled(formData.orderDate) && (
-                <p className="text-xs text-red-500 mt-1">
-                  This date is not available. Please select a different date.
-                </p>
-              )}
             </div>
 
               {/* Client Name */}
@@ -245,7 +242,7 @@ if (!isOpen) return null;
               {/* Company Name */}
               <div>
                 <label className="block text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>
-                  Company Name <span className="text-red-500">*</span>
+                  Business Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -254,24 +251,93 @@ if (!isOpen) return null;
                   onChange={handleInputChange}
                   required
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="Enter company name"
+                  placeholder="Enter Business/R.O.C. Name"
                   disabled={loading}
                 />
               </div>
 
-              {/* Delivery Address */}
+              {/* Preferred Delivery Address Section */}
               <div>
                 <label className="block text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>
                   Preferred Delivery Address <span className="text-red-500">*</span>
                 </label>
+                
+                {/* Block/Home Number/Street Name */}
+                <div className="mb-3">
+                  <input
+                    type="text"
+                    name="streetName"
+                    value={formData.streetName}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="Block/Home Number/Street Name"
+                    disabled={loading}
+                  />
+                </div>
+
+                {/* Country and Postal Code in Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Country */}
+                  <div>
+                    <input
+                      type="text"
+                      name="country"
+                      value={formData.country}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Country"
+                      disabled={loading}
+                    />
+                  </div>
+
+                  {/* Postal Code */}
+                  <div>
+                    <input
+                      type="text"
+                      name="postalCode"
+                      value={formData.postalCode}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Postal Code"
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+
+                {/* Save as Preferred Address Checkbox */}
+                <div className="mt-3 flex items-center">
+                  <input
+                    type="checkbox"
+                    id="saveAsPreferred"
+                    checked={formData.saveAsPreferred}
+                    onChange={handleCheckboxChange}
+                    disabled={loading}
+                    className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500 cursor-pointer"
+                  />
+                  <label 
+                    htmlFor="saveAsPreferred" 
+                    className="ml-2 text-sm text-gray-700 cursor-pointer"
+                  >
+                    Save as preferred address for future orders
+                  </label>
+                </div>
+              </div>
+
+              {/* Additional Notes */}
+              <div>
+                <label className="block text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>
+                  Additional Notes <span className="text-gray-400 text-xs font-normal">(Optional)</span>
+                </label>
                 <textarea
-                  name="deliveryAddress"
-                  value={formData.deliveryAddress}
+                  name="additionalNotes"
+                  value={formData.additionalNotes}
                   onChange={handleInputChange}
-                  required
                   rows={3}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
-                  placeholder="Enter delivery address"
+                  placeholder="Enter any special instructions or notes for this order"
                   disabled={loading}
                 />
               </div>
@@ -303,7 +369,16 @@ if (!isOpen) return null;
             </button>
             <button
               type="submit"
-              disabled={loading || loadingUserData || (formData.orderDate && isDateDisabled(formData.orderDate))}
+              disabled={
+                loading || 
+                loadingUserData || 
+                !formData.deliveryDate.trim() ||
+                !formData.clientName.trim() ||
+                !formData.companyName.trim() ||
+                !formData.streetName.trim() ||
+                !formData.country.trim() ||
+                !formData.postalCode.trim() 
+              }
               className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: '#e84e1b' }}
             >

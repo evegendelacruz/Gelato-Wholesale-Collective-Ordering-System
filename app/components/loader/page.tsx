@@ -3,12 +3,12 @@
 import { useEffect } from 'react';
 
 interface LoadingSpinnerProps {
-  duration?: number; // in milliseconds
+  duration?: number; 
   onComplete?: () => void;
 }
 
 export default function LoadingSpinner({ 
-  duration = 3000,
+  duration = 500,
   onComplete 
 }: LoadingSpinnerProps) {
   

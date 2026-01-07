@@ -25,18 +25,9 @@ interface ProductViewProps {
   onBasketAdded: (productName: string) => void; 
 }
 
-const packagingOptions = [
-  { value: 'tub_500ml', label: '500ml Tub' },
-  { value: 'tub_1l', label: '1L Tub' },
-  { value: 'pint', label: 'Pint' },
-  { value: 'bulk_3l', label: '3L Bulk' },
-  { value: 'bulk_5l', label: '5L Bulk' },
-];
 
 export default function ProductView({ isOpen, onClose, product, onBasketAdded }: ProductViewProps) {
   const [quantity, setQuantity] = useState(1);
-  const [packaging, setPackaging] = useState(packagingOptions[0].value);
-  const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | ''; text: string }>({ type: '', text: '' });
 
@@ -62,13 +53,11 @@ export default function ProductView({ isOpen, onClose, product, onBasketAdded }:
 
     const subtotal = product.custom_price * quantity;
 
-    // Check if item with same product and packaging already exists in basket
     const { data: existingItem, error: checkError } = await supabase
       .from('client_basket')
       .select('*')
       .eq('client_auth_id', user.id)
       .eq('product_id', product.product_list.id)
-      .eq('packaging_type', packaging)
       .maybeSingle();
 
     if (checkError && checkError.code !== 'PGRST116') {
@@ -85,7 +74,6 @@ export default function ProductView({ isOpen, onClose, product, onBasketAdded }:
         .update({
           quantity: newQuantity,
           subtotal: newSubtotal,
-          notes: notes || existingItem.notes
         })
         .eq('id', existingItem.id);
 
@@ -100,9 +88,7 @@ export default function ProductView({ isOpen, onClose, product, onBasketAdded }:
           product_name: product.product_list.product_name,
           quantity: quantity,
           unit_price: product.custom_price,
-          packaging_type: packaging,
           subtotal: subtotal,
-          notes: notes || null
         });
 
       if (insertError) throw insertError;
@@ -113,8 +99,6 @@ export default function ProductView({ isOpen, onClose, product, onBasketAdded }:
     
     // Reset form
     setQuantity(1);
-    setPackaging(packagingOptions[0].value);
-    setNotes('');
     setMessage({ type: '', text: '' });
     
     // Close modal
@@ -200,22 +184,6 @@ export default function ProductView({ isOpen, onClose, product, onBasketAdded }:
                   </div>
                 )}
               </div>
-
-              {/* Ingredients Section */}
-              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <h4 className="text-sm font-bold text-gray-700 mb-2">Ingredients:</h4>
-                <p className="text-sm text-gray-600 leading-relaxed">
-                  {product.product_list.product_ingredient || 'No ingredient information available'}
-                </p>
-              </div>
-
-              {/* Allergen Section */}
-              <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
-                <h4 className="text-sm font-bold text-amber-900 mb-2">⚠️ Allergen Information:</h4>
-                <p className="text-sm text-amber-800 leading-relaxed">
-                  {product.product_list.product_allergen || 'No allergen information available'}
-                </p>
-              </div>
             </div>
 
             {/* Details Section */}
@@ -236,30 +204,6 @@ export default function ProductView({ isOpen, onClose, product, onBasketAdded }:
                       {product.product_list.product_gelato_type || product.product_list.product_type}
                     </span>
                   </div>
-                  <div className="flex items-center">
-                    <span className="text-sm font-semibold text-gray-600 w-32">Product ID:</span>
-                    <span className="text-sm text-gray-800">
-                      {product.product_list.product_id}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Packaging Selection */}
-                <div className="mb-4">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Packaging Type
-                  </label>
-                  <select
-                    value={packaging}
-                    onChange={(e) => setPackaging(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  >
-                    {packagingOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
                 </div>
 
                 {/* Quantity Selection */}
@@ -288,20 +232,6 @@ export default function ProductView({ isOpen, onClose, product, onBasketAdded }:
                       +
                     </button>
                   </div>
-                </div>
-
-                {/* Notes */}
-                <div className="mb-4">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Notes (Optional)
-                  </label>
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Any special instructions or notes..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
-                    rows={3}
-                  />
                 </div>
 
                 {/* Total Price */}

@@ -15,7 +15,6 @@ interface BasketItem {
   product_name: string;
   quantity: number;
   unit_price: number;
-  packaging_type: string;
   notes: string | null;
   subtotal: number;
   created_at: string;
@@ -27,10 +26,14 @@ interface BasketItem {
 }
 
 interface OrderFormData {
+  deliveryDate: string;
   clientName: string;
   companyName: string;
-  deliveryAddress: string;
-  orderDate: string;
+  streetName: string;
+  country: string;
+  postalCode: string;
+  additionalNotes: string;
+  saveAsPreferred: boolean;
 }
 
 interface Message {
@@ -51,13 +54,6 @@ function BasketItemCard({
     if (!imagePath) return '';
     if (imagePath.startsWith('http')) return imagePath;
     return `https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${imagePath}`;
-  };
-
-  const formatPackaging = (packaging: string): string => {
-    return packaging
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
   };
 
   return (
@@ -93,12 +89,6 @@ function BasketItemCard({
         <p className="text-xs text-gray-600 mb-1">
           {item.product_list.product_gelato_type || item.product_list.product_type}
         </p>
-        <p className="text-xs text-gray-500 mb-2">
-          {formatPackaging(item.packaging_type)}
-        </p>
-        {item.notes && (
-          <p className="text-xs text-gray-500 italic mb-2">Note: {item.notes}</p>
-        )}
         <p className="text-sm font-semibold" style={{ color: '#e84e1b' }}>
           S$ {item.unit_price.toFixed(2)} each
         </p>
@@ -282,17 +272,30 @@ export default function BasketPage() {
     // Generate a temporary unique order_id
     const tempOrderId = `TEMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    // Combine delivery address
+    const deliveryAddress = `${formData.streetName}, ${formData.country}, ${formData.postalCode}`;
+
+    // Get current timestamp for order_date
+    const orderDate = new Date().toISOString();
+
+    // Format delivery_date properly
+    const deliveryDate = new Date(formData.deliveryDate).toISOString();
+
     // Create the order with temporary order_id
     const { data: orderData, error: orderError } = await supabase
       .from('client_order')
       .insert({
         order_id: tempOrderId, // Temporary, will be updated by trigger
         client_auth_id: user.id,
-        order_date: new Date(formData.orderDate).toISOString(),
-        delivery_address: formData.deliveryAddress,
+        order_date: orderDate,
+        delivery_date: deliveryDate,
+        delivery_address: deliveryAddress,
+        ad_streetName: formData.streetName,
+        ad_country: formData.country,
+        ad_postal: formData.postalCode,
         total_amount: finalTotal,
         status: 'Pending',
-        notes: `Client: ${formData.clientName}, Company: ${formData.companyName}`
+        notes: formData.additionalNotes || null
       })
       .select()
       .single();
@@ -304,6 +307,26 @@ export default function BasketPage() {
 
     console.log('Order created successfully:', orderData);
 
+    // Save as preferred address if checkbox was checked
+      if (formData.saveAsPreferred) {
+        try {
+          const { error: updateError } = await supabase
+            .from('client_user')
+            .update({
+              client_preferred_address: deliveryAddress
+            })
+            .eq('client_auth_id', user.id);
+
+          if (updateError) {
+            console.error('Error updating preferred address:', updateError);
+            // Don't throw error here, just log it
+          }
+        } catch (prefError) {
+          console.error('Failed to save preferred address:', prefError);
+          // Continue with order processing even if preferred address fails
+        }
+      }
+
     // Create order items from basket
     const orderItems = basketItems.map(item => ({
       order_id: orderData.id,
@@ -311,9 +334,7 @@ export default function BasketPage() {
       product_name: item.product_name,
       quantity: item.quantity,
       unit_price: item.unit_price,
-      packaging_type: item.packaging_type,
       subtotal: item.subtotal,
-      product_notes: item.notes || null
     }));
 
     const { error: itemsError } = await supabase
@@ -493,21 +514,21 @@ export default function BasketPage() {
 
       {loading && !isOrderFormOpen && (
         <LoadingSpinner 
-          duration={3000}
+          duration={500}
           onComplete={() => {}}
         />
       )}
 
       {isRemovingItem && (
         <LoadingSpinner 
-          duration={3000}
+          duration={500}
           onComplete={() => {}}
         />
       )}
 
       {isPlacingOrder && (
         <LoadingSpinner 
-          duration={3000}
+          duration={500}
           onComplete={() => {}}
         />
       )}
