@@ -115,14 +115,15 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
     <>
       {/* Mobile View - Landscape Rectangle */}
       <div className="sm:hidden bg-white rounded-lg border border-gray-200 p-3 flex gap-3 hover:shadow-lg transition-shadow">
-        {/* Product Image */}
-        <div className="w-24 h-24 shrink-0 bg-white rounded-lg overflow-hidden border border-gray-100">
+        {/* Product Image - Hidden on very small screens */}
+        <div className="w-20 h-20 shrink-0 bg-white rounded-lg overflow-hidden border border-gray-100 hidden xs:block min-[360px]:block">
           {product.product_list.product_image ? (
             <Image 
               src={getImageUrl(product.product_list.product_image)} 
               alt={product.product_list.product_name}
-              width={96}
-              height={96}
+              width={80}
+              height={80}
+              loading="eager"
               className="w-full h-full object-cover"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -143,7 +144,7 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
         {/* Product Details */}
         <div className="flex-1 flex flex-col justify-between min-w-0">
           <div>
-            <h3 className="text-sm font-semibold mb-1 line-clamp-1" style={{ color: '#7d3c3c' }}>
+            <h3 className="text-sm font-semibold mb-1" style={{ color: '#7d3c3c' }}>
               {product.product_list.product_name}
             </h3>
             <p className="text-xs text-gray-600 mb-1 line-clamp-1">
@@ -154,14 +155,14 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
             </p>
           </div>
           
-          {/* Quantity Controls */}
-          <div className="flex items-center gap-2">
+          {/* Quantity Controls - Responsive sizing */}
+          <div className="flex items-center gap-1.5 min-[360px]:gap-2">
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 decrementQuantity();
               }}
-              className="w-7 h-7 rounded border border-gray-300 flex items-center justify-center hover:bg-gray-50 text-lg font-semibold"
+              className="w-6 h-6 min-[360px]:w-7 min-[360px]:h-7 rounded border border-gray-300 flex items-center justify-center hover:bg-gray-50 text-base min-[360px]:text-lg font-semibold"
             >
               −
             </button>
@@ -170,7 +171,7 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
               value={quantity}
               onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
               onClick={(e) => e.stopPropagation()}
-              className="w-12 text-center px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-500"
+              className="w-10 min-[360px]:w-12 text-center px-1 min-[360px]:px-2 py-1 border border-gray-300 rounded text-xs min-[360px]:text-sm focus:outline-none focus:ring-1 focus:ring-orange-500"
               min="1"
             />
             <button
@@ -178,25 +179,25 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
                 e.stopPropagation();
                 incrementQuantity();
               }}
-              className="w-7 h-7 rounded border border-gray-300 flex items-center justify-center hover:bg-gray-50 text-lg font-semibold"
+              className="w-6 h-6 min-[360px]:w-7 min-[360px]:h-7 rounded border border-gray-300 flex items-center justify-center hover:bg-gray-50 text-base min-[360px]:text-lg font-semibold"
             >
               +
             </button>
           </div>
         </div>
 
-        {/* Add to Order Button */}
-        <div className="flex items-center">
-          <button 
-            className="px-3 py-2 rounded text-white text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 whitespace-nowrap"
-            style={{ backgroundColor: '#e84e1b' }}
-            onClick={handleAddToBasket}
-            disabled={isAdding}
-          >
-            {isAdding ? 'Adding...' : 'Add to order'}
-          </button>
+         {/* Add to Order Button - Responsive sizing */}
+          <div className="flex items-center">
+            <button 
+              className="px-2 min-[360px]:px-3 py-2 rounded text-white text-[10px] min-[360px]:text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 whitespace-nowrap"
+              style={{ backgroundColor: '#e84e1b' }}
+              onClick={handleAddToBasket}
+              disabled={isAdding}
+            >
+              {isAdding ? 'Adding...' : 'Add to order'}
+            </button>
+          </div>
         </div>
-      </div>
 
       {/* Desktop View - Square Card */}
       <div className="hidden sm:flex sm:flex-col bg-white rounded-lg border border-gray-200 p-4 hover:shadow-lg transition-shadow">

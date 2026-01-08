@@ -57,8 +57,9 @@ function BasketItemCard({
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4 flex gap-4" >
-      <div className="w-20 h-20 bg-gray-100 rounded-lg overflow-hidden shrink-0">
+    <div className="bg-white rounded-lg border border-gray-200 p-3 min-[360px]:p-4 flex gap-2 min-[360px]:gap-4">
+      {/* Product Image - Hidden on very small screens */}
+      <div className="w-16 h-16 min-[360px]:w-20 min-[360px]:h-20 bg-gray-100 rounded-lg overflow-hidden shrink-0 hidden min-[320px]:block">
         {item.product_list.product_image ? (
           <Image 
             src={getImageUrl(item.product_list.product_image)} 
@@ -82,37 +83,37 @@ function BasketItemCard({
         )}
       </div>
       
-      <div className="flex-1">
-        <h3 className="text-sm font-semibold mb-1" style={{ color: '#7d3c3c' }}>
+      <div className="flex-1 min-w-0">
+        <h3 className="text-xs min-[360px]:text-sm font-semibold mb-1" style={{ color: '#7d3c3c' }}>
           {item.product_name}
         </h3>
-        <p className="text-xs text-gray-600 mb-1">
+        <p className="text-[10px] min-[360px]:text-xs text-gray-600 mb-1 line-clamp-1">
           {item.product_list.product_gelato_type || item.product_list.product_type}
         </p>
-        <p className="text-sm font-semibold" style={{ color: '#e84e1b' }}>
+        <p className="text-xs min-[360px]:text-sm font-semibold" style={{ color: '#e84e1b' }}>
           S$ {item.unit_price.toFixed(2)} each
         </p>
       </div>
       
-      <div className="flex flex-col justify-between items-end">
+      <div className="flex flex-col justify-between items-end gap-2">
         <button
           onClick={() => onRemove(item.id)}
-          className="text-gray-400 hover:text-red-500 text-sm"
+          className="text-gray-400 hover:text-red-500 text-sm min-[360px]:text-base"
         >
           ✕
         </button>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 min-[360px]:gap-2">
           <button
             onClick={() => onUpdateQuantity(item.id, Math.max(1, item.quantity - 1))}
-            className="w-7 h-7 rounded border border-gray-300 hover:bg-gray-100 flex items-center justify-center"
+            className="w-6 h-6 min-[360px]:w-7 min-[360px]:h-7 rounded border border-gray-300 hover:bg-gray-100 flex items-center justify-center text-base min-[360px]:text-lg"
           >
             −
           </button>
-          <span className="w-8 text-center font-medium">{item.quantity}</span>
+          <span className="w-6 min-[360px]:w-8 text-center font-medium text-xs min-[360px]:text-sm">{item.quantity}</span>
           <button
             onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
-            className="w-7 h-7 rounded border border-gray-300 hover:bg-gray-100 flex items-center justify-center"
+            className="w-6 h-6 min-[360px]:w-7 min-[360px]:h-7 rounded border border-gray-300 hover:bg-gray-100 flex items-center justify-center text-base min-[360px]:text-lg"
           >
             +
           </button>

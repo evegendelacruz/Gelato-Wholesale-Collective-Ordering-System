@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ClientHeader from '@/app/components/clientHeader/page';
-import ClientInvoice from '@/app/components/clientInvoice';
 import supabase from '@/lib/client';
 
 interface OrderItem {
@@ -32,23 +31,11 @@ interface Order {
   items: OrderItem[];
 }
 
-interface ClientData {
-  client_businessName: string;
-  client_delivery_address: string;
-  client_person_incharge: string;
-}
-
 export default function OrderPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
-  const [clientData, setClientData] = useState<ClientData | null>(null);
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
-  
 
-  // Add this useEffect to set up real-time subscription
   useEffect(() => {
     const fetchOrders = async () => {
       try {
@@ -110,7 +97,6 @@ export default function OrderPage() {
 
     fetchOrders();
 
-    // Set up real-time subscription for order status changes
     const setupRealtimeSubscription = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -127,7 +113,6 @@ export default function OrderPage() {
           },
           (payload) => {
             console.log('Order status updated:', payload);
-            // Update the specific order in state
             setOrders(prevOrders =>
               prevOrders.map(order =>
                 order.id === payload.new.id
@@ -179,257 +164,10 @@ export default function OrderPage() {
         .eq('client_auth_id', user.id)
         .single();
 
-      setClientData(clientData);
-      setSelectedOrder(order);
-      setShowInvoiceModal(true);
-    } catch (error) {
-      console.error('Error loading invoice:', error);
-    }
-  };
+      if (!clientData) return;
 
- const handlePrintInvoice = async () => {
-  if (!selectedOrder || !clientData) return;
-  
-  try {
-    const jsPDF = (await import('jspdf')).default;
-    
-    const doc = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
-
-    const subtotal = getSubtotal(selectedOrder);
-    const gst = getGST(selectedOrder);
-
-    // Set font
-    doc.setFont('helvetica');
-
-    // Add logo - Convert image to base64 and embed
-    try {
-      const logo = document.createElement('img') as HTMLImageElement;
-      logo.crossOrigin = 'anonymous';
-      logo.src = '/assets/Picture1.jpg';
-      await new Promise((resolve, reject) => {
-        logo.onload = resolve;
-        logo.onerror = reject;
-      });
-      
-      const canvas = document.createElement('canvas');
-      const scale = 3;
-      canvas.width = logo.width * scale;
-      canvas.height = logo.height * scale;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(logo, 0, 0, canvas.width, canvas.height);
-      }
-      const logoData = canvas.toDataURL('image/jpeg', 0.95);
-      
-      const logoWidth = 28.6;
-      const logoHeight = 7.4;
-      const logoX = 161.4;
-      const logoY = 15;
-      doc.addImage(logoData, 'JPEG', logoX, logoY, logoWidth, logoHeight);
-    } catch {
-      console.log('Logo loading failed, continuing without logo');
-    }
-
-    // Header - Company Info
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Momolato Pte Ltd', 20, 20);
-    doc.setFont('helvetica', 'normal');
-    doc.text('21 Tampines Street 92, #04-06', 20, 25);
-    doc.text('Singapore', 20, 30);
-    doc.text('finance@momolato.com', 20, 35);
-    doc.text('GST Registration No. : 201319550R', 20, 40);
-    doc.text('Company Registration No. UEN:', 20, 45);
-    doc.text('201319550R', 20, 50);
-
-    // Title
-    doc.setFontSize(16);
-    doc.setTextColor("#0D909A");
-    doc.text('Tax Invoice', 20, 57);
-    doc.setTextColor(0, 0, 0);
-
-    // Bill To, Ship To, Invoice Details
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('BILL TO', 20, 67);
-    doc.setFont('helvetica', 'normal');
-    doc.text(clientData.client_businessName || 'N/A', 20, 72);
-    const billAddress = doc.splitTextToSize(clientData.client_delivery_address || 'N/A', 45);
-    doc.text(billAddress, 20, 77);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('SHIP TO', 75, 67);
-    doc.setFont('helvetica', 'normal');
-    doc.text(clientData.client_businessName || 'N/A', 75, 72);
-    const shipAddress = doc.splitTextToSize(selectedOrder.delivery_address || clientData.client_delivery_address || 'N/A', 45);
-    doc.text(shipAddress, 75, 77);
-
-    // Invoice Details (right aligned)
-    const labelX = 155;
-    const valueX = 157;
-    doc.setFont('helvetica', 'bold');
-    doc.text('INVOICE NO.', labelX, 67, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(selectedOrder.invoice_id, valueX, 67);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('DATE', labelX, 72, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), valueX, 72);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('DUE DATE', labelX, 77, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), valueX, 77);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('TERMS', labelX, 82, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text('Due on receipt', valueX, 82);
-
-    // Horizontal line
-    doc.setDrawColor(77, 184, 186);
-    doc.line(20, 87, 190, 87);
-
-    // Shipping info
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('SHIP DATE', 20, 93);
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), 20, 98);
-    doc.setFont('helvetica', 'bold');
-    doc.text('TRACKING NO.', 100, 93);
-    doc.setFont('helvetica', 'normal');
-    doc.text(selectedOrder.tracking_no, 100, 98);
-
-    // Table Header
-    const tableStartY = 104;
-    doc.setFillColor(184, 230, 231);
-    doc.rect(20, tableStartY, 170, 8, 'F');
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor("#0D909A");
-    doc.setFontSize(9);
-    doc.text('PRODUCT /', 22, tableStartY + 3);
-    doc.text('SERVICES', 22, tableStartY + 6);
-    doc.text('DESCRIPTION', 60, tableStartY + 5);
-    doc.text('QTY', 150, tableStartY + 5, { align: 'center' });
-    doc.text('UNIT', 168, tableStartY + 3, { align: 'right' });
-    doc.text('PRICE', 168, tableStartY + 6, { align: 'right' });
-    doc.text('AMOUNT', 185, tableStartY + 5, { align: 'right' });
-
-    // Table Rows
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    let yPos = tableStartY + 13;
-
-    selectedOrder.items.forEach((item) => {
-      const productText = `${item.product_name}`;
-      
-      doc.setFont('helvetica', 'bold');
-      const productLines = doc.splitTextToSize(productText, 30);
-      doc.text(productLines, 22, yPos);
-      
-      doc.setFont('helvetica', 'normal');
-      const descLines = doc.splitTextToSize(productText, 50);
-      doc.text(descLines, 60, yPos);
-      
-      const maxLines = Math.max(productLines.length, descLines.length);
-      const centerY = yPos + ((maxLines - 1) * 4) / 2;
-      
-      doc.text(item.quantity.toString(), 150, centerY, { align: 'center' });
-      doc.text(item.unit_price.toFixed(2), 168, centerY, { align: 'right' });
-      doc.text(item.subtotal.toFixed(2), 185, centerY, { align: 'right' });
-      
-      yPos += (maxLines * 4) + 1;
-    });
-
-    doc.setDrawColor('#e0e0e0');
-    doc.setLineWidth(0.2);
-    for (let i = 20; i < 190; i += 1.5) {
-      doc.line(i, yPos + 2, i + 0.75, yPos + 2);
-    }
-
-    // Terms & Conditions
-    yPos += 7;
-    doc.setFont('helvetica', 'normal');
-    doc.text('Terms & Conditions', 20, yPos);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    const terms1 = doc.splitTextToSize(
-      'We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.',
-      70
-    );
-    doc.text(terms1, 20, yPos + 5);
-
-    const terms2 = doc.splitTextToSize(
-      'We are not liable for any damage to products once stored at your premises. Please keep frozen products (gelato and / or popsicles) frozen at -18 degree Celsius and below.',
-      70
-    );
-    doc.text(terms2, 20, yPos + 25);
-
-    // Signature line
-    doc.setDrawColor(0, 0, 0);
-    doc.line(20, yPos + 50, 85, yPos + 50);
-    doc.setFontSize(10);
-    doc.text("Client's Signature & Company Stamp", 20, yPos + 55);
-
-    const totalsLabelX = 100;
-    const totalsValueX = 185;
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('SUBTOTAL', totalsLabelX, yPos + 5);
-    doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: 'right' });
-
-    doc.setFont('helvetica', 'normal');
-    doc.text('GST TOTAL', totalsLabelX, yPos + 10);
-    doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: 'right' });
-
-    doc.setFont('helvetica', 'normal');
-    doc.text('TOTAL', totalsLabelX, yPos + 15);
-    doc.text(selectedOrder.total_amount.toFixed(2), totalsValueX, yPos + 15, { align: 'right' });
-
-    doc.setFont('helvetica', 'normal');
-    doc.text('BALANCE DUE', totalsLabelX, yPos + 23);
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`S$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
-
-    // Footer
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    const footerY = 275;
-    doc.text('The team at Momolato deeply appreciates your kind support.', 105, footerY, { align: 'center' });
-    doc.text('Payment instructions:', 105, footerY + 4, { align: 'center' });
-    doc.text('PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)', 105, footerY + 8, { align: 'center' });
-    doc.text('OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd', 105, footerY + 12, { align: 'center' });
-
-    // Enable auto-print
-    doc.autoPrint();
-    
-    // Generate blob and open in new window - FIXED LINE
-    const pdfBlob = doc.output('blob');
-    const blobUrl = URL.createObjectURL(pdfBlob);
-    window.open(blobUrl, '_blank');
-
-  } catch (error) {
-    console.error('Error generating PDF for print:', error);
-    alert('Failed to open print preview. Please try Download PDF instead.');
-  }
-};
-
-  const handleDownloadPDF = async () => {
-    if (!selectedOrder || !clientData) return;
-    
-    setIsGeneratingPDF(true);
-    
-    try {
-       const jsPDF = (await import('jspdf')).default;
+      // Generate PDF and open in new tab
+      const jsPDF = (await import('jspdf')).default;
       
       const doc = new jsPDF({
         orientation: 'portrait',
@@ -437,13 +175,12 @@ export default function OrderPage() {
         format: 'a4'
       });
 
-      const subtotal = getSubtotal(selectedOrder);
-      const gst = getGST(selectedOrder);
+      const subtotal = getSubtotal(order);
+      const gst = getGST(order);
 
-      // Set font
       doc.setFont('helvetica');
 
-      // Add logo - Convert image to base64 and embed
+      // Add logo
       try {
         const logo = document.createElement('img') as HTMLImageElement;
         logo.crossOrigin = 'anonymous';
@@ -453,10 +190,8 @@ export default function OrderPage() {
           logo.onerror = reject;
         });
         
-        // Add logo at top right (convert to base64)
-        // Use higher resolution canvas to prevent pixelation
         const canvas = document.createElement('canvas');
-        const scale = 3; // 3x resolution for better quality
+        const scale = 3;
         canvas.width = logo.width * scale;
         canvas.height = logo.height * scale;
         const ctx = canvas.getContext('2d');
@@ -467,16 +202,15 @@ export default function OrderPage() {
         }
         const logoData = canvas.toDataURL('image/jpeg', 0.95);
         
-        // Position logo at top right with correct dimensions
-        // Dimensions: width 28.6mm, height 7.4mm (landscape orientation)
         const logoWidth = 28.6;
         const logoHeight = 7.4;
-        const logoX = 161.4; // 190mm - 28.6mm to align right
+        const logoX = 161.4;
         const logoY = 15;
         doc.addImage(logoData, 'JPEG', logoX, logoY, logoWidth, logoHeight);
       } catch {
         console.log('Logo loading failed, continuing without logo');
       }
+
       // Header - Company Info
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
@@ -498,56 +232,56 @@ export default function OrderPage() {
       // Bill To, Ship To, Invoice Details
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
-      doc.text('BILL TO', 20, 67); // Changed from 72 to 67
+      doc.text('BILL TO', 20, 67);
       doc.setFont('helvetica', 'normal');
-      doc.text(clientData.client_businessName || 'N/A', 20, 72); // Changed from 77 to 72
+      doc.text(clientData.client_businessName || 'N/A', 20, 72);
       const billAddress = doc.splitTextToSize(clientData.client_delivery_address || 'N/A', 45);
-      doc.text(billAddress, 20, 77); // Changed from 82 to 77
+      doc.text(billAddress, 20, 77);
 
       doc.setFont('helvetica', 'bold');
-      doc.text('SHIP TO', 75, 67); // Changed from 72 to 67
+      doc.text('SHIP TO', 75, 67);
       doc.setFont('helvetica', 'normal');
-      doc.text(clientData.client_businessName || 'N/A', 75, 72); // Changed from 77 to 72
-      const shipAddress = doc.splitTextToSize(selectedOrder.delivery_address || clientData.client_delivery_address || 'N/A', 45);
-      doc.text(shipAddress, 75, 77); // Changed from 82 to 77
+      doc.text(clientData.client_businessName || 'N/A', 75, 72);
+      const shipAddress = doc.splitTextToSize(order.delivery_address || clientData.client_delivery_address || 'N/A', 45);
+      doc.text(shipAddress, 75, 77);
 
-      // Invoice Details (right aligned)
-    const labelX = 155; // Changed from 143 to 150
-    const valueX = 157; // Changed from 145 to 152
-    doc.setFont('helvetica', 'bold');
-    doc.text('INVOICE NO.', labelX, 67, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(selectedOrder.invoice_id, valueX, 67);
+      // Invoice Details
+      const labelX = 155;
+      const valueX = 157;
+      doc.setFont('helvetica', 'bold');
+      doc.text('INVOICE NO.', labelX, 67, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.text(order.invoice_id, valueX, 67);
 
-    doc.setFont('helvetica', 'bold');
-    doc.text('DATE', labelX, 72, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), valueX, 72);
+      doc.setFont('helvetica', 'bold');
+      doc.text('DATE', labelX, 72, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.text(formatDate(order.order_date), valueX, 72);
 
-    doc.setFont('helvetica', 'bold');
-    doc.text('DUE DATE', labelX, 77, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), valueX, 77);
+      doc.setFont('helvetica', 'bold');
+      doc.text('DUE DATE', labelX, 77, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.text(formatDate(order.order_date), valueX, 77);
 
-    doc.setFont('helvetica', 'bold');
-    doc.text('TERMS', labelX, 82, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text('Due on receipt', valueX, 82);
+      doc.setFont('helvetica', 'bold');
+      doc.text('TERMS', labelX, 82, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.text('Due on receipt', valueX, 82);
 
-     // Horizontal line
+      // Horizontal line
       doc.setDrawColor(77, 184, 186);
-      doc.line(20, 87, 190, 87); // Changed from 89 to 87
+      doc.line(20, 87, 190, 87);
 
       // Shipping info
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
-      doc.text('SHIP DATE', 20, 93); // Changed from 95 to 92
+      doc.text('SHIP DATE', 20, 93);
       doc.setFont('helvetica', 'normal');
-      doc.text(formatDate(selectedOrder.order_date), 20, 98); // Changed from 100 to 97
+      doc.text(formatDate(order.order_date), 20, 98);
       doc.setFont('helvetica', 'bold');
-      doc.text('TRACKING NO.', 100, 93); // Changed from 95 to 92
+      doc.text('TRACKING NO.', 100, 93);
       doc.setFont('helvetica', 'normal');
-      doc.text(selectedOrder.tracking_no, 100, 98); // Changed from 100 to 97
+      doc.text(order.tracking_no, 100, 98);
 
       // Table Header
       const tableStartY = 104;
@@ -569,42 +303,37 @@ export default function OrderPage() {
       doc.setTextColor(0, 0, 0);
       let yPos = tableStartY + 13;
 
-      selectedOrder.items.forEach((item) => {
-        const productText = `${item.product_name} `;
+      order.items.forEach((item) => {
+        const productText = `${item.product_name}`;
         
-        // Product/Services column (wrapped text)
         doc.setFont('helvetica', 'bold');
         const productLines = doc.splitTextToSize(productText, 30);
         doc.text(productLines, 22, yPos);
         
-        // Description column (wrapped text)
         doc.setFont('helvetica', 'normal');
         const descLines = doc.splitTextToSize(productText, 50);
         doc.text(descLines, 60, yPos);
         
-        // Calculate max lines for proper spacing
         const maxLines = Math.max(productLines.length, descLines.length);
         const centerY = yPos + ((maxLines - 1) * 4) / 2;
         
-        // QTY, Unit Price, Amount (centered vertically)
         doc.text(item.quantity.toString(), 150, centerY, { align: 'center' });
         doc.text(item.unit_price.toFixed(2), 168, centerY, { align: 'right' });
         doc.text(item.subtotal.toFixed(2), 185, centerY, { align: 'right' });
         
-        yPos += (maxLines * 4) + 1; // Add spacing between rows
+        yPos += (maxLines * 4) + 1;
       });
 
       doc.setDrawColor('#e0e0e0');
       doc.setLineWidth(0.2);
       for (let i = 20; i < 190; i += 1.5) {
-        doc.line(i, yPos + 2, i + 0.75, yPos + 2); // Changed from yPos + 5 to yPos + 2
+        doc.line(i, yPos + 2, i + 0.75, yPos + 2);
       }
 
       // Terms & Conditions
-      yPos += 7; // Changed from 10 to 7
+      yPos += 7;
       doc.setFont('helvetica', 'normal');
       doc.text('Terms & Conditions', 20, yPos);
-      doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
       const terms1 = doc.splitTextToSize(
         'We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.',
@@ -629,24 +358,19 @@ export default function OrderPage() {
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       doc.text('SUBTOTAL', totalsLabelX, yPos + 5);
-      doc.setFont('helvetica', 'normal');
       doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: 'right' });
 
-      doc.setFont('helvetica', 'normal');
       doc.text('GST TOTAL', totalsLabelX, yPos + 10);
-      doc.setFont('helvetica', 'normal');
       doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: 'right' });
 
-      doc.setFont('helvetica', 'normal');
       doc.text('TOTAL', totalsLabelX, yPos + 15);
-      doc.setFont('helvetica', 'normal');
-      doc.text(selectedOrder.total_amount.toFixed(2), totalsValueX, yPos + 15, { align: 'right' });
+      doc.text(order.total_amount.toFixed(2), totalsValueX, yPos + 15, { align: 'right' });
 
-      doc.setFont('helvetica', 'normal');
       doc.text('BALANCE DUE', totalsLabelX, yPos + 23);
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
-      doc.text(`S$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+      doc.text(`S$${order.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+
       // Footer
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
@@ -656,32 +380,14 @@ export default function OrderPage() {
       doc.text('PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)', 105, footerY + 8, { align: 'center' });
       doc.text('OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd', 105, footerY + 12, { align: 'center' });
 
-      // Save PDF securely using blob
-      const fileName = `Invoice_${selectedOrder.invoice_id}_${formatDate(selectedOrder.order_date).replace(/\//g, '-')}.pdf`;
-      
-      // Generate blob and create download link
+      // Open PDF in new tab
       const pdfBlob = doc.output('blob');
       const blobUrl = URL.createObjectURL(pdfBlob);
-      
-      // Create temporary link and trigger download
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = fileName;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      
-      // Cleanup
-      setTimeout(() => {
-        document.body.removeChild(link);
-        URL.revokeObjectURL(blobUrl);
-      }, 100);
+      window.open(blobUrl, '_blank');
 
     } catch (error) {
-      console.error('Error generating PDF:', error);
-      alert('Failed to generate PDF. Please try again or use Print Invoice instead.');
-    } finally {
-      setIsGeneratingPDF(false);
+      console.error('Error loading invoice:', error);
+      alert('Failed to open invoice. Please try again.');
     }
   };
 
@@ -741,22 +447,22 @@ export default function OrderPage() {
                 </div>
 
                 <div className="border-t border-gray-200 pt-4 mb-4">
-                <h4 className="text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>Order Items</h4>
-                <div className="space-y-2">
-                  {order.items && order.items.length > 0 ? (
-                    order.items.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between text-sm">
-                        <span className="text-gray-600 flex-1">
-                          {item.product_name} x{item.quantity}
-                        </span>
-                        <span className="font-medium ml-2">S$ {item.subtotal.toFixed(2)}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-gray-500">No items found</p>
-                  )}
+                  <h4 className="text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>Order Items</h4>
+                  <div className="space-y-2">
+                    {order.items && order.items.length > 0 ? (
+                      order.items.map((item) => (
+                        <div key={item.id} className="flex items-center justify-between text-sm">
+                          <span className="text-gray-600 flex-1">
+                            {item.product_name} x{item.quantity}
+                          </span>
+                          <span className="font-medium ml-2">S$ {item.subtotal.toFixed(2)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500">No items found</p>
+                    )}
+                  </div>
                 </div>
-              </div>
 
                 <div className="border-t border-gray-200 pt-4 mb-4">
                   <div className="flex justify-between text-sm mb-1">
@@ -794,66 +500,6 @@ export default function OrderPage() {
             ))}
           </div>
         )}
-        
-       {showInvoiceModal && selectedOrder && clientData && (
-        <div 
-          className="fixed inset-0 flex items-center justify-center z-50 p-4"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
-          onClick={() => setShowInvoiceModal(false)}
-        >
-          <div 
-            className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] relative flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shrink-0 rounded-t-lg">
-              <h3 className="text-xl font-bold" style={{ color: '#7d3c3c' }}>
-                Invoice Preview
-              </h3>
-              <button
-                onClick={() => setShowInvoiceModal(false)}
-                className="text-gray-500 hover:text-gray-700 text-2xl"
-              >
-                ×
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-auto">
-              <ClientInvoice 
-                order={selectedOrder}
-                clientData={clientData}
-                formatDate={formatDate}
-                getSubtotal={getSubtotal}
-                getGST={getGST}
-              />
-            </div>
-
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg">
-              <button
-                onClick={handlePrintInvoice}
-                className="flex-1 px-4 py-3 rounded text-white font-medium hover:opacity-90 transition-opacity"
-                style={{ backgroundColor: '#e84e1b' }}
-              >
-                Print Invoice
-              </button>
-              <button
-                onClick={handleDownloadPDF}
-                disabled={isGeneratingPDF}
-                className="flex-1 px-4 py-3 rounded text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: '#4db8ba' }}
-              >
-                {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
-              </button>
-              <button
-                onClick={() => setShowInvoiceModal(false)}
-                className="flex-1 px-4 py-3 rounded border-2 font-medium hover:bg-gray-50 transition-colors"
-                style={{ borderColor: '#7d3c3c', color: '#7d3c3c' }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       </main>
       
       <footer 
@@ -864,10 +510,6 @@ export default function OrderPage() {
           Gelato Wholesale Collective | © 2025 All Rights Reserved
         </div>
       </footer>
-
-      <style jsx global>{`
-      
-    `}</style>
     </div>
   );
 }

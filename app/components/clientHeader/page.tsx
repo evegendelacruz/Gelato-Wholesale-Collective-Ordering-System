@@ -292,9 +292,11 @@ export default function ClientHeader() {
               fontFamily: "'Roboto Condensed', sans-serif"
             }}
           >
-            Gelato Wholesale Collective
+            <span className="hidden md:inline">Gelato Wholesale Collective</span>
+            <span className="md:hidden">GWC</span>
           </h1>
         </Link>
+
                 
         <div className="flex items-center gap-6">
           <Link
@@ -363,9 +365,9 @@ export default function ClientHeader() {
                   </span>
                 )}
               </div>
-              <span style={{ color: '#e84e1b' }}>|</span>
-              {/* User Name */}
-              <span className="text-sm font-medium" style={{ color: '#e84e1b' }}>
+              <span className="hidden md:inline" style={{ color: '#e84e1b' }}>|</span>
+              {/* User Name - hidden on small screens */}
+              <span className="text-sm font-medium hidden md:inline" style={{ color: '#e84e1b' }}>
                 {loading ? 'Loading...' : user?.name || 'Unknown User'}
               </span>
               
