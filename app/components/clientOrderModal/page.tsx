@@ -92,7 +92,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     } catch (error) {
       console.error('Error fetching clients:', error);
       setMessage({ type: 'error', text: 'Failed to load clients' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
     }
   };
 
@@ -122,7 +122,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     } catch (error) {
       console.error('Error fetching client products:', error);
       setMessage({ type: 'error', text: 'Failed to load client products' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
     } finally {
       setLoading(false);
     }
@@ -162,7 +162,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   const handleStep1Next = () => {
     if (!selectedClient) {
       setMessage({ type: 'error', text: 'Please select a client' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       return;
     }
     setStep(2);
@@ -171,7 +171,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   const handleStep2Next = () => {
     if (!orderDate || !deliveryDate || !deliveryAddress) {
       setMessage({ type: 'error', text: 'Please fill in all required fields' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       return;
     }
     setStep(3);
@@ -223,13 +223,13 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   const handleSubmitOrder = async () => {
     if (orderItems.length === 0) {
         setMessage({ type: 'error', text: 'Please add at least one product' });
-        setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+        setTimeout(() => setMessage({ type: '', text: '' }), 1000);
         return;
     }
 
     if (!selectedClient) {
         setMessage({ type: 'error', text: 'Client not selected' });
-        setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+        setTimeout(() => setMessage({ type: '', text: '' }), 1000);
         return;
     }
 

@@ -175,6 +175,24 @@ export default function BasketPage() {
     }
   };
 
+  const isWithinOrderingHours = (): boolean => {
+  const now = new Date();
+  const currentHour = now.getHours();
+  // Orders allowed from 12 AM (0) to 6 PM (18), but not at 6 PM
+  return currentHour >= 0 && currentHour < 18;
+};
+
+  const getNextAvailableOrderTime = (): string => {
+    const now = new Date();
+    const currentHour = now.getHours();
+    
+    if (currentHour >= 18) {
+      // After 6 PM, next available is 12 AM tomorrow
+      return "12:00 AM tomorrow";
+    }
+    return "12:00 AM";
+  };
+
   const updateQuantity = async (id: number, quantity: number) => {
     try {
       const item = basketItems.find(i => i.id === id);
@@ -214,7 +232,7 @@ export default function BasketPage() {
     setIsRemovingItem(true);
     
     // Show loader for 3 seconds
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
     const { error } = await supabase
       .from('client_basket')
@@ -229,7 +247,7 @@ export default function BasketPage() {
       text: 'Item removed from basket.' 
     });
     
-    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    setTimeout(() => setMessage({ type: '', text: '' }), 1000);
 
   } catch (error) {
     console.error('Error removing item:', error);
@@ -244,13 +262,24 @@ export default function BasketPage() {
 
   const handlePlaceOrderClick = () => {
   if (basketItems.length === 0) return;
+  
+  // Check if within ordering hours
+  if (!isWithinOrderingHours()) {
+    setMessage({
+      type: 'error',
+      text: `Placing orders is not available. Our cut-off time is 6:00 PM. Orders will resume at ${getNextAvailableOrderTime()}.`
+    });
+    setTimeout(() => setMessage({ type: '', text: '' }), 5000);
+    return;
+  }
+  
   setIsPlacingOrder(true);
   
-  // Show loader for 3 seconds
+  // Show loader for 1 second
   setTimeout(() => {
     setIsPlacingOrder(false);
     setIsOrderFormOpen(true);
-  }, 3000);
+  }, 1000);
 };
 
  const handleOrderFormSubmit = async (formData: OrderFormData) => {
@@ -258,7 +287,7 @@ export default function BasketPage() {
     setProcessingOrder(true);
     
     // Wait for 3 seconds to show the loader
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
@@ -307,26 +336,6 @@ export default function BasketPage() {
     }
 
     console.log('Order created successfully:', orderData);
-
-    // Save as preferred address if checkbox was checked
-      if (formData.saveAsPreferred) {
-        try {
-          const { error: updateError } = await supabase
-            .from('client_user')
-            .update({
-              client_preferred_address: deliveryAddress
-            })
-            .eq('client_auth_id', user.id);
-
-          if (updateError) {
-            console.error('Error updating preferred address:', updateError);
-            // Don't throw error here, just log it
-          }
-        } catch (prefError) {
-          console.error('Failed to save preferred address:', prefError);
-          // Continue with order processing even if preferred address fails
-        }
-      }
 
     // Create order items from basket
     const orderItems = basketItems.map(item => ({
@@ -485,11 +494,14 @@ export default function BasketPage() {
                 
                 <button 
                   onClick={handlePlaceOrderClick}
-                  disabled={loading}
+                  disabled={loading || !isWithinOrderingHours()}
                   className="w-full py-3 rounded text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ backgroundColor: '#e84e1b' }}
                 >
-                  Place Order
+                  {!isWithinOrderingHours() 
+                    ? 'Orders Closed (Available at 12 AM)' 
+                    : 'Place Order'
+                  }
                 </button>
                 
                 <button 

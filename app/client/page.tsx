@@ -399,7 +399,7 @@ export default function ClientPage() {
       setIsProcessing(false);
       setAddedProductName(productName);
       setShowConfirmation(true);
-    }, 3000);
+    }, 1000);
   };
 
   return (

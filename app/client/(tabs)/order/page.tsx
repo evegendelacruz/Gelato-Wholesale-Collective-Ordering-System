@@ -235,7 +235,7 @@ export default function OrderPage() {
       doc.text('BILL TO', 20, 67);
       doc.setFont('helvetica', 'normal');
       doc.text(clientData.client_businessName || 'N/A', 20, 72);
-      const billAddress = doc.splitTextToSize(clientData.client_delivery_address || 'N/A', 45);
+      const billAddress = doc.splitTextToSize(order.delivery_address || clientData.client_delivery_address || 'N/A', 45);
       doc.text(billAddress, 20, 77);
 
       doc.setFont('helvetica', 'bold');

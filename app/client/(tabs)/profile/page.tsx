@@ -162,25 +162,25 @@ export default function ClientProfilePage() {
 
     if (formData.personContact && formData.personContact.length !== 8) {
       setMessage({ type: 'error', text: 'Contact number must be exactly 8 digits' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       return;
     }
 
     if (formData.businessContact && formData.businessContact.length !== 8) {
       setMessage({ type: 'error', text: 'Business contact must be exactly 8 digits' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       return;
     }
 
     if (formData.password && formData.password !== formData.confirmPassword) {
       setMessage({ type: 'error', text: 'Passwords do not match' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       return;
     }
 
     if (formData.password && formData.password.length < 6) {
       setMessage({ type: 'error', text: 'Password must be at least 6 characters' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       return;
     }
 
@@ -242,7 +242,7 @@ export default function ClientProfilePage() {
       setFormData(prev => ({ ...prev, password: '', confirmPassword: '' }));
       setIsEditMode(false);
       
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
     } catch (error) {
       console.error('Error updating profile:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to update profile. Please try again.';
@@ -250,7 +250,7 @@ export default function ClientProfilePage() {
         type: 'error', 
         text: errorMessage
       });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
     } finally {
       setSaving(false);
     }
@@ -277,7 +277,7 @@ export default function ClientProfilePage() {
   const handlePreviewACRA = () => {
     if (!user?.client_ACRA) {
       setMessage({ type: 'error', text: 'No ACRA file available' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       return;
     }
 
@@ -303,14 +303,14 @@ export default function ClientProfilePage() {
       
       if (file.size > 5 * 1024 * 1024) {
         setMessage({ type: 'error', text: 'Image size must be less than 5MB' });
-        setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+        setTimeout(() => setMessage({ type: '', text: '' }), 1000);
         return;
       }
       
       const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
       if (!validTypes.includes(file.type)) {
         setMessage({ type: 'error', text: 'Please upload a valid image file' });
-        setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+        setTimeout(() => setMessage({ type: '', text: '' }), 1000);
         return;
       }
       
@@ -366,12 +366,12 @@ export default function ClientProfilePage() {
         setProfilePhoto(publicUrl);
         
         setMessage({ type: 'success', text: 'Profile photo updated successfully!' });
-        setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+        setTimeout(() => setMessage({ type: '', text: '' }), 1000);
         
       } catch (error) {
         console.error('Error uploading photo:', error);
         setMessage({ type: 'error', text: 'Failed to upload photo. Please try again.' });
-        setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+        setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       } finally {
         setUploadingPhoto(false);
       }
@@ -403,12 +403,12 @@ export default function ClientProfilePage() {
       await fetchCurrentUser();
       
       setMessage({ type: 'success', text: 'Profile photo removed successfully!' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       
     } catch (error) {
       console.error('Error removing photo:', error);
       setMessage({ type: 'error', text: 'Failed to remove photo' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
     } finally {
       setUploadingPhoto(false);
     }
