@@ -23,11 +23,8 @@ interface DeliveryDateData {
   total_items: number;
   milk_production_kg: number;
   sugar_syrup_production_kg: number;
-  total_5l_tubs: number;
-  total_2_5l_tubs: number;
-  total_100ml_cups: number;
-  total_ice_cream_cakes: number;
   items: ReportDataItem[];
+  type_totals?: { [key: string]: number }
 }
 
 interface Order {
@@ -44,7 +41,7 @@ interface OrderItem {
   product_name: string;
   product_type: string;
   quantity: number;
-  gelato_type: string;
+  product_gelato_type: string;
   weight: number;
   unit_price: number;
   subtotal: number;
@@ -83,6 +80,8 @@ export default function ReportPage() {
   const [previewData, setPreviewData] = useState<{ [deliveryDate: string]: DeliveryDateData }>({});
   const [selectedSheet, setSelectedSheet] = useState<string>('');
   const [previewDate, setPreviewDate] = useState('');
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
   const itemsPerPage = 10;
 
   useEffect(() => {
@@ -169,10 +168,10 @@ export default function ReportPage() {
     }
 
     await fetchReports();
-    alert('All reports generated successfully!');
+    setShowSuccessModal(true); // Show success modal instead of alert
   } catch (err) {
     console.error('Error generating reports:', err);
-    alert('Error generating reports. Please try again.');
+    setShowErrorModal(true); // Show error modal instead of alert
   } finally {
     setGenerating(false);
   }
@@ -205,13 +204,25 @@ export default function ReportPage() {
 
       if (itemsError) throw itemsError;
 
+      // Fetch product details for all items - UPDATED TO INCLUDE product_milkbased and product_sugarbased
+      const productIds = [...new Set(orderItems?.map((item: OrderItem) => item.product_id) || [])];
+      const { data: products, error: productsError } = await supabase
+        .from('product_list')
+        .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased')
+        .in('id', productIds);
+
+      if (productsError) throw productsError;
+
+      // Create maps for quick product lookup - ADDED product_milkbased and product_sugarbased maps
+      const productTypeMap = new Map(products?.map(p => [p.id, p.product_type]) || []);
+      const productWeightMap = new Map(products?.map(p => [p.id, p.product_weight]) || []);
+      const productGelatoTypeMap = new Map(products?.map(p => [p.id, p.product_gelato_type]) || []);
+      const productMilkBasedMap = new Map(products?.map(p => [p.id, p.product_milkbased]) || []);
+      const productSugarBasedMap = new Map(products?.map(p => [p.id, p.product_sugarbased]) || []);
+
       let milkProduction = 0;
       let sugarSyrupProduction = 0;
       let totalItems = 0;
-      let total5lTubs = 0;
-      let total2_5lTubs = 0;
-      let total100mlCups = 0;
-      let totalIceCreamCakes = 0;
 
       const items: ReportDataItem[] = [];
 
@@ -223,55 +234,49 @@ export default function ReportPage() {
         const orderItemsList = orderItems?.filter((item: OrderItem) => item.order_id === order.id) || [];
 
         orderItemsList.forEach((item: OrderItem) => {
-          const weight = item.weight || (item.quantity * 4);
+          const productWeight = productWeightMap.get(item.product_id) || 0;
+          const calculatedWeightNum = productWeight * item.quantity;
+          const productType = productTypeMap.get(item.product_id) || item.product_type || 'N/A';
+          const productGelatoType = productGelatoTypeMap.get(item.product_id) || 'Dairy';
           totalItems += item.quantity;
           
-          if (item.gelato_type === 'Dairy') {
-            milkProduction += weight;
-          } else if (item.gelato_type === 'Sorbet') {
-            sugarSyrupProduction += weight;
-          }
-
-          // Count product types based on product_type field
-          if (item.product_type === '5L Tub') {
-            total5lTubs += item.quantity;
-          } else if (item.product_type === '2.5L Tub') {
-            total2_5lTubs += item.quantity;
-          } else if (item.product_type === '100ml Cup') {
-            total100mlCups += item.quantity;
-          } else if (item.product_type === 'Ice Cream Cake') {
-            totalIceCreamCakes += item.quantity;
+          // UPDATED CALCULATION: Use product_milkbased and product_sugarbased
+          if (productGelatoType === 'Dairy') {
+            const milkBased = productMilkBasedMap.get(item.product_id) || 0;
+            milkProduction += milkBased * item.quantity;
+          } else if (productGelatoType === 'Sorbet') {
+            const sugarBased = productSugarBasedMap.get(item.product_id) || 0;
+            sugarSyrupProduction += sugarBased * item.quantity;
           }
 
           items.push({
             deliveryDate: order.delivery_date,
             customerName: companyName,
             productName: item.product_name,
-            type: item.product_type,
+            type: productType,
             quantity: item.quantity,
-            gelatoType: item.gelato_type || 'Dairy',
-            weight: weight
+            gelatoType: productGelatoType,
+            weight: parseFloat(calculatedWeightNum.toFixed(1))
           });
         });
       });
 
-      items.sort((a, b) => {
-        const nameCompare = a.customerName.localeCompare(b.customerName);
-        if (nameCompare !== 0) return nameCompare;
-        return a.productName.localeCompare(b.productName);
+      items.sort((a, b) => a.productName.localeCompare(b.productName));
+
+      const typeTotals = new Map<string, number>();
+      items.forEach(item => {
+        const currentTotal = typeTotals.get(item.type) || 0;
+        typeTotals.set(item.type, currentTotal + item.quantity);
       });
 
       yearReportData[deliveryDate] = {
         delivery_date: deliveryDate,
         total_orders: orders.length,
         total_items: totalItems,
-        milk_production_kg: milkProduction,
-        sugar_syrup_production_kg: sugarSyrupProduction,
-        total_5l_tubs: total5lTubs,
-        total_2_5l_tubs: total2_5lTubs,
-        total_100ml_cups: total100mlCups,
-        total_ice_cream_cakes: totalIceCreamCakes,
-        items: items
+        milk_production_kg: Math.round(milkProduction), // Round to remove decimals
+        sugar_syrup_production_kg: Math.round(sugarSyrupProduction), // Round to remove decimals
+        items: items,
+        type_totals: Object.fromEntries(typeTotals)
       };
     }
 
@@ -298,8 +303,7 @@ export default function ReportPage() {
     setPreviewDate(report.year.toString());
     setShowPreview(true);
   };
-
-  const handleDownload = async (report: Report) => {
+const handleDownload = async (report: Report) => {
   if (!report.report_data || Object.keys(report.report_data).length === 0) {
     alert('No data available for this year');
     return;
@@ -330,19 +334,69 @@ export default function ReportPage() {
       { header: 'Milk Production (kg)', key: 'milkProduction', width: 25 }
     ];
 
-    // Add data rows
-    dateData.items.forEach((item, index) => {
-      worksheet.addRow({
-        deliveryDate: formatDateShort(item.deliveryDate),
-        customerName: item.customerName,
-        description: item.productName,
-        type: item.type,
-        quantity: item.quantity,
-        gelatoType: item.gelatoType,
-        weight: item.weight,
-        milkProduction: index === 0 && dateData.milk_production_kg > 0 ? `Dairy\n${dateData.milk_production_kg}` : ''
+    // Sort items by product name (Memo/Description)
+    const sortedItems = [...dateData.items].sort((a, b) => 
+      a.productName.localeCompare(b.productName)
+    );
+
+    // Track the number of data rows
+    const dataRowsCount = sortedItems.length;
+
+    // Build summary array - ALWAYS add these sections
+    const summaryContent = [];
+    
+    // Add Dairy section - ALWAYS
+    summaryContent.push({ text: 'Dairy', isBold: false });
+    summaryContent.push({ text: (dateData.milk_production_kg || 0).toString(), isBold: false });
+    summaryContent.push({ text: '', isBold: false });
+    
+    // Add Sugar Syrup Production section - ALWAYS
+    summaryContent.push({ text: 'Sugar Syrup Production (kg)', isBold: true });
+    summaryContent.push({ text: 'Sorbet', isBold: false });
+    summaryContent.push({ text: (dateData.sugar_syrup_production_kg || 0).toString(), isBold: false });
+    summaryContent.push({ text: '', isBold: false });
+    
+    // Add Type Totals section
+    if (dateData.type_totals) {
+      Object.entries(dateData.type_totals).forEach(([type, count]) => {
+        summaryContent.push({ text: `Total ${type}`, isBold: true });
+        summaryContent.push({ text: count.toString(), isBold: false });
+        summaryContent.push({ text: '', isBold: false });
       });
-    });
+    }
+
+    // Determine total rows needed
+    const totalRows = Math.max(dataRowsCount, summaryContent.length);
+
+    // Add all rows (data + summary side by side)
+    const boldRows = []; // Track which rows need bold in column 8
+
+    for (let i = 0; i < totalRows; i++) {
+      const item = i < dataRowsCount ? sortedItems[i] : null;
+      const summaryItem = i < summaryContent.length ? summaryContent[i] : null;
+
+      const row = worksheet.addRow({
+        deliveryDate: item ? formatDateShort(item.deliveryDate) : '',
+        customerName: item ? item.customerName : '',
+        description: item ? item.productName : '',
+        type: item ? item.type : '',
+        quantity: item ? item.quantity : '',
+        gelatoType: item ? item.gelatoType : '',
+        weight: item ? item.weight : '',
+        milkProduction: summaryItem ? summaryItem.text : ''
+      });
+
+      // Format weight cell
+      if (item) {
+        const weightCell = row.getCell(7);
+        weightCell.numFmt = '0.0';
+      }
+
+      // Track if this row needs bold
+      if (summaryItem?.isBold) {
+        boldRows.push(row.number);
+      }
+    }
 
     // Set page setup
     worksheet.pageSetup = {
@@ -373,17 +427,18 @@ export default function ReportPage() {
         right: { style: 'thin', color: { argb: 'FF000000' } }
       };
     });
+    
+    // Highlight Milk Production header
     const milkProductionHeaderCell = headerRow.getCell(8);
-      milkProductionHeaderCell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFFFF2CC' }
-      };
+    milkProductionHeaderCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFFF2CC' }
+    };
 
     // Style data rows
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber > 1) {
-        row.height = 40;
         row.eachCell((cell, colNumber) => {
           cell.font = { name: 'Poppins', size: 11 };
           
@@ -394,12 +449,14 @@ export default function ReportPage() {
             right: { style: 'thin', color: { argb: 'FF000000' } }
           };
           
+          // Left align customer name and description with text wrap, center others with text wrap
           if (colNumber === 2 || colNumber === 3) {
-            cell.alignment = { vertical: 'top', horizontal: colNumber === 2 || colNumber === 3 ? 'left' : 'center', wrapText: true };
+            cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
           } else {
             cell.alignment = { vertical: 'top', horizontal: 'center', wrapText: true };
           }
           
+          // Highlight Milk Production column
           if (colNumber === 8) {
             cell.fill = {
               type: 'pattern',
@@ -409,6 +466,12 @@ export default function ReportPage() {
           }
         });
       }
+    });
+
+    // Apply bold to specific rows in column 8 AFTER all other styling
+    boldRows.forEach(rowNumber => {
+      const cell = worksheet.getRow(rowNumber).getCell(8);
+      cell.font = { name: 'Poppins', size: 11, bold: true };
     });
   });
 
@@ -486,7 +549,6 @@ export default function ReportPage() {
                   <RefreshCw size={20} className={generating ? 'animate-spin' : ''} />
                   <span>{generating ? 'Generating...' : 'Generate Reports'}</span>
                 </button>
-
               </div>
             </div>
 
@@ -580,6 +642,67 @@ export default function ReportPage() {
               </button>
             </div>
           </div>
+
+          {/* Success Modal */}
+          {showSuccessModal && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
+              <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center">
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
+                  Success!
+                </h2>
+                <p className="text-gray-600 mb-6">
+                  All reports generated successfully!
+                </p>
+                <button
+                  onClick={() => setShowSuccessModal(false)}
+                  className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: '#10B981' }}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Error Modal */}
+          {showErrorModal && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
+              <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center">
+                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
+                  Error
+                </h2>
+                <p className="text-gray-600 mb-6">
+                  Error generating reports. Please try again.
+                </p>
+                <button
+                  onClick={() => setShowErrorModal(false)}
+                  className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity bg-red-600"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Preview Modal */}
           {showPreview && (
@@ -679,37 +802,86 @@ export default function ReportPage() {
                                 </th>
                               </tr>
                             </thead>
-                            <tbody>
-                              {currentData.items.map((item, index) => (
-                                <tr key={index} className="hover:bg-gray-50">
-                                  <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                    {formatDateShort(item.deliveryDate)}
-                                  </td>
-                                  <td className="border border-black text-left" style={{ fontSize: '7px' }}>
-                                    {item.customerName}
-                                  </td>
-                                  <td className="border border-black text-left" style={{ fontSize: '7px' }}>
-                                    {item.productName}
-                                  </td>
-                                  <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                    {item.type}
-                                  </td>
-                                  <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                    {item.quantity}
-                                  </td>
-                                  <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                    {item.gelatoType}
-                                  </td>
-                                  <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                    {item.weight}
-                                  </td>
-                                  <td className="border border-black text-center whitespace-pre-line" style={{ fontSize: '7px', backgroundColor: '#FFF2CC' }}>
-                                    {index === 0 && currentData.milk_production_kg > 0 ? `Dairy\n${currentData.milk_production_kg}` : ''}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                           <tbody>
+                            {(() => {
+                              
+                              const allRows = [];
+                              const dataRowsCount = currentData.items.length;
+                              
+                              // Build summary array - ALWAYS add these regardless of value
+                              const summaryContent = [];
+                              
+                              // Add Milk Production section - ALWAYS
+                              summaryContent.push({ text: 'Dairy', isBold: false });
+                              summaryContent.push({ text: (currentData.milk_production_kg || 0).toString()});
+                              summaryContent.push({ text: '', isBold: false });
+                              
+                              // Add Sugar Syrup Production section - ALWAYS
+                              summaryContent.push({ text: 'Sugar Syrup Production (kg)', isBold: true });
+                              summaryContent.push({ text: 'Sorbet', isBold: false });
+                              summaryContent.push({ text: (currentData.sugar_syrup_production_kg || 0).toString()});
+                              summaryContent.push({ text: '', isBold: false });
+                              
+                              // Add Type Totals section
+                              if (currentData.type_totals) {
+                                Object.entries(currentData.type_totals).forEach(([type, count]) => {
+                                  summaryContent.push({ text: `Total ${type}`, isBold: true });
+                                  summaryContent.push({ text: count.toString()});
+                                  summaryContent.push({ text: '', isBold: false });
+                                });
+                              }
+                              
+                              console.log('Summary Content Array:', summaryContent);
+                              
+                              // Determine how many rows we need total
+                              const totalRows = Math.max(dataRowsCount, summaryContent.length);
+                              
+                              // Create all rows
+                              for (let i = 0; i < totalRows; i++) {
+                                const item = i < dataRowsCount ? currentData.items[i] : null;
+                                const summaryItem = i < summaryContent.length ? summaryContent[i] : null;
+                                
+                                allRows.push(
+                                  <tr key={`row-${i}`} className="hover:bg-gray-50">
+                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                      {item ? formatDateShort(item.deliveryDate) : ''}
+                                    </td>
+                                    <td className="border border-black text-left" style={{ fontSize: '7px' }}>
+                                      {item ? item.customerName : ''}
+                                    </td>
+                                    <td className="border border-black text-left" style={{ fontSize: '7px' }}>
+                                      {item ? item.productName : ''}
+                                    </td>
+                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                      {item ? item.type : ''}
+                                    </td>
+                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                      {item ? item.quantity : ''}
+                                    </td>
+                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                      {item ? item.gelatoType : ''}
+                                    </td>
+                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                      {item ? item.weight.toFixed(1) : ''}
+                                    </td>
+                                    <td 
+                                      className="border border-black text-center" 
+                                      style={{ 
+                                        fontSize: '7px', 
+                                        backgroundColor: '#FFF2CC',
+                                        fontWeight: summaryItem?.isBold ? 'bold' : 'normal'
+                                      }}
+                                    >
+                                      {summaryItem?.text || ''}
+                                    </td>
+                                  </tr>
+                                );
+                              }
+                              
+                              return allRows;
+                            })()}
+                          </tbody>
+                        </table>
                         </div>
                       );
                     })()}

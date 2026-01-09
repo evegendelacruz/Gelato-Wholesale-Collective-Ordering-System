@@ -34,7 +34,7 @@ interface OrderItemDB {
   product_name: string;
   product_type: string;
   quantity: number;
-  gelato_type: string;
+  product_gelato_type: string;
   weight: number;
   unit_price: number;
   subtotal: number;
@@ -48,7 +48,7 @@ interface ReportRow {
   'Type': string;
   'Quantity': number;
   'Gelato Type': string;
-  'Weight (kg)': number;
+  'Weight (kg)': number | string;
 }
 
 export default function ReportPage() {
@@ -158,6 +158,19 @@ export default function ReportPage() {
 
     if (itemsError) throw itemsError;
 
+    const productIds = [...new Set(orderItems?.map((item: OrderItemDB) => item.product_id) || [])];
+    const { data: products, error: productsError } = await supabase
+      .from('product_list')
+      .select('id, product_type, product_weight, product_gelato_type')   
+      .in('id', productIds); 
+
+    if (productsError) throw productsError;
+
+    // Create maps for quick product lookup
+    const productTypeMap = new Map(products?.map(p => [p.id, p.product_type]) || []);
+    const productWeightMap = new Map(products?.map(p => [p.id, p.product_weight]) || []);
+    const productGelatoTypeMap = new Map(products?.map(p => [p.id, p.product_gelato_type]) || []);
+
     // Prepare report data
     const reportData: ReportRow[] = [];
 
@@ -169,17 +182,20 @@ export default function ReportPage() {
       const items = orderItems?.filter((item: OrderItemDB) => item.order_id === order.id) || [];
 
       items.forEach((item: OrderItemDB) => {
-        const weight = item.weight || (item.quantity * 4);
+        const productWeight = productWeightMap.get(item.product_id) || 0;
+        const calculatedWeight = productWeight * item.quantity;
+        const productType = productTypeMap.get(item.product_id) || 'N/A';
+        const productGelatoType = productGelatoTypeMap.get(item.product_id) || 'Dairy';
 
-        // Create the row data with only 7 columns
+        // Create the row data with product type from product_list
         const rowData: ReportRow = {
           'Delivery Date': formatDateShort(order.delivery_date),
           'Customer Full Name': companyName,
           'Memo/Description': item.product_name,
-          'Type': item.product_type,
+          'Type': productType,
           'Quantity': item.quantity,
-          'Gelato Type': item.gelato_type || 'Dairy',
-          'Weight (kg)': weight
+          'Gelato Type': productGelatoType,
+          'Weight (kg)': calculatedWeight
         };
 
         reportData.push(rowData);
@@ -468,7 +484,7 @@ export default function ReportPage() {
                           <td className="border border-gray-300 px-2 py-1">{row['Type']}</td>
                           <td className="border border-gray-300 px-2 py-1 text-center">{row['Quantity']}</td>
                           <td className="border border-gray-300 px-2 py-1">{row['Gelato Type']}</td>
-                          <td className="border border-gray-300 px-2 py-1 text-right">{row['Weight (kg)']}</td>
+                          <td className="border border-gray-300 px-2 py-1 text-right">{Number(row['Weight (kg)']).toFixed(1)}</td>
                         </tr>
                       ))}
                     </tbody>
