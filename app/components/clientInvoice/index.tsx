@@ -4,6 +4,8 @@ import Image from "next/image";
 interface OrderItem {
   id: number;
   product_name: string;
+  product_billingName?: string;
+  product_description?: string; 
   quantity: number;
   unit_price: number;
   subtotal: number;
@@ -377,8 +379,8 @@ export default function ClientInvoice({
 
             {order.items.map((item) => (
               <div key={item.id} className="table-row">
-                <div className="table-col">{item.product_name} </div>
-                <div className="table-col">{item.product_name} </div>
+                <div className="table-col">{item.product_billingName || item.product_name} </div>
+                <div className="table-col">{item.product_description || item.product_name}</div>
                 <div className="table-col qty">{item.quantity}</div>
                 <div className="table-col price">{item.unit_price.toFixed(2)}</div>
                 <div className="table-col amount">{item.subtotal.toFixed(2)}</div>

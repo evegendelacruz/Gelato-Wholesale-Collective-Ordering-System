@@ -1,10 +1,15 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import supabase from '@/lib/client';
 
-const LabelGenerator = ({ orderItems, clientData }) => {
+const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [previewBlobUrl, setPreviewBlobUrl] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editableData, setEditableData] = useState([]);
+  const [applyBestBeforeToAll, setApplyBestBeforeToAll] = useState(false);
+  const [applyBatchNumberToAll, setApplyBatchNumberToAll] = useState(false);
 
   // Wrap getHalalImageBase64 in useCallback
   const getHalalImageBase64 = useCallback((): Promise<string> => {
@@ -24,21 +29,43 @@ const LabelGenerator = ({ orderItems, clientData }) => {
     });
   }, []);
 
+  const calculateBestBefore = useCallback((orderDate) => {
+  const date = new Date(orderDate);
+  // Add 1 day
+  date.setDate(date.getDate() + 1);
+  // Add 6 months
+  date.setMonth(date.getMonth() + 6);
+  
+  // Format as DD/MM/YYYY
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  
+  return `${day}/${month}/${year}`;
+}, []);
+
   const generatePreviewHTML = useCallback((items, halalImageSrc = '/assets/halal.png') => {
   const pages = items.map((item, index) => {
-    const companyName = clientData?.client_businessName || 'Company Name';
-    const productName = item.product_name || 'Product Name Product Name Product Name';
-    const ingredients = item.ingredients || 'Milk, skimmed milk powder, sugar, dextrose, maltodextrin, pistachio. Milk, skimmed milk powder, sugar, dextrose, maltodextrin, pistachio.';
+    const data = editableData[index] || {
+      companyName: clientData?.client_businessName || 'Company Name',
+      productName: item.product_name || 'Product Name',
+      ingredients: item.ingredients || 'Ingredients not available',
+      allergen: item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+      bestBefore: calculateBestBefore(item.order_date || new Date()),
+      batchNumber: ''
+    };
+    
+    const storageInfo = `${data.allergen} Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.`;
 
     return `
       <div class="page" data-page="${index}">
         <div class="label-container">
           <div class="left-section">
-            <div class="company-name">${companyName}</div>
-            <div class="product-name">${productName}</div>
-            <div class="ingredients-text">${ingredients}</div>
+            <div class="company-name">${data.companyName}</div>
+            <div class="product-name">${data.productName}</div>
+            <div class="ingredients-text">${data.ingredients}</div>
             <div class="storage-info">
-              Our products are crafted in a facility that also processes dairy, gluten, and nuts. Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.
+              ${storageInfo}
             </div>
           </div>
 
@@ -47,8 +74,10 @@ const LabelGenerator = ({ orderItems, clientData }) => {
           </div>
           
           <div class="right-section">
-            <div class="field-label">Best Before (mm/dd/yyyy)</div>
+            <div class="field-label">Best Before (dd/mm/yyyy)</div>
+            <div class="best-before-value">${(data.bestBefore || '').trim()}</div>
             <div class="field-label batch">Batch Number</div>
+            <div class="batch-number-value">${(data.batchNumber || '').trim()}</div>
             
             <div class="manufacturer-info">
               Manufactured by:<br>
@@ -164,14 +193,25 @@ const LabelGenerator = ({ orderItems, clientData }) => {
         .field-label {
           font-family: Arial, sans-serif;
           font-size: 7px;
-          margin-bottom: 6mm;
+          margin-bottom: 1mm;
           margin-top: 8mm;
-          margn-left: -15mm;
+        }
+        
+        .best-before-value, .batch-number-value {
+          font-family: Arial Narrow, sans-serif;
+          font-size: 10px;
+          font-weight: bold;
+          margin-bottom: 2mm;
+          min-height: 10px;
+          background-color: black;
+          color: white;
+          display: inline-block;
+          width: fit-content;
+          line-height: 1;
+          white-space: nowrap;
         }
         
         .field-label.batch {
-          margin-bottom: 4mm;
-          margn-left: -5mm;
           margin-top: 0mm;
         }
         
@@ -199,7 +239,6 @@ const LabelGenerator = ({ orderItems, clientData }) => {
           bottom: 0;
           left: 0;
           right: 0;
-    
         }
         
         @media print {
@@ -224,21 +263,61 @@ const LabelGenerator = ({ orderItems, clientData }) => {
     ${pages}
     </body>
     </html>`;
-    }, [clientData]);
+    }, [clientData, editableData, calculateBestBefore]);
 
-  // Now useEffect with proper dependencies
   useEffect(() => {
+  // Initialize editable data with values from database if available
+  const initialData = orderItems.map((item, index) => {
+    // Helper to format date from database
+    const formatDateDisplay = (dateStr) => {
+      if (!dateStr) return '';
+      const date = new Date(dateStr);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    };
+
+    return {
+      id: index,
+      companyName: clientData?.client_businessName || 'Company Name',
+      productName: item.product_name || 'Product Name',
+      // Use saved label data if available, otherwise use product defaults
+      ingredients: item.label_ingredients || item.ingredients || 'Ingredients not available',
+      allergen: item.label_allergens || item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+      // Use saved best_before if available, otherwise calculate
+      bestBefore: item.best_before 
+        ? formatDateDisplay(item.best_before) 
+        : (item.bestBefore || calculateBestBefore(item.order_date || new Date())),
+      // Use saved batch_number if available
+      batchNumber: item.batch_number ? String(item.batch_number) : (item.batchNumber || '')
+    };
+  });
+  setEditableData(initialData);
+}, [orderItems, clientData, calculateBestBefore]);
+
+useEffect(() => {
+  // Generate preview only after editableData is set
+  if (editableData.length > 0) {
     const initPreview = async () => {
       const halalBase64 = await getHalalImageBase64();
       const html = generatePreviewHTML(orderItems, halalBase64);
       const blob = new Blob([html], { type: 'text/html' });
       const blobUrl = URL.createObjectURL(blob);
+      
+      // Clean up old blob URL
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl);
+      }
+      
       setPreviewBlobUrl(blobUrl);
       setShowPreview(true);
     };
     
     initPreview();
-  }, [orderItems, generatePreviewHTML, getHalalImageBase64]);
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [editableData, orderItems, getHalalImageBase64]);
 
   // Generate label as canvas and convert to JPEG
   const generateLabelImage = async (item, index) => {
@@ -259,10 +338,20 @@ const LabelGenerator = ({ orderItems, clientData }) => {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, width, height);
       
-      const companyName = clientData?.client_businessName || 'Company Name';
-      const productName = item.product_name || 'Product Name Product Name Product Name';
-      const ingredients = item.ingredients || 'Milk, skimmed milk powder, sugar, dextrose, maltodextrin, pistachio. Milk, skimmed milk powder, sugar, dextrose, maltodextrin, pistachio.';
-      
+      // Get editable data for this label
+      const data = editableData[index] || {
+        companyName: clientData?.client_businessName || 'Company Name',
+        productName: item.product_name || 'Product Name',
+        ingredients: item.ingredients || 'Ingredients not available',
+        allergen: item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+        bestBefore: calculateBestBefore(item.order_date || new Date()),
+        batchNumber: ''
+      };
+
+      const companyName = data.companyName;
+      const productName = data.productName;
+      const ingredients = data.ingredients;
+      const allergenInfo = data.allergen;
       ctx.fillStyle = '#000000';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
@@ -311,12 +400,12 @@ const LabelGenerator = ({ orderItems, clientData }) => {
       // LEFT SECTION
       let leftY = marginTop;
       const leftMaxWidth = leftSectionWidth - marginLeft - Math.round(6 * mmToPx);
-      
+
       // Company Name - Arial Nova Condensed (fallback to Arial Narrow/Arial)
       ctx.font = `${companyFontSize}px Arial Narrow, Arial`;
       ctx.fillText(companyName, marginLeft, leftY);
       leftY += Math.round(7 * mmToPx);
-      
+
       // Product Name - Arial Nova Condensed Bold (fallback to Arial Narrow/Arial)
       const productLines = wrapText(productName, leftMaxWidth, productFontSize, 'Arial Narrow, Arial', true);
       ctx.font = `bold ${productFontSize}px Arial Narrow, Arial`;
@@ -325,60 +414,103 @@ const LabelGenerator = ({ orderItems, clientData }) => {
         leftY += Math.round(4.5 * mmToPx);
       }
       leftY += Math.round(2 * mmToPx);
-      
-    // Ingredients - Arial
-    const ingredientsLines = wrapText(ingredients, leftMaxWidth, ingredientsFontSize, 'Arial');
-    ctx.font = `bold ${ingredientsFontSize}px Arial`;
-    const maxIngredientsLines = 4;
-    for (let i = 0; i < Math.min(ingredientsLines.length, maxIngredientsLines); i++) {
-      ctx.fillText(ingredientsLines[i], marginLeft, leftY);
-      leftY += Math.round(3 * mmToPx);
-    }
 
-    // Add space between ingredients and storage
-    leftY += Math.round(4 * mmToPx); // Add 4mm gap
-
-    // Storage Info - Now positioned relatively from ingredients - Arial
-    ctx.font = `${storageFontSize}px Arial`;
-    const storageText = 'Our products are crafted in a facility that also processes dairy, gluten, and nuts. Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
-
-    const storageMaxWidth = leftMaxWidth - Math.round(6 * mmToPx); // Shorter lines
-
-    const storageLines = wrapText(storageText, storageMaxWidth, storageFontSize, 'Arial');
-    storageLines.forEach((line, idx) => {
-      if (idx < 5) { 
-        ctx.fillText(line, marginLeft, leftY + (idx * Math.round(2.3 * mmToPx)));
+      // Ingredients - Arial
+      const ingredientsLines = wrapText(ingredients, leftMaxWidth, ingredientsFontSize, 'Arial');
+      ctx.font = `bold ${ingredientsFontSize}px Arial`;
+      const maxIngredientsLines = 4;
+      for (let i = 0; i < Math.min(ingredientsLines.length, maxIngredientsLines); i++) {
+        ctx.fillText(ingredientsLines[i], marginLeft, leftY);
+        leftY += Math.round(3 * mmToPx);
       }
-    });
+
+      // Storage Info - Positioned at bottom (absolute position) - Arial
+      ctx.font = `${storageFontSize}px Arial`;
+      const storageText = `${allergenInfo} Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.`;
+      const storageMaxWidth = leftMaxWidth - Math.round(6 * mmToPx);
+
+      // Calculate storage position from bottom
+      const storageStartY = height - marginBottom - Math.round(11 * mmToPx);
+
+      const storageLines = wrapText(storageText, storageMaxWidth, storageFontSize, 'Arial');
+      storageLines.forEach((line, idx) => {
+        if (idx < 5) { 
+          ctx.fillText(line, marginLeft, storageStartY + (idx * Math.round(2.3 * mmToPx)));
+        }
+      });
       
-      // Function to finalize and draw right section
       const finalizeCanvas = (halalImage = null) => {
         // RIGHT SECTION
         ctx.fillStyle = '#000000';
         ctx.textAlign = 'left';
         
-       let rightY = marginTop + Math.round(7 * mmToPx); 
+        let rightY = marginTop + Math.round(6 * mmToPx);  
         const rightX = rightSectionX + Math.round(3.4 * mmToPx);
         
         // Best Before - Arial
-        ctx.font = `${rightSectionFontSize}px Arial`;
+        ctx.font = `${rightSectionFontSize}px  Arial`;
         ctx.fillText('Best Before (mm/dd/yyyy)', rightX, rightY);
-        rightY += Math.round(8 * mmToPx);
+        rightY += Math.round(2 * mmToPx);  
+
+        // Best Before Value - White text on black background
+        ctx.font = `bold ${Math.round(10 * (dpi/96))}px  Arial Narrow`;
+        const bestBeforeText = (data.bestBefore || '').trim();
+        const bestBeforeMetrics = ctx.measureText(bestBeforeText);
+        const bestBeforeHeight = Math.round(3.5 * mmToPx);
+
+        // Draw black background (exact width of text)
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(
+          rightX, 
+          rightY, 
+          bestBeforeMetrics.width, 
+          bestBeforeHeight
+        );
+
+        // Draw white text
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(bestBeforeText, rightX, rightY);
+        rightY += Math.round(3 * mmToPx);
         
-        // Batch Number - Arial
+        // Add extra spacing before the label
+        rightY += Math.round(3 * mmToPx);  
+        
+        // Reset to black for label
+        ctx.fillStyle = '#000000';
+        ctx.font = `${rightSectionFontSize}px Arial`;
         ctx.fillText('Batch Number', rightX, rightY);
-        rightY += Math.round(6 * mmToPx);
+        rightY += Math.round(2 * mmToPx);  // Changed from 6 to 3 - smaller gap
+
+        // Batch Number value - White text on black background
+        ctx.font = `bold ${Math.round(10 * (dpi/96))}px Arial Narrow`;
+        const batchNumberText = (data.batchNumber || '').trim();
+        const batchMetrics = ctx.measureText(batchNumberText);
+        const batchHeight = Math.round(3.5 * mmToPx);
+
+        // Draw black background (exact width of text)
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(
+          rightX, 
+          rightY, 
+          batchMetrics.width, 
+          batchHeight
+        );
+
+        // Draw white text
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(batchNumberText, rightX, rightY);
         
-        // Halal Logo - centered in right section
-        const logoSize = Math.round(13.5 * mmToPx); // Slightly smaller to fit
+        // Halal Logo - moved to better position
+        const logoSize = Math.round(13.5 * mmToPx);
         const logoX = marginLeft + leftMaxWidth - logoSize - Math.round(-8 * mmToPx);
-        const logoY = leftY + Math.round(-2 * mmToPx);
+        const logoY = height - marginBottom - Math.round(12 * mmToPx);
         
         if (halalImage) {
           ctx.drawImage(halalImage, logoX, logoY, logoSize, logoSize);
         }
         
         // Manufacturer Info at bottom - Arial
+        ctx.fillStyle = '#000000';
         ctx.font = `${manufacturerFontSize}px Arial`;
         const mfgY = height - marginBottom - Math.round(11 * mmToPx);
         const lineSpacing = Math.round(2.3 * mmToPx);
@@ -409,7 +541,7 @@ const LabelGenerator = ({ orderItems, clientData }) => {
           reject(err);
         }
       };
-      
+            
       // Load Halal logo
       const halalImg = new Image();
       halalImg.crossOrigin = 'anonymous';
@@ -527,20 +659,323 @@ const LabelGenerator = ({ orderItems, clientData }) => {
         </div>
 
         <div className="px-6 py-4 border-t border-gray-200 flex gap-3 shrink-0">
-          <button 
-            onClick={handleDownloadImages} 
-            disabled={isGenerating} 
-            className="flex-1 px-4 py-3 bg-green-600 text-white rounded font-medium hover:bg-green-700 disabled:opacity-50"
+        <button 
+          onClick={() => setShowEditModal(true)}
+          className="px-6 py-3 bg-blue-600 text-white rounded font-medium hover:bg-blue-700"
+        >
+          Edit Labels
+        </button>
+        <button 
+          onClick={handleDownloadImages} 
+          disabled={isGenerating} 
+          className="flex-1 px-4 py-3 bg-green-600 text-white rounded font-medium hover:bg-green-700 disabled:opacity-50"
+        >
+          {isGenerating ? 'Generating Images...' : `Download ${orderItems.length} JPEG Labels`}
+        </button>
+        <button 
+          onClick={closePreview} 
+          className="px-6 py-3 border-2 border-gray-800 text-gray-800 rounded font-medium hover:bg-gray-50"
+        >
+          Close Preview
+        </button>
+      </div>
+        {/* Edit Label Modal */}
+        {showEditModal && (
+          <div 
+            className="fixed inset-0 flex items-center justify-center z-50 p-4" 
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }} 
+            onClick={() => setShowEditModal(false)}
           >
-            {isGenerating ? 'Generating Images...' : `Download ${orderItems.length} JPEG Labels`}
-          </button>
-          <button 
-            onClick={closePreview} 
-            className="px-6 py-3 border-2 border-gray-800 text-gray-800 rounded font-medium hover:bg-gray-50"
-          >
-            Close Preview
-          </button>
-        </div>
+            <div 
+              className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] flex flex-col" 
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center shrink-0">
+                <h3 className="text-xl font-bold text-gray-800">
+                  Edit Label Information
+                </h3>
+                <button 
+                  onClick={() => setShowEditModal(false)} 
+                  className="text-gray-500 hover:text-gray-700 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-auto p-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {editableData.map((data, index) => (
+                    <div key={index} className="border border-gray-300 rounded-lg p-4 bg-gray-50">
+                      <h4 className="font-bold text-lg mb-4 text-gray-700">
+                        Label {index + 1}
+                      </h4>
+                      
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Company Name
+                          </label>
+                          <input
+                            type="text"
+                            value={data.companyName}
+                            disabled
+                            onChange={(e) => {
+                              const newData = [...editableData];
+                              newData[index].companyName = e.target.value;
+                              setEditableData(newData);
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded bg-gray-100 text-gray-500 cursor-not-allowed"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Product Name
+                          </label>
+                          <input
+                            type="text"
+                            value={data.productName}
+                            onChange={(e) => {
+                              const newData = [...editableData];
+                              newData[index].productName = e.target.value;
+                              setEditableData(newData);
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Ingredients
+                          </label>
+                          <textarea
+                            value={data.ingredients}
+                            onChange={(e) => {
+                              const newData = [...editableData];
+                              newData[index].ingredients = e.target.value;
+                              setEditableData(newData);
+                            }}
+                            rows={3}
+                            className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Allergen Information
+                          </label>
+                          <textarea
+                            value={data.allergen}
+                            onChange={(e) => {
+                              const newData = [...editableData];
+                              newData[index].allergen = e.target.value;
+                              setEditableData(newData);
+                            }}
+                            rows={2}
+                            className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Best Before (dd/mm/yyyy)
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={data.bestBefore}
+                              onChange={(e) => {
+                                const newData = [...editableData];
+                                newData[index].bestBefore = e.target.value;
+                                setEditableData(newData);
+                              }}
+                              placeholder="DD/MM/YYYY"
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            {index === 0 && (
+                              <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
+                                <input
+                                  type="checkbox"
+                                  checked={applyBestBeforeToAll}
+                                  onChange={(e) => {
+                                    setApplyBestBeforeToAll(e.target.checked);
+                                    if (e.target.checked) {
+                                      const newData = editableData.map(item => ({
+                                        ...item,
+                                        bestBefore: editableData[0].bestBefore
+                                      }));
+                                      setEditableData(newData);
+                                    }
+                                  }}
+                                  className="w-4 h-4"
+                                />
+                                Apply to all
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Batch Number
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={data.batchNumber}
+                              onChange={(e) => {
+                                const newData = [...editableData];
+                                newData[index].batchNumber = e.target.value;
+                                setEditableData(newData);
+                              }}
+                              placeholder="Enter batch number"
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            {index === 0 && (
+                              <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
+                                <input
+                                  type="checkbox"
+                                  checked={applyBatchNumberToAll}
+                                  onChange={(e) => {
+                                    setApplyBatchNumberToAll(e.target.checked);
+                                    if (e.target.checked) {
+                                      const newData = editableData.map(item => ({
+                                        ...item,
+                                        batchNumber: editableData[0].batchNumber
+                                      }));
+                                      setEditableData(newData);
+                                    }
+                                  }}
+                                  className="w-4 h-4"
+                                />
+                                Apply to all
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-200 flex gap-3 shrink-0">
+              <button 
+                onClick={async () => {
+                  try {
+                    // Convert best_before from DD/MM/YYYY to YYYY-MM-DD format for PostgreSQL
+                    const convertToPostgresDate = (dateStr) => {
+                      if (!dateStr) return null;
+                      const parts = dateStr.split('/');
+                      if (parts.length !== 3) return null;
+                      // DD/MM/YYYY -> YYYY-MM-DD
+                      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+                    };
+
+                    // Update each order item in the database
+                    const updatePromises = editableData.map(async (data, index) => {
+                      const item = orderItems[index];
+                      
+                      // Batch number as text
+                      const batchNumberValue = data.batchNumber && data.batchNumber.trim() !== '' 
+                        ? data.batchNumber.trim() 
+                        : null;
+                      
+                      const updateData = {
+                        product_name: data.productName || null,  // ADD THIS LINE
+                        label_ingredients: data.ingredients || null,
+                        label_allergens: data.allergen || null,
+                        best_before: convertToPostgresDate(data.bestBefore),
+                        batch_number: batchNumberValue
+                      };
+
+                      console.log(`Updating item ${item.id} with:`, updateData);
+                      
+                      const result = await supabase
+                        .from('client_order_item')
+                        .update(updateData)
+                        .eq('id', item.id)
+                        .select();
+                      
+                      console.log(`Update result for item ${item.id}:`, result);
+                      return result;
+                    });
+
+                    const results = await Promise.all(updatePromises);
+
+                    // Check for errors
+                    const errors = results.filter(r => r.error);
+                    if (errors.length > 0) {
+                      console.error('Some updates failed:', errors);
+                      errors.forEach((err, idx) => {
+                        console.error(`Error ${idx + 1}:`, err.error?.message, err.error?.details, err.error?.hint);
+                      });
+                      alert('Some label updates failed. Error: ' + errors[0].error?.message);
+                      return;
+                    }
+
+                    console.log('All updates successful:', results);
+
+                    // Update orderItems with the saved data including database format
+                    const updatedOrderItems = orderItems.map((item, index) => ({
+                      ...item,
+                      // ADD THIS LINE - Update product_name
+                      product_name: editableData[index].productName,
+                      // Display format
+                      ingredients: editableData[index].ingredients,
+                      allergen: editableData[index].allergen,
+                      bestBefore: editableData[index].bestBefore,
+                      batchNumber: editableData[index].batchNumber,
+                      // Database format
+                      label_ingredients: editableData[index].ingredients,
+                      label_allergens: editableData[index].allergen,
+                      best_before: convertToPostgresDate(editableData[index].bestBefore),
+                      batch_number: editableData[index].batchNumber
+                    }));
+
+                    console.log('Updated order items:', updatedOrderItems);
+
+                    // Update editableData to ensure it reflects the saved state
+                    const refreshedEditableData = editableData.map((data) => ({
+                      ...data
+                    }));
+                    setEditableData(refreshedEditableData);
+
+                    // Update preview with the new data
+                    const halalBase64 = await getHalalImageBase64();
+                    const html = generatePreviewHTML(updatedOrderItems, halalBase64);
+                    if (previewBlobUrl) {
+                      URL.revokeObjectURL(previewBlobUrl);
+                    }
+                    const blob = new Blob([html], { type: 'text/html' });
+                    const blobUrl = URL.createObjectURL(blob);
+                    setPreviewBlobUrl(blobUrl);
+                    setShowEditModal(false);
+                    
+                    if (onUpdate) {
+                      onUpdate(updatedOrderItems);
+                    }
+                    
+                    alert('Label information saved successfully!');
+                  } catch (error) {
+                    console.error('Error saving label information:', error);
+                    alert('Failed to save label information: ' + error.message);
+                  }
+                }}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded font-medium hover:bg-blue-700"
+              >
+                Save Changes
+              </button>
+                <button 
+                  onClick={() => setShowEditModal(false)} 
+                  className="px-6 py-3 border-2 border-gray-800 text-gray-800 rounded font-medium hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

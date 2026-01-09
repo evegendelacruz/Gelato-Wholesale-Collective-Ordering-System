@@ -27,7 +27,6 @@ interface OrderItem {
   id: number;
   product_id: string;
   product_name: string;
-  packaging_type: string;
   quantity: number;
   unit_price: number;
   subtotal: number;
@@ -311,11 +310,6 @@ export default function EditOrderModal({ isOpen, onClose, onSuccess, order }: Ed
                   {orderItems.map((item, index) => (
                     <tr key={item.id} className="border-b border-gray-200">
                       <td className="py-2 px-2 text-xs">{item.product_name}</td>
-                      <td className="py-2 px-2 text-xs">
-                        {item.packaging_type.split('_').map(word => 
-                          word.charAt(0).toUpperCase() + word.slice(1)
-                        ).join(' ')}
-                      </td>
                       <td className="py-2 px-2">
                         <input
                           type="number"

@@ -13,11 +13,14 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: '*.supabase.co',
+        hostname: 'boxzapgxostpqutxabzs.supabase.co',
+        port: '',
         pathname: '/storage/v1/object/public/**',
       },
     ],
+    unoptimized: true,
   },
+  productionBrowserSourceMaps: false,
 };
 
 export default nextConfig;

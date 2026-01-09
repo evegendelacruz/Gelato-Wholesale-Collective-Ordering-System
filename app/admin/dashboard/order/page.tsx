@@ -320,28 +320,89 @@ const handleDelete = async () => {
 
   const handleGenerateLabels = async (order) => {
   try {
-    // Fetch order items if not already loaded
-    const { data: items } = await supabase
+    // Fetch order items with product details including ingredients and allergen
+    const { data: items, error: fetchError } = await supabase
       .from('client_order_item')
-      .select('*')
+      .select(`
+        *,
+        product_list(
+          product_ingredient,
+          product_allergen
+        )
+      `)
       .eq('order_id', order.id);
 
+    if (fetchError) {
+      console.error('Error fetching order items:', fetchError);
+      throw fetchError;
+    }
+
+    console.log('Fetched items:', items);
+
+    // Helper function to convert PostgreSQL date to DD/MM/YYYY
+    const formatDateDisplay = (dateStr) => {
+      if (!dateStr) return '';
+      const date = new Date(dateStr);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    };
+
+    // Map items to include product details at root level
+    const itemsWithDetails = items?.map(item => {
+      // Handle both array and object responses from Supabase
+      let productIngredients = 'Ingredients not available';
+      let productAllergen = 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.';
+
+      if (item.product_list) {
+        if (Array.isArray(item.product_list)) {
+          productIngredients = item.product_list[0]?.product_ingredient || productIngredients;
+          productAllergen = item.product_list[0]?.product_allergen || productAllergen;
+        } else {
+          productIngredients = item.product_list.product_ingredient || productIngredients;
+          productAllergen = item.product_list.product_allergen || productAllergen;
+        }
+      }
+
+      return {
+        ...item,
+        // Use saved label data if available, otherwise fall back to product data
+        ingredients: item.label_ingredients || productIngredients,
+        allergen: item.label_allergens || productAllergen,
+        bestBefore: item.best_before ? formatDateDisplay(item.best_before) : '',
+        batchNumber: item.batch_number ? String(item.batch_number) : '',
+        order_date: order.order_date
+      };
+    }) || [];
+
+    console.log('Items with details:', itemsWithDetails);
+
     // Fetch client data
-    const { data: client } = await supabase
+    const { data: client, error: clientError } = await supabase
       .from('client_user')
       .select('client_businessName, client_delivery_address')
       .eq('client_auth_id', order.client_auth_id)
       .single();
 
-    setSelectedOrderItems(items || []);
+    if (clientError) {
+      console.error('Error fetching client data:', clientError);
+      throw clientError;
+    }
+
+    if (itemsWithDetails.length === 0) {
+      alert('No items found for this order');
+      return;
+    }
+
+    setSelectedOrderItems(itemsWithDetails);
     setSelectedClientData(client);
     setShowLabelGenerator(true);
   } catch (error) {
     console.error('Error loading data for labels:', error);
-    alert('Failed to load order data');
+    alert('Failed to load order data: ' + (error.message || 'Unknown error'));
   }
 };
-
 
   const handleRowExpand = async (order) => {
     // If already expanded, just toggle
@@ -355,12 +416,32 @@ const handleDelete = async () => {
       try {
         const { data: items } = await supabase
           .from('client_order_item')
-          .select('*')
+          .select(`
+            *,
+            product_list!client_order_item_product_id_fkey(
+              product_type,
+              product_name,
+              product_weight
+            )
+          `)
           .eq('order_id', order.id);
+
+        // Map items to include product details at root level
+        const itemsWithType = items?.map(item => ({
+          ...item,
+          product_type: item.product_list?.product_type || 'N/A',
+          // Use product_name from product_list, fallback to stored product_name
+          display_product_name: item.product_list?.product_name || item.product_name,
+          // Calculate weight: product_weight * quantity
+          calculated_weight: item.calculated_weight || 
+            (item.product_list?.product_weight ? 
+              (Number(item.product_list.product_weight) * Number(item.quantity)).toFixed(2) : 
+              '-')
+        })) || [];
 
         setRowOrderItems(prev => ({
           ...prev,
-          [order.id]: items || []
+          [order.id]: itemsWithType
         }));
       } catch (error) {
         console.error('Error fetching order items:', error);
@@ -536,14 +617,15 @@ const handlePrintInvoice = async () => {
     let yPos = tableStartY + 13;
 
     orderItems.forEach((item) => {
-      const productText = `${item.product_name} (${formatPackaging(item.packaging_type)})`;
+      const productText = `${item.product_billingName || item.product_name}`;
       
       doc.setFont('helvetica', 'bold');
       const productLines = doc.splitTextToSize(productText, 30);
+      const descriptionText = item.product_description || productText;
       doc.text(productLines, 22, yPos);
       
       doc.setFont('helvetica', 'normal');
-      const descLines = doc.splitTextToSize(productText, 50);
+      const descLines = doc.splitTextToSize(descriptionText, 50);
       doc.text(descLines, 60, yPos);
       
       const maxLines = Math.max(productLines.length, descLines.length);
@@ -773,14 +855,14 @@ const handleDownloadPDF = async () => {
     let yPos = tableStartY + 13;
 
     orderItems.forEach((item) => {
-      const productText = `${item.product_name} (${formatPackaging(item.packaging_type)})`;
+      const productText = `${item.product_billingName || item.product_name}`;
       
       doc.setFont('helvetica', 'bold');
-      const productLines = doc.splitTextToSize(productText, 30);
+      const productLines = doc.splitTextToSize(productText, 40);
       doc.text(productLines, 22, yPos);
       
       doc.setFont('helvetica', 'normal');
-      const descLines = doc.splitTextToSize(productText, 50);
+      const descLines = doc.splitTextToSize(productText, 88);
       doc.text(descLines, 60, yPos);
       
       const maxLines = Math.max(productLines.length, descLines.length);
@@ -880,36 +962,42 @@ const handleDownloadPDF = async () => {
 };
 
 const handleViewInvoice = async (order) => {
-    try {
-      // Fetch client data
-      const { data: client } = await supabase
-        .from('client_user')
-        .select('client_businessName, client_delivery_address, client_person_incharge')
-        .eq('client_auth_id', order.client_auth_id)
-        .single();
+  try {
+    // Fetch client data
+    const { data: client } = await supabase
+      .from('client_user')
+      .select('client_businessName, client_delivery_address, client_person_incharge')
+      .eq('client_auth_id', order.client_auth_id)
+      .single();
 
-      // Fetch order items
-      const { data: items } = await supabase
-        .from('client_order_item')
-        .select('*')
-        .eq('order_id', order.id);
+    // Fetch order items with product description
+    const { data: items } = await supabase
+      .from('client_order_item')
+      .select(`
+         *,
+        product:product_id (
+          product_description,
+          product_billingName
+        )
+      `)
+      .eq('order_id', order.id);
 
-      setClientData(client);
-      setOrderItems(items || []);
-      setSelectedOrder(order);
-      setShowInvoiceModal(true);
-    } catch (error) {
-      console.error('Error loading invoice:', error);
-      alert('Failed to load invoice');
-    }
-  };
+    // Map the items to include product_description at the root level
+    const itemsWithDescription = items?.map(item => ({
+      ...item,
+      product_description: item.product?.[0]?.product_description || item.product?.product_description || 'No description available',
+      product_billingName: item.product?.[0]?.product_billingName || item.product?.product_billingName || item.product_name
+    })) || [];
 
-  const formatPackaging = (packaging) => {
-    return packaging
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-  };
+    setClientData(client);
+    setOrderItems(itemsWithDescription);
+    setSelectedOrder(order);
+    setShowInvoiceModal(true);
+  } catch (error) {
+    console.error('Error loading invoice:', error);
+    alert('Failed to load invoice');
+  }
+};
 
   const getSubtotal = (items) => {
     return items.reduce((sum, item) => sum + item.subtotal, 0);
@@ -1348,44 +1436,44 @@ const handleViewInvoice = async (order) => {
                         <tr className="">
                           <td className="py-2 px-2"></td>
                           <td className="py-2 px-2 text-xs font-bold border-l border-gray-400" style={{ color: 'gray' }}>PRODUCT ID</td>
-                          <td className="py-2 px-3 text-xs font-bold" style={{ color: 'gray' }}>NAME/DESCRIPTION</td>
+                          <td className="py-2 px-4 text-xs font-bold" style={{ color: 'gray' }}>NAME</td>
                           <td className="py-2 px-2 text-xs font-bold" style={{ color: 'gray' }}>TYPE</td>
-                          <td className="py-2 px-2 text-xs font-bold text-center" style={{ color: 'gray' }}>QUANTITY</td>
                           <td className="py-2 px-2 text-xs font-bold" style={{ color: 'gray' }}>GELATO TYPE</td>
+                          <td className="py-2 px-2 text-xs font-bold text-center" style={{ color: 'gray' }}>QUANTITY</td>
                           <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>WEIGHT (kg)</td>
-                          <td className="py-2 px-2 text-xs font-bold" style={{ color: 'gray' }}>ADDITIONAL NOTE</td>
-                          <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>TOTAL</td>
+                          <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>UNIT PRICE</td>
                           <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>AMOUNT (S$)</td>
+                          <td className="py-2 px-2"></td>
                           <td className="py-2 px-2"></td>
                         </tr>
                       )}
 
                       {/* Expanded Order Items - Data Rows */}
-                      {expandedRows[order.id] && rowOrderItems[order.id] && rowOrderItems[order.id].length > 0 ? (
-                        rowOrderItems[order.id].map((item, index) => (
-                          <tr key={`${order.id}-item-${index}`} className="bg-white border-b border-gray-200 hover:bg-gray-50">
-                            <td className="py-2 px-2"></td>
-                            <td className="py-2 px-2 text-xs border-l border-gray-400">{item.product_id}</td>
-                            <td className="py-2 px-3 text-xs">{item.product_name}</td>
-                            <td className="py-2 px-2 text-xs">{formatPackaging(item.packaging_type)}</td>
-                            <td className="py-2 px-2 text-xs text-center">{item.quantity}</td>
-                            <td className="py-2 px-2 text-xs">{item.gelato_type || 'Dairy'}</td>
-                            <td className="py-2 px-2 text-xs text-right">{item.weight || '-'}</td>
-                            <td className="py-2 px-2 text-xs">{item.request || '-'}</td>
-                            <td className="py-2 px-2 text-xs text-right">{(item.quantity * item.unit_price).toFixed(2)}</td>
-                            <td className="py-2 px-2 text-xs text-right font-medium">{formatCurrency(item.subtotal)}</td>
-                            <td className="py-2 px-2"></td>
-                          </tr>
-                        ))
-                      ) : expandedRows[order.id] ? (
-                        <tr className="bg-white border-b border-gray-200">
+                    {expandedRows[order.id] && rowOrderItems[order.id] && rowOrderItems[order.id].length > 0 ? (
+                      rowOrderItems[order.id].map((item, index) => (
+                        <tr key={`${order.id}-item-${index}`} className="bg-white border-b border-gray-200 hover:bg-gray-50">
                           <td className="py-2 px-2"></td>
-                          <td colSpan={9} className="text-center py-4 text-gray-500 text-xs border-l-4 border-gray-400">
-                            Loading order items...
-                          </td>
+                          <td className="py-2 px-2 text-xs border-l border-gray-400">{item.product_id}</td>
+                          <td className="py-2 px-3 text-xs">{item.display_product_name}</td>
+                          <td className="py-2 px-2 text-xs">{item.product_type}</td>
+                          <td className="py-2 px-2 text-xs">{item.gelato_type || 'Dairy'}</td>
+                          <td className="py-2 px-2 text-xs text-center">{item.quantity}</td>
+                          <td className="py-2 px-2 text-xs text-right">{item.calculated_weight}</td>
+                          <td className="py-2 px-2 text-xs text-right">{item.unit_price.toFixed(2)}</td>
+                          <td className="py-2 px-2 text-xs text-right font-medium">{formatCurrency(item.subtotal)}</td>
+                          <td className="py-2 px-2"></td>
                           <td className="py-2 px-2"></td>
                         </tr>
-                      ) : null}
+                      ))
+                    ) : expandedRows[order.id] ? (
+                      <tr className="bg-white border-b border-gray-200">
+                        <td className="py-2 px-2"></td>
+                        <td colSpan={10} className="text-center py-4 text-gray-500 text-xs border-l border-gray-400">
+                          Loading order items...
+                        </td>
+                        <td className="py-2 px-2"></td>
+                      </tr>
+                    ) : null}
                     </Fragment>
                   ))}
                 </>
@@ -1487,9 +1575,13 @@ const handleViewInvoice = async (order) => {
           {/* Label Generator Modal */}
           {showLabelGenerator && selectedOrderItems.length > 0 && selectedClientData && (
             <LabelGenerator 
-              orderItems={selectedOrderItems}
-              clientData={selectedClientData}
-            />
+            orderItems={selectedOrderItems}
+            clientData={selectedClientData}
+            onUpdate={(updatedItems) => {
+              // Update the selectedOrderItems with new data
+              setSelectedOrderItems(updatedItems);
+            }}
+          />
           )}
 
           {showCreateOrderModal && (

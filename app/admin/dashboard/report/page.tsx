@@ -42,7 +42,7 @@ interface OrderItem {
   order_id: number;
   product_id: string;
   product_name: string;
-  packaging_type: string;
+  product_type: string;
   quantity: number;
   gelato_type: string;
   weight: number;
@@ -88,18 +88,6 @@ export default function ReportPage() {
   useEffect(() => {
     fetchReports();
   }, []);
-
-  const formatPackaging = (packaging: string): string => {
-    const packagingMap: Record<string, string> = {
-      'tub_5l': 'Gelato [5L/Grey Tub]',
-      'tub_2.5l': 'Gelato [2.5L/Grey Tub]',
-      'cup_100ml': '100ml Cup',
-      'pint_473ml': 'Pint [473ml]',
-      'ice_cream_cake_6inch': 'Ice Cream Cake',
-      'ice_cream_cake_8inch': 'Ice Cream Cake',
-    };
-    return packagingMap[packaging] || packaging;
-  };
 
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
@@ -219,11 +207,11 @@ export default function ReportPage() {
 
       let milkProduction = 0;
       let sugarSyrupProduction = 0;
-      let tub5L = 0;
-      let tub2_5L = 0;
-      let cup100ml = 0;
-      let iceCreamCake = 0;
       let totalItems = 0;
+      let total5lTubs = 0;
+      let total2_5lTubs = 0;
+      let total100mlCups = 0;
+      let totalIceCreamCakes = 0;
 
       const items: ReportDataItem[] = [];
 
@@ -244,22 +232,22 @@ export default function ReportPage() {
             sugarSyrupProduction += weight;
           }
 
-          const type = formatPackaging(item.packaging_type);
-          if (type.includes('5L/Grey Tub')) {
-            tub5L += item.quantity;
-          } else if (type.includes('2.5L/Grey Tub')) {
-            tub2_5L += item.quantity;
-          } else if (type.includes('100ml Cup')) {
-            cup100ml += item.quantity;
-          } else if (type.includes('Ice Cream Cake')) {
-            iceCreamCake += item.quantity;
+          // Count product types based on product_type field
+          if (item.product_type === '5L Tub') {
+            total5lTubs += item.quantity;
+          } else if (item.product_type === '2.5L Tub') {
+            total2_5lTubs += item.quantity;
+          } else if (item.product_type === '100ml Cup') {
+            total100mlCups += item.quantity;
+          } else if (item.product_type === 'Ice Cream Cake') {
+            totalIceCreamCakes += item.quantity;
           }
 
           items.push({
             deliveryDate: order.delivery_date,
             customerName: companyName,
             productName: item.product_name,
-            type: type,
+            type: item.product_type,
             quantity: item.quantity,
             gelatoType: item.gelato_type || 'Dairy',
             weight: weight
@@ -279,10 +267,10 @@ export default function ReportPage() {
         total_items: totalItems,
         milk_production_kg: milkProduction,
         sugar_syrup_production_kg: sugarSyrupProduction,
-        total_5l_tubs: tub5L,
-        total_2_5l_tubs: tub2_5L,
-        total_100ml_cups: cup100ml,
-        total_ice_cream_cakes: iceCreamCake,
+        total_5l_tubs: total5lTubs,
+        total_2_5l_tubs: total2_5lTubs,
+        total_100ml_cups: total100mlCups,
+        total_ice_cream_cakes: totalIceCreamCakes,
         items: items
       };
     }

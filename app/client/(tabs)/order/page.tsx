@@ -8,6 +8,7 @@ import supabase from '@/lib/client';
 interface OrderItem {
   id: number;
   product_name: string;
+  product_description?: string;
   quantity: number;
   unit_price: number;
   subtotal: number;
@@ -65,19 +66,20 @@ export default function OrderPage() {
             if (itemsError) throw itemsError;
 
             const itemsWithImages = await Promise.all(
-              (itemsData || []).map(async (item) => {
-                const { data: productData } = await supabase
-                  .from('product_list')
-                  .select('product_image')
-                  .eq('id', item.product_id)
-                  .single();
+            (itemsData || []).map(async (item) => {
+              const { data: productData } = await supabase
+                .from('product_list')
+                .select('product_image, product_description')
+                .eq('id', item.product_id)
+                .single();
 
-                return {
-                  ...item,
-                  product_image: productData?.product_image || null
-                };
-              })
-            );
+              return {
+                ...item,
+                product_image: productData?.product_image || null,
+                product_description: productData?.product_description || item.product_name
+              };
+            })
+          );
 
             return {
               ...order,
@@ -305,13 +307,14 @@ export default function OrderPage() {
 
       order.items.forEach((item) => {
         const productText = `${item.product_name}`;
+        const descriptionText = `${item.product_description}` || `${item.product_name}`;
         
         doc.setFont('helvetica', 'bold');
         const productLines = doc.splitTextToSize(productText, 30);
         doc.text(productLines, 22, yPos);
         
         doc.setFont('helvetica', 'normal');
-        const descLines = doc.splitTextToSize(productText, 50);
+        const descLines = doc.splitTextToSize(descriptionText, 88);
         doc.text(descLines, 60, yPos);
         
         const maxLines = Math.max(productLines.length, descLines.length);

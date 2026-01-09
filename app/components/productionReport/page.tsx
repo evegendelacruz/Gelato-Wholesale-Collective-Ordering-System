@@ -32,7 +32,7 @@ interface OrderItemDB {
   order_id: number;
   product_id: string;
   product_name: string;
-  packaging_type: string;
+  product_type: string;
   quantity: number;
   gelato_type: string;
   weight: number;
@@ -60,18 +60,6 @@ export default function ReportPage() {
   const [previewData, setPreviewData] = useState<ReportRow[]>([]);
   const [previewDate, setPreviewDate] = useState('');
   const itemsPerPage = 10;
-
-  const formatPackaging = (packaging: string): string => {
-    const packagingMap: Record<string, string> = {
-      'tub_5l': 'Gelato [5L/Grey Tub]',
-      'tub_2.5l': 'Gelato [2.5L/Grey Tub]',
-      'cup_100ml': '100ml Cup',
-      'pint_473ml': 'Pint [473ml]',
-      'ice_cream_cake_6inch': 'Ice Cream Cake',
-      'ice_cream_cake_8inch': 'Ice Cream Cake',
-    };
-    return packagingMap[packaging] || packaging;
-  };
 
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
@@ -183,14 +171,12 @@ export default function ReportPage() {
       items.forEach((item: OrderItemDB) => {
         const weight = item.weight || (item.quantity * 4);
 
-        const type = formatPackaging(item.packaging_type);
-
         // Create the row data with only 7 columns
         const rowData: ReportRow = {
           'Delivery Date': formatDateShort(order.delivery_date),
           'Customer Full Name': companyName,
           'Memo/Description': item.product_name,
-          'Type': type,
+          'Type': item.product_type,
           'Quantity': item.quantity,
           'Gelato Type': item.gelato_type || 'Dairy',
           'Weight (kg)': weight
