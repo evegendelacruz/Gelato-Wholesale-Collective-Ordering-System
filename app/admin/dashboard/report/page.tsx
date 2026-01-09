@@ -14,6 +14,18 @@ interface ReportDataItem {
   gelatoType: string;
   weight: number;
 }
+
+interface ConsolidatedItem {
+  productName: string;
+  type: string;
+  quantity: number;
+  costPerTab: number;
+  pricePerTab: number;
+  totalCost: number;
+  totalSales: number;
+  grossMargin: number;
+} 
+
 interface ClientUser {
   client_businessName?: string;
 }
@@ -23,7 +35,7 @@ interface DeliveryDateData {
   total_items: number;
   milk_production_kg: number;
   sugar_syrup_production_kg: number;
-  items: ReportDataItem[];
+  items: ReportDataItem[] | ConsolidatedItem[];
   type_totals?: { [key: string]: number }
 }
 
@@ -180,8 +192,34 @@ export default function ReportPage() {
   const generateAndSaveYearReport = async (year: number, deliveryDates: string[]) => {
   try {
     const yearReportData: { [deliveryDate: string]: DeliveryDateData } = {};
+    
+    // Group dates by month
+    const datesByMonth = new Map<string, string[]>();
+    deliveryDates.forEach(date => {
+      const monthKey = new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      if (!datesByMonth.has(monthKey)) {
+        datesByMonth.set(monthKey, []);
+      }
+      datesByMonth.get(monthKey)!.push(date);
+    });
+
+    // Track consolidated data per month
+    const monthlyConsolidatedMaps = new Map<string, Map<string, {
+      productName: string;
+      type: string;
+      quantity: number;
+      cost: number;
+      price: number;
+    }>>();
 
     for (const deliveryDate of deliveryDates) {
+      const monthKey = new Date(deliveryDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      
+      if (!monthlyConsolidatedMaps.has(monthKey)) {
+        monthlyConsolidatedMaps.set(monthKey, new Map());
+      }
+      const consolidatedMap = monthlyConsolidatedMaps.get(monthKey)!;
+
       const { data: orders, error: ordersError } = await supabase
         .from('client_order')
         .select(`
@@ -204,26 +242,25 @@ export default function ReportPage() {
 
       if (itemsError) throw itemsError;
 
-      // Fetch product details for all items - UPDATED TO INCLUDE product_milkbased and product_sugarbased
       const productIds = [...new Set(orderItems?.map((item: OrderItem) => item.product_id) || [])];
       const { data: products, error: productsError } = await supabase
         .from('product_list')
-        .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased')
+        .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased, product_cost, product_price')
         .in('id', productIds);
 
       if (productsError) throw productsError;
 
-      // Create maps for quick product lookup - ADDED product_milkbased and product_sugarbased maps
       const productTypeMap = new Map(products?.map(p => [p.id, p.product_type]) || []);
       const productWeightMap = new Map(products?.map(p => [p.id, p.product_weight]) || []);
       const productGelatoTypeMap = new Map(products?.map(p => [p.id, p.product_gelato_type]) || []);
       const productMilkBasedMap = new Map(products?.map(p => [p.id, p.product_milkbased]) || []);
       const productSugarBasedMap = new Map(products?.map(p => [p.id, p.product_sugarbased]) || []);
+      const productCostMap = new Map(products?.map(p => [p.id, p.product_cost]) || []);
+      const productPriceMap = new Map(products?.map(p => [p.id, p.product_price]) || []);
 
       let milkProduction = 0;
       let sugarSyrupProduction = 0;
       let totalItems = 0;
-
       const items: ReportDataItem[] = [];
 
       orders.forEach((order: Order) => {
@@ -238,9 +275,11 @@ export default function ReportPage() {
           const calculatedWeightNum = productWeight * item.quantity;
           const productType = productTypeMap.get(item.product_id) || item.product_type || 'N/A';
           const productGelatoType = productGelatoTypeMap.get(item.product_id) || 'Dairy';
+          const productCost = productCostMap.get(item.product_id) || 0;
+          const productPrice = productPriceMap.get(item.product_id) || 0;
+          
           totalItems += item.quantity;
           
-          // UPDATED CALCULATION: Use product_milkbased and product_sugarbased
           if (productGelatoType === 'Dairy') {
             const milkBased = productMilkBasedMap.get(item.product_id) || 0;
             milkProduction += milkBased * item.quantity;
@@ -258,6 +297,21 @@ export default function ReportPage() {
             gelatoType: productGelatoType,
             weight: parseFloat(calculatedWeightNum.toFixed(1))
           });
+
+          // Aggregate for monthly consolidated view
+          const key = `${item.product_name}|${productType}`;
+          if (consolidatedMap.has(key)) {
+            const existing = consolidatedMap.get(key)!;
+            existing.quantity += item.quantity;
+          } else {
+            consolidatedMap.set(key, {
+              productName: item.product_name,
+              type: productType,
+              quantity: item.quantity,
+              cost: productCost,
+              price: productPrice
+            });
+          }
         });
       });
 
@@ -273,12 +327,44 @@ export default function ReportPage() {
         delivery_date: deliveryDate,
         total_orders: orders.length,
         total_items: totalItems,
-        milk_production_kg: Math.round(milkProduction), // Round to remove decimals
-        sugar_syrup_production_kg: Math.round(sugarSyrupProduction), // Round to remove decimals
+        milk_production_kg: Math.round(milkProduction),
+        sugar_syrup_production_kg: Math.round(sugarSyrupProduction),
         items: items,
         type_totals: Object.fromEntries(typeTotals)
       };
     }
+
+    // Create monthly consolidated sheets
+    monthlyConsolidatedMaps.forEach((consolidatedMap, monthKey) => {
+      const consolidatedItems: ConsolidatedItem[] = Array.from(consolidatedMap.values()).map(item => {
+      const totalCost = item.cost * item.quantity;
+      const totalSales = item.price * item.quantity;
+      const grossMargin = totalSales > 0 ? (totalCost / totalSales) * 100 : 0;
+
+      return {
+        productName: item.productName,
+        type: item.type,
+        quantity: item.quantity,
+        costPerTab: item.cost,
+        pricePerTab: item.price,
+        totalCost: totalCost,
+        totalSales: totalSales,
+        grossMargin: grossMargin
+      };
+    });
+
+      consolidatedItems.sort((a, b) => a.productName.localeCompare(b.productName));
+
+      yearReportData[`${monthKey} Consolidated`] = {
+        delivery_date: `${monthKey} Consolidated`,
+        total_orders: 0,
+        total_items: 0,
+        milk_production_kg: 0,
+        sugar_syrup_production_kg: 0,
+        items: consolidatedItems,
+        type_totals: {}
+      };
+    });
 
     const summaryId = `PROD-${year}`;
     
@@ -311,13 +397,18 @@ const handleDownload = async (report: Report) => {
 
   const workbook = new ExcelJS.Workbook();
 
-  // Sort delivery dates
-  const sortedDates = Object.keys(report.report_data).sort((a, b) => 
-    new Date(a).getTime() - new Date(b).getTime()
-  );
+  // Separate regular dates and consolidated sheets
+  const allKeys = Object.keys(report.report_data);
+  const regularDates = allKeys.filter(key => !key.includes('Consolidated')).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+  const consolidatedSheets = allKeys.filter(key => key.includes('Consolidated')).sort();
+
+  // Type guard function
+  const isReportDataItem = (item: ReportDataItem | ConsolidatedItem): item is ReportDataItem => {
+    return 'deliveryDate' in item;
+  };
 
   // Create a sheet for each delivery date
-  sortedDates.forEach(deliveryDate => {
+  regularDates.forEach(deliveryDate => {
     const dateData = report.report_data[deliveryDate];
     const sheetName = formatDateShort(deliveryDate);
     const worksheet = workbook.addWorksheet(sheetName);
@@ -334,8 +425,9 @@ const handleDownload = async (report: Report) => {
       { header: 'Milk Production (kg)', key: 'milkProduction', width: 25 }
     ];
 
-    // Sort items by product name (Memo/Description)
-    const sortedItems = [...dateData.items].sort((a, b) => 
+    // Filter only ReportDataItem items and sort by product name
+    const reportItems = dateData.items.filter(isReportDataItem);
+    const sortedItems = [...reportItems].sort((a, b) => 
       a.productName.localeCompare(b.productName)
     );
 
@@ -475,6 +567,97 @@ const handleDownload = async (report: Report) => {
     });
   });
 
+  // Create Monthly Consolidated Sheets
+  consolidatedSheets.forEach(consolidatedKey => {
+    const consolidatedData = report.report_data[consolidatedKey];
+    const sheetName = consolidatedKey.replace(' Consolidated', ''); // e.g., "Jan 2024"
+    const consolidatedSheet = workbook.addWorksheet(sheetName);
+    
+    consolidatedSheet.columns = [
+      { header: 'Memo/Description', key: 'description', width: 55 },
+      { header: 'Type', key: 'type', width: 25 },
+      { header: 'Quantity', key: 'quantity', width: 15 },
+      { header: 'Cost per Tab', key: 'costPerTab', width: 15 },
+      { header: 'Price per Tab', key: 'pricePerTab', width: 15 },
+      { header: 'Total Cost', key: 'totalCost', width: 15 },
+      { header: 'Total Sales', key: 'totalSales', width: 15 },
+      { header: 'Gross Margin', key: 'grossMargin', width: 15 }
+    ];
+
+    const consolidatedItems = consolidatedData.items as unknown as ConsolidatedItem[];
+    
+    consolidatedItems.forEach(item => {
+      consolidatedSheet.addRow({
+        description: item.productName,
+        type: item.type,
+        quantity: item.quantity,
+        costPerTab: item.costPerTab,
+        pricePerTab: item.pricePerTab,
+        totalCost: item.totalCost,
+        totalSales: item.totalSales,
+        grossMargin: item.grossMargin
+      });
+    });
+
+    // Style header row
+    const headerRow = consolidatedSheet.getRow(1);
+    headerRow.height = 60;
+    headerRow.font = { name: 'Poppins', size: 11, bold: true };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    headerRow.eachCell((cell) => {
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } }
+      };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD3D3D3' }
+      };
+    });
+
+    // Style data rows
+    consolidatedSheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) {
+        row.eachCell((cell, colNumber) => {
+          cell.font = { name: 'Poppins', size: 11 };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FF000000' } },
+            left: { style: 'thin', color: { argb: 'FF000000' } },
+            bottom: { style: 'thin', color: { argb: 'FF000000' } },
+            right: { style: 'thin', color: { argb: 'FF000000' } }
+          };
+          
+          if (colNumber === 1) {
+            cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
+          } else {
+            cell.alignment = { vertical: 'top', horizontal: 'center', wrapText: true };
+          }
+
+          // Format currency columns
+          if (colNumber === 4 || colNumber === 5 || colNumber === 6 || colNumber === 7) {
+            cell.numFmt = '#,##0.00';
+          }
+          
+          // Format percentage column
+          if (colNumber === 8) {
+            cell.numFmt = '0.00"%"';
+          }
+        });
+      }
+    });
+
+    consolidatedSheet.pageSetup = {
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      margins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 }
+    };
+  });
+
   // Generate Excel file and download
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -485,7 +668,6 @@ const handleDownload = async (report: Report) => {
   link.click();
   window.URL.revokeObjectURL(url);
 };
-
   const filteredReports = reports.filter(report =>
   report.summary_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
   report.year.toString().includes(searchQuery)
@@ -749,7 +931,7 @@ const handleDownload = async (report: Report) => {
                           : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                       }`}
                     >
-                      {formatDateShort(date)}
+                      {date.includes('Consolidated') ? date : formatDateShort(date)}
                     </button>
                   ))}
                 </div>
@@ -771,6 +953,79 @@ const handleDownload = async (report: Report) => {
                       
                       if (!currentData) return null;
 
+                      const isConsolidated = currentDate.includes('Consolidated');
+
+                      if (isConsolidated) {
+                        // Render consolidated table
+                        const consolidatedItems = currentData.items as unknown as ConsolidatedItem[];
+
+                        return (
+                          <div className="w-full">
+                            <table className="w-full border-collapse" style={{ fontFamily: 'Poppins, sans-serif', fontSize: '7px' }}>
+                              <thead>
+                                <tr>
+                                  <th className="border border-black px-2 py-2 text-center font-bold bg-gray-300" style={{ fontSize: '7px', width: '390px' }}>
+                                    Memo/Description
+                                  </th>
+                                  <th className="border border-black px-2 py-2 text-center font-bold bg-gray-300" style={{ fontSize: '7px', width: '150px' }}>
+                                    Type
+                                  </th>
+                                  <th className="border border-black px-2 py-2 text-center font-bold bg-gray-300" style={{ fontSize: '7px', width: '80px' }}>
+                                    Quantity
+                                  </th>
+                                  <th className="border border-black px-2 py-2 text-center font-bold bg-gray-300" style={{ fontSize: '7px', width: '80px' }}>
+                                    Cost per Tab
+                                  </th>
+                                  <th className="border border-black px-2 py-2 text-center font-bold bg-gray-300" style={{ fontSize: '7px', width: '80px' }}>
+                                    Price per Tab
+                                  </th>
+                                  <th className="border border-black px-2 py-2 text-center font-bold bg-gray-300" style={{ fontSize: '7px', width: '80px' }}>
+                                    Total Cost
+                                  </th>
+                                  <th className="border border-black px-2 py-2 text-center font-bold bg-gray-300" style={{ fontSize: '7px', width: '80px' }}>
+                                    Total Sales
+                                  </th>
+                                  <th className="border border-black px-2 py-2 text-center font-bold bg-gray-300" style={{ fontSize: '7px', width: '80px' }}>
+                                    Gross Margin
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {consolidatedItems.map((item, index) => (
+                                  <tr key={index} className="hover:bg-gray-50">
+                                    <td className="border border-black text-left px-2 py-1" style={{ fontSize: '7px' }}>
+                                      {item.productName}
+                                    </td>
+                                    <td className="border border-black text-center px-2 py-1" style={{ fontSize: '7px' }}>
+                                      {item.type}
+                                    </td>
+                                    <td className="border border-black text-center px-2 py-1" style={{ fontSize: '7px' }}>
+                                      {item.quantity}
+                                    </td>
+                                    <td className="border border-black text-center px-2 py-1" style={{ fontSize: '7px' }}>
+                                      {item.costPerTab.toFixed(2)}
+                                    </td>
+                                    <td className="border border-black text-center px-2 py-1" style={{ fontSize: '7px' }}>
+                                      {item.pricePerTab.toFixed(2)}
+                                    </td>
+                                    <td className="border border-black text-center px-2 py-1" style={{ fontSize: '7px' }}>
+                                      {item.totalCost.toFixed(2)}
+                                    </td>
+                                    <td className="border border-black text-center px-2 py-1" style={{ fontSize: '7px' }}>
+                                      {item.totalSales.toFixed(2)}
+                                    </td>
+                                    <td className="border border-black text-center px-2 py-1" style={{ fontSize: '7px' }}>
+                                      {((item.totalCost / item.totalSales) * 100).toFixed(2)}%
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      }
+
+                      // Regular date table
                       return (
                         <div className="w-full">
                           <table className="w-full border-collapse" style={{ fontFamily: 'Poppins, sans-serif', fontSize: '7px' }}>
@@ -802,91 +1057,94 @@ const handleDownload = async (report: Report) => {
                                 </th>
                               </tr>
                             </thead>
-                           <tbody>
-                            {(() => {
-                              
-                              const allRows = [];
-                              const dataRowsCount = currentData.items.length;
-                              
-                              // Build summary array - ALWAYS add these regardless of value
-                              const summaryContent = [];
-                              
-                              // Add Milk Production section - ALWAYS
-                              summaryContent.push({ text: 'Dairy', isBold: false });
-                              summaryContent.push({ text: (currentData.milk_production_kg || 0).toString()});
-                              summaryContent.push({ text: '', isBold: false });
-                              
-                              // Add Sugar Syrup Production section - ALWAYS
-                              summaryContent.push({ text: 'Sugar Syrup Production (kg)', isBold: true });
-                              summaryContent.push({ text: 'Sorbet', isBold: false });
-                              summaryContent.push({ text: (currentData.sugar_syrup_production_kg || 0).toString()});
-                              summaryContent.push({ text: '', isBold: false });
-                              
-                              // Add Type Totals section
-                              if (currentData.type_totals) {
-                                Object.entries(currentData.type_totals).forEach(([type, count]) => {
-                                  summaryContent.push({ text: `Total ${type}`, isBold: true });
-                                  summaryContent.push({ text: count.toString()});
-                                  summaryContent.push({ text: '', isBold: false });
-                                });
-                              }
-                              
-                              console.log('Summary Content Array:', summaryContent);
-                              
-                              // Determine how many rows we need total
-                              const totalRows = Math.max(dataRowsCount, summaryContent.length);
-                              
-                              // Create all rows
-                              for (let i = 0; i < totalRows; i++) {
-                                const item = i < dataRowsCount ? currentData.items[i] : null;
-                                const summaryItem = i < summaryContent.length ? summaryContent[i] : null;
+                            <tbody>
+                              {(() => {
+                                const allRows = [];
+                                const dataRowsCount = currentData.items.length;
                                 
-                                allRows.push(
-                                  <tr key={`row-${i}`} className="hover:bg-gray-50">
-                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                      {item ? formatDateShort(item.deliveryDate) : ''}
-                                    </td>
-                                    <td className="border border-black text-left" style={{ fontSize: '7px' }}>
-                                      {item ? item.customerName : ''}
-                                    </td>
-                                    <td className="border border-black text-left" style={{ fontSize: '7px' }}>
-                                      {item ? item.productName : ''}
-                                    </td>
-                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                      {item ? item.type : ''}
-                                    </td>
-                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                      {item ? item.quantity : ''}
-                                    </td>
-                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                      {item ? item.gelatoType : ''}
-                                    </td>
-                                    <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                      {item ? item.weight.toFixed(1) : ''}
-                                    </td>
-                                    <td 
-                                      className="border border-black text-center" 
-                                      style={{ 
-                                        fontSize: '7px', 
-                                        backgroundColor: '#FFF2CC',
-                                        fontWeight: summaryItem?.isBold ? 'bold' : 'normal'
-                                      }}
-                                    >
-                                      {summaryItem?.text || ''}
-                                    </td>
-                                  </tr>
-                                );
-                              }
-                              
-                              return allRows;
-                            })()}
-                          </tbody>
-                        </table>
+                                // Build summary array - ALWAYS add these regardless of value
+                                const summaryContent = [];
+                                
+                                // Add Milk Production section - ALWAYS
+                                summaryContent.push({ text: 'Dairy', isBold: false });
+                                summaryContent.push({ text: (currentData.milk_production_kg || 0).toString(), isBold: false });
+                                summaryContent.push({ text: '', isBold: false });
+                                
+                                // Add Sugar Syrup Production section - ALWAYS
+                                summaryContent.push({ text: 'Sugar Syrup Production (kg)', isBold: true });
+                                summaryContent.push({ text: 'Sorbet', isBold: false });
+                                summaryContent.push({ text: (currentData.sugar_syrup_production_kg || 0).toString(), isBold: false });
+                                summaryContent.push({ text: '', isBold: false });
+                                
+                                // Add Type Totals section
+                                if (currentData.type_totals) {
+                                  Object.entries(currentData.type_totals).forEach(([type, count]) => {
+                                    summaryContent.push({ text: `Total ${type}`, isBold: true });
+                                    summaryContent.push({ text: count.toString(), isBold: false });
+                                    summaryContent.push({ text: '', isBold: false });
+                                  });
+                                }
+                                
+                                // Determine how many rows we need total
+                                const totalRows = Math.max(dataRowsCount, summaryContent.length);
+                                
+                                // Type guard to check if item is ReportDataItem
+                                const isReportDataItem = (item: ReportDataItem | ConsolidatedItem | null): item is ReportDataItem => {
+                                  return item !== null && 'deliveryDate' in item && 'weight' in item;
+                                };
+                                
+                                // Create all rows
+                                for (let i = 0; i < totalRows; i++) {
+                                  const item = i < dataRowsCount ? currentData.items[i] : null;
+                                  const summaryItem = i < summaryContent.length ? summaryContent[i] : null;
+                                  
+                                  allRows.push(
+                                    <tr key={`row-${i}`} className="hover:bg-gray-50">
+                                      <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                        {isReportDataItem(item) ? formatDateShort(item.deliveryDate) : ''}
+                                      </td>
+                                      <td className="border border-black text-left" style={{ fontSize: '7px' }}>
+                                        {isReportDataItem(item) ? item.customerName : ''}
+                                      </td>
+                                      <td className="border border-black text-left" style={{ fontSize: '7px' }}>
+                                        {item ? item.productName : ''}
+                                      </td>
+                                      <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                        {item ? item.type : ''}
+                                      </td>
+                                      <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                        {item ? item.quantity : ''}
+                                      </td>
+                                      <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                        {isReportDataItem(item) ? item.gelatoType : ''}
+                                      </td>
+                                      <td className="border border-black text-center" style={{ fontSize: '7px' }}>
+                                        {isReportDataItem(item) ? item.weight.toFixed(1) : ''}
+                                      </td>
+                                      <td 
+                                        className="border border-black text-center" 
+                                        style={{ 
+                                          fontSize: '7px', 
+                                          backgroundColor: '#FFF2CC',
+                                          fontWeight: summaryItem?.isBold ? 'bold' : 'normal'
+                                        }}
+                                      >
+                                        {summaryItem?.text || ''}
+                                      </td>
+                                    </tr>
+                                  );
+                                }
+                                
+                                return allRows;
+                              })()}
+                            </tbody>
+                          </table>
                         </div>
                       );
                     })()}
                   </div>
                 </div>
+                  
 
                 {/* Action Buttons */}
                 <div className="px-6 pt-6 pb-6 flex gap-3 shrink-0 border-t border-gray-200">
