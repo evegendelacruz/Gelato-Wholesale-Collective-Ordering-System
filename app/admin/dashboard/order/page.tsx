@@ -858,11 +858,12 @@ const handleDownloadPDF = async () => {
       const productText = `${item.product_billingName || item.product_name}`;
       
       doc.setFont('helvetica', 'bold');
-      const productLines = doc.splitTextToSize(productText, 40);
+      const productLines = doc.splitTextToSize(productText, 30);
+      const descriptionText = item.product_description || productText;
       doc.text(productLines, 22, yPos);
       
       doc.setFont('helvetica', 'normal');
-      const descLines = doc.splitTextToSize(productText, 88);
+      const descLines = doc.splitTextToSize(descriptionText, 50);
       doc.text(descLines, 60, yPos);
       
       const maxLines = Math.max(productLines.length, descLines.length);
@@ -880,6 +881,7 @@ const handleDownloadPDF = async () => {
     for (let i = 20; i < 190; i += 1.5) {
       doc.line(i, yPos + 2, i + 0.75, yPos + 2);
     }
+
 
     // Terms & Conditions
     yPos += 7;
@@ -1447,37 +1449,52 @@ const handleViewInvoice = async (order) => {
                           <td className="py-2 px-2"></td>
                         </tr>
                       )}
-
                       {/* Expanded Order Items - Data Rows */}
-                    {expandedRows[order.id] && rowOrderItems[order.id] && rowOrderItems[order.id].length > 0 ? (
-                      rowOrderItems[order.id].map((item, index) => (
-                        <tr key={`${order.id}-item-${index}`} className="bg-white border-b border-gray-200 hover:bg-gray-50">
+                      {expandedRows[order.id] && rowOrderItems[order.id] && rowOrderItems[order.id].length > 0 ? (
+                        rowOrderItems[order.id].map((item, index) => (
+                          <tr key={`${order.id}-item-${index}`} className="bg-white border-b border-gray-200 hover:bg-gray-50">
+                            <td className="py-2 px-2"></td>
+                            <td className="py-2 px-2 text-xs border-l border-gray-400">{item.product_id}</td>
+                            <td className="py-2 px-3 text-xs">{item.display_product_name}</td>
+                            <td className="py-2 px-2 text-xs">{item.product_type}</td>
+                            <td className="py-2 px-2 text-xs">{item.gelato_type || 'Dairy'}</td>
+                            <td className="py-2 px-2 text-xs text-center">{item.quantity}</td>
+                            <td className="py-2 px-2 text-xs text-right">{item.calculated_weight}</td>
+                            <td className="py-2 px-2 text-xs text-right">{item.unit_price.toFixed(2)}</td>
+                            <td className="py-2 px-2 text-xs text-right font-medium">{formatCurrency(item.subtotal)}</td>
+                            <td className="py-2 px-2"></td>
+                            <td className="py-2 px-2"></td>
+                          </tr>
+                        ))
+                      ) : expandedRows[order.id] ? (
+                        <tr className="bg-white border-b border-gray-200">
                           <td className="py-2 px-2"></td>
-                          <td className="py-2 px-2 text-xs border-l border-gray-400">{item.product_id}</td>
-                          <td className="py-2 px-3 text-xs">{item.display_product_name}</td>
-                          <td className="py-2 px-2 text-xs">{item.product_type}</td>
-                          <td className="py-2 px-2 text-xs">{item.gelato_type || 'Dairy'}</td>
-                          <td className="py-2 px-2 text-xs text-center">{item.quantity}</td>
-                          <td className="py-2 px-2 text-xs text-right">{item.calculated_weight}</td>
-                          <td className="py-2 px-2 text-xs text-right">{item.unit_price.toFixed(2)}</td>
-                          <td className="py-2 px-2 text-xs text-right font-medium">{formatCurrency(item.subtotal)}</td>
-                          <td className="py-2 px-2"></td>
+                          <td colSpan={10} className="text-center py-4 text-gray-500 text-xs border-l border-gray-400">
+                            Loading order items...
+                          </td>
                           <td className="py-2 px-2"></td>
                         </tr>
-                      ))
-                    ) : expandedRows[order.id] ? (
-                      <tr className="bg-white border-b border-gray-200">
-                        <td className="py-2 px-2"></td>
-                        <td colSpan={10} className="text-center py-4 text-gray-500 text-xs border-l border-gray-400">
-                          Loading order items...
-                        </td>
-                        <td className="py-2 px-2"></td>
-                      </tr>
-                    ) : null}
-                    </Fragment>
+                      ) : null}
+                      {/* Notes Row */}
+                      {expandedRows[order.id] && (
+                        <tr className="bg-blue-50 border-b border-gray-200">
+                          <td className="py-3 px-2"></td>
+                          <td colSpan={10} className="py-3 px-2 border-l border-gray-400">
+                            <div className="flex items-start gap-2">
+                              <span className="text-xs font-bold text-gray-700">NOTES:</span>
+                              <span className="text-xs text-gray-600 flex-1">
+                                {order.notes || 'No additional notes'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-2"></td>
+                        </tr>
+                      )}
+                      </Fragment>
                   ))}
                 </>
               )}
+              
               </tbody>
             </table>
           </div>

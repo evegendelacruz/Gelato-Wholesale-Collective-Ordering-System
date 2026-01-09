@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect} from 'react';
 import { X } from 'lucide-react';
 import supabase from '@/lib/client';
 
@@ -25,12 +25,11 @@ interface EditOrderModalProps {
 
 interface OrderItem {
   id: number;
-  product_id: string;
+  product_id: number;
   product_name: string;
   quantity: number;
   unit_price: number;
   subtotal: number;
-  gelato_type: string;
   weight: number;
   request: string | null;
 }
@@ -47,42 +46,76 @@ export default function EditOrderModal({ isOpen, onClose, onSuccess, order }: Ed
     status: ''
   });
 
-  useEffect(() => {
-    const fetchOrderItems = async () => {
-        try {
-        const { data, error } = await supabase
-            .from('client_order_item')
-            .select('*')
-            .eq('order_id', order.id);
+// Update the fetchOrderItems useEffect
+useEffect(() => {
+  const fetchOrderItems = async () => {
+    try {
+      console.log('Fetching order items for order ID:', order.id);
+      
+      // Fetch order items with product details using the foreign key relationship
+      const { data: orderItemsData, error: itemsError } = await supabase
+        .from('client_order_item')
+        .select(`
+          *`)
+        .eq('order_id', order.id);
 
-        if (error) throw error;
-        setOrderItems(data || []);
-        } catch (error) {
-        console.error('Error fetching order items:', error);
-        }
+      console.log('Order items response:', { data: orderItemsData, error: itemsError });
+
+      if (itemsError) {
+        console.error('Items error details:', itemsError);
+        throw itemsError;
+      }
+
+      if (!orderItemsData || orderItemsData.length === 0) {
+        console.log('No order items found');
+        setOrderItems([]);
+        return;
+      }
+
+      // Map the data to include gelato_type from product_list
+      const itemsWithGelatoType = orderItemsData.map(item => ({
+        id: item.id,
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.subtotal,
+        weight: item.calculated_weight || 0,
+        request: item.notes || null,
+        label_allergens: item.label_allergens,
+        label_ingredients: item.label_ingredients,
+        best_before: item.best_before,
+        calculated_weight: item.calculated_weight
+      }));
+
+      console.log('Final items with gelato type:', itemsWithGelatoType);
+      setOrderItems(itemsWithGelatoType);
+    } catch (error) {
+      console.error('Error fetching order items:', error);
+      console.error('Error details:', JSON.stringify(error, null, 2));
+      setOrderItems([]);
+    }
+  };
+
+  if (isOpen && order) {
+    const formatDateForInput = (dateString: string) => {
+      if (!dateString) return '';
+      const date = new Date(dateString);
+      return date.toISOString().split('T')[0];
     };
 
-    if (isOpen && order) {
-        // Format dates for input fields (YYYY-MM-DD)
-        const formatDateForInput = (dateString: string) => {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toISOString().split('T')[0];
-        };
+    setFormData({
+      order_date: formatDateForInput(order.order_date),
+      delivery_date: formatDateForInput(order.delivery_date),
+      delivery_address: order.delivery_address || '',
+      tracking_no: order.tracking_no || '',
+      notes: order.notes || '',
+      status: order.status || 'Pending'
+    });
 
-        setFormData({
-        order_date: formatDateForInput(order.order_date),
-        delivery_date: formatDateForInput(order.delivery_date),
-        delivery_address: order.delivery_address || '',
-        tracking_no: order.tracking_no || '',
-        notes: order.notes || '',
-        status: order.status || 'Pending'
-        });
-
-        // Fetch order items
-        fetchOrderItems();
-    }
-    }, [isOpen, order]);
+    fetchOrderItems();
+  }
+}, [isOpen, order]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -115,58 +148,86 @@ export default function EditOrderModal({ isOpen, onClose, onSuccess, order }: Ed
     return subtotal + gst;
   };
 
+
   const handleSubmit = async () => {
-    try {
-      setLoading(true);
+  try {
+    setLoading(true);
+    console.log('Starting order update...');
+    console.log('Order ID:', order.id);
+    console.log('Form Data:', formData);
+    console.log('Order Items:', orderItems);
 
-      // Validate dates
-      if (!formData.order_date || !formData.delivery_date) {
-        alert('Please fill in all required fields');
-        return;
-      }
-
-      const totalAmount = calculateTotalAmount();
-
-      // Update order
-      const { error: orderError } = await supabase
-        .from('client_order')
-        .update({
-          order_date: formData.order_date,
-          delivery_date: formData.delivery_date,
-          delivery_address: formData.delivery_address,
-          tracking_no: formData.tracking_no,
-          notes: formData.notes,
-          status: formData.status,
-          total_amount: totalAmount,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', order.id);
-
-      if (orderError) throw orderError;
-
-      // Update order items
-      for (const item of orderItems) {
-        const { error: itemError } = await supabase
-          .from('client_order_item')
-          .update({
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            subtotal: item.subtotal,
-            request: item.request
-          })
-          .eq('id', item.id);
-
-        if (itemError) throw itemError;
-      }
-
-      onSuccess();
-    } catch (error) {
-      console.error('Error updating order:', error);
-      alert('Failed to update order. Please try again.');
-    } finally {
+    // Validate dates
+    if (!formData.order_date || !formData.delivery_date) {
+      alert('Please fill in all required fields');
       setLoading(false);
+      return;
     }
-  };
+
+    console.log('Calculating total amount...');
+    const totalAmount = calculateTotalAmount();
+    console.log('Total Amount:', totalAmount);
+
+    // Update order (notes is stored here in client_order table)
+    console.log('Updating order in database...');
+    const { data: orderData, error: orderError } = await supabase
+      .from('client_order')
+      .update({
+        order_date: formData.order_date,
+        delivery_date: formData.delivery_date,
+        delivery_address: formData.delivery_address,
+        tracking_no: formData.tracking_no,
+        notes: formData.notes, // Notes stored in client_order
+        status: formData.status,
+        total_amount: totalAmount,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', order.id);
+
+    console.log('Order update response:', { data: orderData, error: orderError });
+
+    if (orderError) {
+      console.error('Order update error details:', orderError);
+      throw new Error(`Order update failed: ${orderError.message}`);
+    }
+
+    // Update order items (without notes - that's in client_order)
+    console.log('Updating order items...');
+    for (let i = 0; i < orderItems.length; i++) {
+      const item = orderItems[i];
+      console.log(`Updating item ${i + 1}/${orderItems.length}:`, item);
+      
+      const { data: itemData, error: itemError } = await supabase
+        .from('client_order_item')
+        .update({
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          subtotal: item.subtotal
+          // Removed: notes: item.request (this column doesn't exist in client_order_item)
+        })
+        .eq('id', item.id);
+
+      console.log(`Item ${i + 1} update response:`, { data: itemData, error: itemError });
+
+      if (itemError) {
+        console.error(`Item ${i + 1} update error:`, itemError);
+        throw new Error(`Item update failed: ${itemError.message}`);
+      }
+    }
+    onSuccess();
+    onClose();
+  } catch (error: unknown) {
+    console.error('Caught error in handleSubmit:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    console.error('Error message:', errorMessage);
+    console.error('Error stack:', errorStack);
+    alert(`Failed to update order: ${errorMessage}`);
+  } finally {
+    setLoading(false);
+  }
+};
 
   if (!isOpen) return null;
 
@@ -295,51 +356,40 @@ export default function EditOrderModal({ isOpen, onClose, onSuccess, order }: Ed
               Order Items
             </h3>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
-                    <th className="text-left py-2 px-2 font-bold text-xs">PRODUCT</th>
-                    <th className="text-left py-2 px-2 font-bold text-xs">TYPE</th>
-                    <th className="text-center py-2 px-2 font-bold text-xs">QUANTITY</th>
-                    <th className="text-right py-2 px-2 font-bold text-xs">UNIT PRICE</th>
-                    <th className="text-right py-2 px-2 font-bold text-xs">SUBTOTAL</th>
-                    <th className="text-left py-2 px-2 font-bold text-xs">REQUEST</th>
+                    <th className="text-left py-2 px-2 font-bold text-xs w-[25%]">PRODUCT</th>
+                    <th className="text-center py-2 px-2 font-bold text-xs w-[12%]">QUANTITY</th>
+                    <th className="text-right py-2 px-2 font-bold text-xs w-[13%]">UNIT PRICE</th>
+                    <th className="text-right py-2 px-2 font-bold text-xs w-[13%]">SUBTOTAL</th>
                   </tr>
                 </thead>
                 <tbody>
                   {orderItems.map((item, index) => (
                     <tr key={item.id} className="border-b border-gray-200">
                       <td className="py-2 px-2 text-xs">{item.product_name}</td>
-                      <td className="py-2 px-2">
+                      <td className="py-2 px-2 text-center">
                         <input
                           type="number"
                           value={item.quantity}
                           onChange={(e) => handleItemChange(index, 'quantity', Number(e.target.value))}
                           min="1"
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-center text-xs"
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-center text-xs"
                         />
                       </td>
-                      <td className="py-2 px-2">
+                      <td className="py-2 px-2 text-right">
                         <input
                           type="number"
                           value={item.unit_price}
                           onChange={(e) => handleItemChange(index, 'unit_price', Number(e.target.value))}
                           step="0.01"
                           min="0"
-                          className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-xs"
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-right text-xs"
                         />
                       </td>
                       <td className="py-2 px-2 text-right text-xs font-medium">
                         ${item.subtotal.toFixed(2)}
-                      </td>
-                      <td className="py-2 px-2">
-                        <input
-                          type="text"
-                          value={item.request || ''}
-                          onChange={(e) => handleItemChange(index, 'request', e.target.value)}
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                          placeholder="Special request..."
-                        />
                       </td>
                     </tr>
                   ))}

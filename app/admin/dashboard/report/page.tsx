@@ -94,6 +94,10 @@ export default function ReportPage() {
   const [previewDate, setPreviewDate] = useState('');
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [sortBy, setSortBy] = useState<'year-desc' | 'year-asc' | 'date-desc' | 'date-asc'>('year-desc');
+  const [filterBy, setFilterBy] = useState<'all' | '2024' | '2025' | '2026'>('all');
+  const [showSortDropdown, setShowSortDropdown] = useState(false);
+  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const itemsPerPage = 10;
 
   useEffect(() => {
@@ -180,10 +184,10 @@ export default function ReportPage() {
     }
 
     await fetchReports();
-    setShowSuccessModal(true); // Show success modal instead of alert
+    setShowSuccessModal(true); 
   } catch (err) {
     console.error('Error generating reports:', err);
-    setShowErrorModal(true); // Show error modal instead of alert
+    setShowErrorModal(true); 
   } finally {
     setGenerating(false);
   }
@@ -668,10 +672,31 @@ const handleDownload = async (report: Report) => {
   link.click();
   window.URL.revokeObjectURL(url);
 };
-  const filteredReports = reports.filter(report =>
-  report.summary_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-  report.year.toString().includes(searchQuery)
-);
+  const filteredReports = reports
+  .filter(report => {
+    // Search filter
+    const matchesSearch = report.summary_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      report.year.toString().includes(searchQuery);
+    
+    // Year filter
+    const matchesFilter = filterBy === 'all' || report.year.toString() === filterBy;
+    
+    return matchesSearch && matchesFilter;
+  })
+  .sort((a, b) => {
+    switch (sortBy) {
+      case 'year-desc':
+        return b.year - a.year;
+      case 'year-asc':
+        return a.year - b.year;
+      case 'date-desc':
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      case 'date-asc':
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      default:
+        return 0;
+    }
+  });
 
   const totalPages = Math.ceil(filteredReports.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -706,18 +731,120 @@ const handleDownload = async (report: Report) => {
                   />
                 </div>
 
-                {/* Sort By Button */}
-                <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                  <Filter size={20} />
-                  <span>Sort by</span>
-                </button>
+                {/* Sort By Dropdown */}
+                <div className="relative">
+                  <button 
+                    onClick={() => {
+                      setShowSortDropdown(!showSortDropdown);
+                      setShowFilterDropdown(false);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    <Filter size={20} />
+                    <span>Sort by</span>
+                  </button>
+                  
+                  {showSortDropdown && (
+                    <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-300 rounded-lg shadow-lg z-10">
+                      <button
+                        onClick={() => {
+                          setSortBy('year-desc');
+                          setShowSortDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 ${sortBy === 'year-desc' ? 'bg-gray-100 font-semibold' : ''}`}
+                      >
+                        Year (Newest First)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSortBy('year-asc');
+                          setShowSortDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 ${sortBy === 'year-asc' ? 'bg-gray-100 font-semibold' : ''}`}
+                      >
+                        Year (Oldest First)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSortBy('date-desc');
+                          setShowSortDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 ${sortBy === 'date-desc' ? 'bg-gray-100 font-semibold' : ''}`}
+                      >
+                        Date Created (Newest First)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSortBy('date-asc');
+                          setShowSortDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 rounded-b-lg ${sortBy === 'date-asc' ? 'bg-gray-100 font-semibold' : ''}`}
+                      >
+                        Date Created (Oldest First)
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-                {/* Filter Button */}
-                <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                  <Filter size={20} />
-                  <span>Filter</span>
-                </button>
-
+                {/* Filter Dropdown */}
+                <div className="relative">
+                  <button 
+                    onClick={() => {
+                      setShowFilterDropdown(!showFilterDropdown);
+                      setShowSortDropdown(false);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    <Filter size={20} />
+                    <span>Filter</span>
+                    {filterBy !== 'all' && (
+                      <span className="ml-1 px-2 py-0.5 text-xs bg-orange-500 text-white rounded-full">
+                        1
+                      </span>
+                    )}
+                  </button>
+                  
+                  {showFilterDropdown && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-300 rounded-lg shadow-lg z-10">
+                      <button
+                        onClick={() => {
+                          setFilterBy('all');
+                          setShowFilterDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 rounded-t-lg ${filterBy === 'all' ? 'bg-gray-100 font-semibold' : ''}`}
+                      >
+                        All Years
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFilterBy('2026');
+                          setShowFilterDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 ${filterBy === '2026' ? 'bg-gray-100 font-semibold' : ''}`}
+                      >
+                        2026
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFilterBy('2025');
+                          setShowFilterDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 ${filterBy === '2025' ? 'bg-gray-100 font-semibold' : ''}`}
+                      >
+                        2025
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFilterBy('2024');
+                          setShowFilterDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 rounded-b-lg ${filterBy === '2024' ? 'bg-gray-100 font-semibold' : ''}`}
+                      >
+                        2024
+                      </button>
+                    </div>
+                  )}
+                </div>
                 {/* Generate All Reports Button */}
                 <button
                   onClick={generateAllReports}
@@ -1145,7 +1272,6 @@ const handleDownload = async (report: Report) => {
                   </div>
                 </div>
                   
-
                 {/* Action Buttons */}
                 <div className="px-6 pt-6 pb-6 flex gap-3 shrink-0 border-t border-gray-200">
                   <button

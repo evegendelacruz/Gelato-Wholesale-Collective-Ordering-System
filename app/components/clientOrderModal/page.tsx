@@ -33,7 +33,6 @@ interface ClientProduct {
 interface OrderItem {
   product_id: number;
   product_name: string;
-  packaging_type: string;
   quantity: number;
   unit_price: number;
   gelato_type: string;
@@ -59,10 +58,11 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   
   // Step 2: Order Details
-  const [orderDate, setOrderDate] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [notes, setNotes] = useState('');
+  const [country, setCountry] = useState('Singapore');
+  const [postalCode, setPostalCode] = useState('');
   
   // Step 3: Product Selection
   const [availableProducts, setAvailableProducts] = useState<ClientProduct[]>([]);
@@ -96,10 +96,13 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     }
   };
 
+  // Update the fetchClientProducts function to also fetch address data
   const fetchClientProducts = async (clientAuthId: string) => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      
+      // Fetch client products
+      const { data: productsData, error: productsError } = await supabase
         .from('client_product')
         .select(`
           *,
@@ -117,11 +120,26 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
         .eq('client_auth_id', clientAuthId)
         .eq('is_available', true);
 
-      if (error) throw error;
-      setAvailableProducts(data || []);
+      if (productsError) throw productsError;
+      setAvailableProducts(productsData || []);
+
+      // Fetch client address data
+      const { data: clientData, error: clientError } = await supabase
+        .from('client_user')
+        .select('ad_streetName, ad_country, ad_postal')
+        .eq('client_auth_id', clientAuthId)
+        .single();
+
+      if (clientError) throw clientError;
+      
+      // Set address fields with fetched data or defaults
+      setDeliveryAddress(clientData?.ad_streetName || '');
+      setCountry(clientData?.ad_country || 'Singapore');
+      setPostalCode(clientData?.ad_postal || '');
+
     } catch (error) {
-      console.error('Error fetching client products:', error);
-      setMessage({ type: 'error', text: 'Failed to load client products' });
+      console.error('Error fetching client data:', error);
+      setMessage({ type: 'error', text: 'Failed to load client data' });
       setTimeout(() => setMessage({ type: '', text: '' }), 1000);
     } finally {
       setLoading(false);
@@ -169,7 +187,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   };
 
   const handleStep2Next = () => {
-    if (!orderDate || !deliveryDate || !deliveryAddress) {
+    if (!deliveryDate || !deliveryAddress) {
       setMessage({ type: 'error', text: 'Please fill in all required fields' });
       setTimeout(() => setMessage({ type: '', text: '' }), 1000);
       return;
@@ -181,7 +199,6 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     const newItem: OrderItem = {
       product_id: clientProduct.product_list.id,
       product_name: clientProduct.product_list.product_name,
-      packaging_type: clientProduct.product_list.product_type,
       quantity: 1,
       unit_price: clientProduct.custom_price,
       gelato_type: clientProduct.product_list.product_gelato_type,
@@ -192,6 +209,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     setOrderItems([...orderItems, newItem]);
   };
 
+  // Update handleUpdateQuantity to handle custom price
   const handleUpdateQuantity = (index: number, quantity: number) => {
     const newItems = [...orderItems];
     if (quantity <= 0) {
@@ -200,6 +218,13 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       newItems[index].quantity = quantity;
       newItems[index].subtotal = quantity * newItems[index].unit_price;
     }
+    setOrderItems(newItems);
+  };
+
+  const handleUpdatePrice = (index: number, price: number) => {
+    const newItems = [...orderItems];
+    newItems[index].unit_price = price;
+    newItems[index].subtotal = newItems[index].quantity * price;
     setOrderItems(newItems);
   };
 
@@ -220,79 +245,84 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     return calculateTotal() + calculateGST();
   };
 
-  const handleSubmitOrder = async () => {
-    if (orderItems.length === 0) {
+    // Update handleSubmitOrder to include address fields and auto-generate order_date
+    const handleSubmitOrder = async () => {
+      if (orderItems.length === 0) {
         setMessage({ type: 'error', text: 'Please add at least one product' });
         setTimeout(() => setMessage({ type: '', text: '' }), 1000);
         return;
-    }
+      }
 
-    if (!selectedClient) {
+      if (!selectedClient) {
         setMessage({ type: 'error', text: 'Client not selected' });
         setTimeout(() => setMessage({ type: '', text: '' }), 1000);
         return;
-    }
+      }
 
-    try {
+      try {
         setLoading(true);
 
         // Generate Order ID
         const orderId = await generateOrderId();
         const totalAmount = calculateGrandTotal();
+        
+        // Get current timestamp for order_date
+        const currentTimestamp = new Date().toISOString();
 
-        // Insert order - let database trigger handle invoice_id and tracking_no
+        // Insert order with address fields
         const { data: orderData, error: orderError } = await supabase
-        .from('client_order')
-        .insert({
+          .from('client_order')
+          .insert({
             order_id: orderId,
             client_auth_id: selectedClient.client_auth_id,
-            order_date: orderDate,
+            order_date: currentTimestamp,
             delivery_date: deliveryDate,
             delivery_address: deliveryAddress,
+            ad_streetName: deliveryAddress,
+            ad_country: country,
+            ad_postal: postalCode,
             total_amount: totalAmount,
             status: 'Pending',
             notes: notes || null
-        })
-        .select('*')
-        .single();
+          })
+          .select('*')
+          .single();
 
         if (orderError) {
-            console.error('Order creation error:', orderError);
-            throw new Error(`Failed to create order: ${orderError.message || JSON.stringify(orderError)}`);
+          console.error('Order creation error:', orderError);
+          throw new Error(`Failed to create order: ${orderError.message || JSON.stringify(orderError)}`);
         }
 
         if (!orderData) {
-            throw new Error('Order created but no data returned');
+          throw new Error('Order created but no data returned');
         }
 
         console.log('Order created successfully:', orderData);
 
         const orderItemsData = orderItems.map(item => ({
-            order_id: orderData.id,
-            product_id: item.product_id,
-            product_name: item.product_name,
-            packaging_type: item.packaging_type,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            subtotal: item.subtotal
+          order_id: orderData.id,
+          product_id: item.product_id,
+          product_name: item.product_name,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          subtotal: item.subtotal
         }));
 
         console.log('Attempting to insert order items:', orderItemsData);
 
         const { data: insertedItems, error: itemsError } = await supabase
-            .from('client_order_item')
-            .insert(orderItemsData)
-            .select();
+          .from('client_order_item')
+          .insert(orderItemsData)
+          .select();
 
         if (itemsError) {
-            console.error('Order items creation error:', itemsError);
-            // Try to rollback the order if items insertion fails
-            await supabase
-                .from('client_order')
-                .delete()
-                .eq('id', orderData.id);
-            
-            throw new Error(`Failed to create order items: ${itemsError.message || 'Unknown error'}`);
+          console.error('Order items creation error:', itemsError);
+          await supabase
+            .from('client_order')
+            .delete()
+            .eq('id', orderData.id);
+          
+          throw new Error(`Failed to create order items: ${itemsError.message || 'Unknown error'}`);
         }
 
         console.log('Order items created successfully:', insertedItems);
@@ -301,40 +331,41 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
         setCreatedOrderId(orderId);
         setIsSuccessModalOpen(true);
 
-    } catch (error) {
+      } catch (error) {
         console.error('Error creating order:', error);
         
         let errorMessage = 'Failed to create order';
         
         if (error instanceof Error) {
-            errorMessage = error.message;
+          errorMessage = error.message;
         } else if (typeof error === 'object' && error !== null) {
-            errorMessage = JSON.stringify(error);
+          errorMessage = JSON.stringify(error);
         }
         
         setMessage({
-            type: 'error',
-            text: errorMessage
+          type: 'error',
+          text: errorMessage
         });
         setTimeout(() => setMessage({ type: '', text: '' }), 5000);
-    } finally {
+      } finally {
         setLoading(false);
-    }
-};
+      }
+    };
 
-  const handleClose = () => {
-    setStep(1);
-    setSelectedClient(null);
-    setOrderDate('');
-    setDeliveryDate('');
-    setDeliveryAddress('');
-    setNotes('');
-    setOrderItems([]);
-    setClientSearch('');
-    setProductSearch('');
-    setMessage({ type: '', text: '' });
-    onClose();
-  };
+const handleClose = () => {
+  setStep(1);
+  setSelectedClient(null);
+  setDeliveryDate('');
+  setDeliveryAddress('');
+  setCountry('Singapore');
+  setPostalCode('');
+  setNotes('');
+  setOrderItems([]);
+  setClientSearch('');
+  setProductSearch('');
+  setMessage({ type: '', text: '' });
+  onClose();
+};
 
   const handleSuccessClose = () => {
     setIsSuccessModalOpen(false);
@@ -488,79 +519,96 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
 
             {/* Step 2: Order Details */}
             {step === 2 && (
-            <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-4">
                 <div>
-                    <label className="block text-sm font-medium mb-1 text-gray-700">
-                    Order Date <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                    type="date"
-                    value={orderDate}
-                    onChange={(e) => setOrderDate(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    required
-                    />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium mb-1 text-gray-700">
+                  <label className="block text-sm font-medium mb-1 text-gray-700">
                     Delivery Date <span className="text-red-500">*</span>
-                    </label>
-                    <input
+                  </label>
+                  <p className="text-xs text-gray-600 mb-2">
+                    * Minimum 2-day lead time required. Orders placed today can be delivered starting from {new Date(new Date().setDate(new Date().getDate() + 3)).toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' })}.
+                  </p>
+                  <input
                     type="date"
                     value={deliveryDate}
                     onChange={(e) => setDeliveryDate(e.target.value)}
+                    min={new Date(new Date().setDate(new Date().getDate() + 3)).toISOString().split('T')[0]}
                     className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
                     required
-                    />
-                </div>
+                  />
                 </div>
 
-                <div>
-                <label className="block text-sm font-medium mb-1 text-gray-700">
-                    Delivery Address <span className="text-red-500">*</span>
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-700">
+                  Preferred Delivery Address <span className="text-red-500">*</span>
                 </label>
-                <input
+                
+                {/* Street Name */}
+                <div className="mb-3">
+                  <input
                     type="text"
                     value={deliveryAddress}
                     onChange={(e) => setDeliveryAddress(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="Block/Home Number/Street Name/City"
                     required
-                />
+                  />
                 </div>
 
-                {/* Removed Tracking Number field - now auto-generated */}
+                {/* Country and Postal Code in Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <input
+                      type="text"
+                      value={country}
+                      onChange={(e) => setCountry(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Country"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={postalCode}
+                      onChange={(e) => setPostalCode(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Postal Code"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
 
-                <div>
+              <div>
                 <label className="block text-sm font-medium mb-1 text-gray-700">
-                    Notes <span className="text-gray-400 font-normal">(optional)</span>
+                  Notes <span className="text-gray-400 font-normal">(optional)</span>
                 </label>
                 <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
-                </div>
+              </div>
 
-                <div className="flex justify-between gap-3 mt-6">
+              <div className="flex justify-between gap-3 mt-6">
                 <button
-                    onClick={() => setStep(1)}
-                    className="px-8 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
+                  onClick={() => setStep(1)}
+                  className="px-8 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
                 >
-                    Back
+                  Back
                 </button>
                 <button
-                    onClick={handleStep2Next}
-                    disabled={loading}
-                    className="px-8 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: '#FF5722' }}
+                  onClick={handleStep2Next}
+                  disabled={loading}
+                  className="px-8 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: '#FF5722' }}
                 >
-                    Next
+                  Next
                 </button>
-                </div>
+              </div>
             </div>
-            )}
+          )}
 
             {/* Step 3: Product Selection */}
             {step === 3 && (
@@ -634,31 +682,32 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
                   <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
                     Order Items ({orderItems.length})
                   </h3>
-                  {orderItems.length === 0 ? (
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500">
-                      No products added yet. Add products from the list above.
-                    </div>
-                  ) : (
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <div className="max-h-64 overflow-y-auto">
-                        <table className="w-full">
-                          <thead className="bg-gray-50 sticky top-0">
-                            <tr>
-                              <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Product</th>
-                              <th className="text-center py-2 px-3 text-xs font-semibold text-gray-700">Qty</th>
-                              <th className="text-right py-2 px-3 text-xs font-semibold text-gray-700">Price</th>
-                              <th className="text-right py-2 px-3 text-xs font-semibold text-gray-700">Subtotal</th>
-                              <th className="text-center py-2 px-3 text-xs font-semibold text-gray-700">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200">
-                            {orderItems.map((item, index) => (
-                              <tr key={index} className="hover:bg-gray-50">
-                                <td className="py-2 px-3">
-                                  <p className="text-sm font-medium">{item.product_name}</p>
-                                  <p className="text-xs text-gray-600">{item.packaging_type}</p>
-                                </td>
-                                <td className="py-2 px-3">
+               
+                {orderItems.length === 0 ? (
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500">
+                    No products added yet. Add products from the list above.
+                  </div>
+                ) : (
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="max-h-64 overflow-y-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-700">Product</th>
+                            <th className="text-center py-3 px-4 text-xs font-semibold text-gray-700 w-24">Qty</th>
+                            <th className="text-right py-3 px-4 text-xs font-semibold text-gray-700 w-32">Custom Price</th>
+                            <th className="text-right py-3 px-4 text-xs font-semibold text-gray-700 w-28">Subtotal</th>
+                            <th className="text-center py-3 px-4 text-xs font-semibold text-gray-700 w-16">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {orderItems.map((item, index) => (
+                            <tr key={index} className="hover:bg-gray-50">
+                              <td className="py-3 px-4">
+                                <p className="text-sm font-medium">{item.product_name}</p>
+                              </td>
+                              <td className="py-3 px-4 w-24">
+                                <div className="flex justify-center">
                                   <input
                                     type="number"
                                     min="1"
@@ -666,40 +715,53 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
                                     onChange={(e) => handleUpdateQuantity(index, parseInt(e.target.value) || 1)}
                                     className="w-16 px-2 py-1 border border-gray-300 rounded text-center text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                                   />
-                                </td>
-                                <td className="py-2 px-3 text-right text-sm">S$ {item.unit_price.toFixed(2)}</td>
-                                <td className="py-2 px-3 text-right text-sm font-medium">S$ {item.subtotal.toFixed(2)}</td>
-                                <td className="py-2 px-3 text-center">
-                                  <button
-                                    onClick={() => handleRemoveItem(index)}
-                                    className="text-red-500 hover:text-red-700 transition-colors"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 w-32">
+                                <div className="flex justify-end items-center gap-1">
+                                  <span className="text-sm text-gray-600">S$</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={item.unit_price}
+                                    onChange={(e) => handleUpdatePrice(index, parseFloat(e.target.value) || 0)}
+                                    className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                  />
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-right text-sm font-medium w-28">S$ {item.subtotal.toFixed(2)}</td>
+                              <td className="py-3 px-4 text-center w-16">
+                                <button
+                                  onClick={() => handleRemoveItem(index)}
+                                  className="text-red-500 hover:text-red-700 transition-colors inline-flex items-center justify-center"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
 
-                      {/* Order Summary */}
-                      <div className="bg-gray-50 p-4 border-t border-gray-200">
-                        <div className="flex justify-between text-sm mb-2">
-                          <span className="text-gray-600">Subtotal:</span>
-                          <span className="font-medium">S$ {calculateTotal().toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm mb-2">
-                          <span className="text-gray-600">GST (9%):</span>
-                          <span className="font-medium">S$ {calculateGST().toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-lg font-bold border-t pt-2">
-                          <span style={{ color: '#5C2E1F' }}>Total:</span>
-                          <span style={{ color: '#FF5722' }}>S$ {calculateGrandTotal().toFixed(2)}</span>
-                        </div>
+                    {/* Order Summary */}
+                    <div className="bg-gray-50 p-4 border-t border-gray-200">
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-gray-600">Subtotal:</span>
+                        <span className="font-medium">S$ {calculateTotal().toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-gray-600">GST (9%):</span>
+                        <span className="font-medium">S$ {calculateGST().toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-lg font-bold border-t pt-2">
+                        <span style={{ color: '#5C2E1F' }}>Total:</span>
+                        <span style={{ color: '#FF5722' }}>S$ {calculateGrandTotal().toFixed(2)}</span>
                       </div>
                     </div>
-                  )}
+                  </div>
+                )}
                 </div>
 
                 <div className="flex justify-between gap-3 mt-6">
