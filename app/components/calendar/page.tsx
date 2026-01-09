@@ -2,9 +2,19 @@
 
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import supabase from '@/lib/client';
 
+interface OrderForDate {
+  id: string;
+  order_id: string;
+  companyName: string;
+  date: Date;
+  totalQuantity: number;
+}
+
 export default function Calendar() {
+  const router = useRouter();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -82,6 +92,22 @@ export default function Calendar() {
       setLoading(false);
     }
   };
+
+  const handleDateClick = (date: Date, ordersForDate: OrderForDate[]) => {
+  if (ordersForDate.length > 0) {
+    // Format date as YYYY-MM-DD
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    
+    // Store the date in sessionStorage before navigating
+    sessionStorage.setItem('filterDeliveryDate', dateStr);
+    
+    // Navigate to order page without URL parameter
+    router.push('dashboard/order');
+  }
+};
 
   const getDaysInMonth = (date) => {
     const year = date.getFullYear();
@@ -212,7 +238,6 @@ export default function Calendar() {
         ))}
       </div>
 
-      {/* Calendar Grid */}
       <div className="grid grid-cols-7 gap-1">
         {calendarDays.map((dayInfo, index) => {
           const isToday = dayInfo.date.toDateString() === new Date().toDateString();
@@ -223,8 +248,11 @@ export default function Calendar() {
               key={index}
               className={`min-h-24 border p-1 ${
                 dayInfo.isCurrentMonth ? 'bg-white' : 'bg-gray-50'
-              } ${isToday ? 'ring-2 ring-blue-400' : ''}`}
+              } ${isToday ? 'ring-2 ring-blue-400' : ''} ${
+                dayOrders.length > 0 ? 'cursor-pointer hover:bg-gray-100' : ''
+              }`}
               style={{ borderColor: '#8B4513' }}
+              onClick={() => handleDateClick(dayInfo.date, dayOrders)}
             >
               <div
                 className={`text-xs font-semibold mb-1 ${

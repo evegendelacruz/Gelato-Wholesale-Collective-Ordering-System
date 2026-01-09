@@ -80,6 +80,16 @@ export default function OrderPage() {
   }));
 };
 
+// Add this new useEffect to check for date filter from calendar
+useEffect(() => {
+  const filterDate = sessionStorage.getItem('filterDeliveryDate');
+  if (filterDate) {
+    setSearchQuery(filterDate); // Use search query to filter by date
+    // Clear the sessionStorage after applying the filter
+    sessionStorage.removeItem('filterDeliveryDate');
+  }
+}, []);
+
 useEffect(() => {
   const fetchOrders = async () => {
     try {
@@ -156,12 +166,17 @@ useEffect(() => {
 
   const filteredOrders = orders.filter(order => {
   const searchLower = searchQuery.toLowerCase();
+  
+  // Format delivery_date to match YYYY-MM-DD for comparison
+  const deliveryDateStr = order.delivery_date ? new Date(order.delivery_date).toISOString().split('T')[0] : '';
+  
   const matchesSearch = (
     order.order_id?.toString().toLowerCase().includes(searchLower) ||
     order.delivery_address?.toLowerCase().includes(searchLower) ||
     order.status?.toLowerCase().includes(searchLower) ||
     order.tracking_no?.toLowerCase().includes(searchLower) ||
-    order.company_name?.toLowerCase().includes(searchLower)
+    order.company_name?.toLowerCase().includes(searchLower) ||
+    deliveryDateStr.includes(searchQuery) // Check if delivery date matches the search
   );
 
   // Apply status filter
@@ -1271,6 +1286,26 @@ const handleViewInvoice = async (order) => {
               <div className="mb-4 text-sm text-gray-600">
                 Showing {currentOrders.length} of {filteredOrders.length} orders
                 {searchQuery && ` (filtered from ${orders.length} total)`}
+              </div>
+            )}
+
+            {/* Date Filter Badge */}
+            {searchQuery && searchQuery.match(/^\d{4}-\d{2}-\d{2}$/) && (
+              <div className="mb-4 flex items-center gap-2">
+                <span className="text-sm text-gray-600">Filtering by delivery date:</span>
+                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium flex items-center gap-2">
+                  {new Date(searchQuery).toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="hover:bg-blue-200 rounded-full p-0.5"
+                  >
+                    <X size={14} />
+                  </button>
+                </span>
               </div>
             )}
 

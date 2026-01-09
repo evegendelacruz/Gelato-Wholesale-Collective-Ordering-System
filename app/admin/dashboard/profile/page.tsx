@@ -40,7 +40,6 @@ export default function ProfilePage() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [formData, setFormData] = useState({
     fullName: '',
@@ -861,67 +860,15 @@ export default function ProfilePage() {
       <div className="flex-1 flex flex-col">
         <Header />
         <div className="flex flex-1" style={{ backgroundColor: '#f5ebe0', padding: '24px', gap: '24px' }}>
-          {/* Mobile Navigation Toggle Button */}
-          <button
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="lg:hidden"
-            style={{
-              position: 'fixed',
-              bottom: '20px',
-              right: '20px',
-              width: '56px',
-              height: '56px',
-              borderRadius: '50%',
-              backgroundColor: '#ff5722',
-              color: 'white',
-              border: 'none',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              zIndex: 999
-            }}
-          >
-            <Settings size={24} />
-          </button>
-
-          {/* Left Sidebar - Modified for Mobile */}
+          {/* Left Sidebar */}
           <div style={{
-            width: isMobileMenuOpen ? '100%' : '0',
-            maxWidth: '280px',
+            width: '280px',
             backgroundColor: 'white',
-            padding: isMobileMenuOpen ? '32px 24px' : '0',
+            padding: '32px 24px',
             boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
             borderRadius: '12px',
-            height: 'fit-content',
-            position: 'fixed',
-            left: isMobileMenuOpen ? '0' : '-100%',
-            top: '0',
-            bottom: '0',
-            zIndex: 1000,
-            transition: 'all 0.3s ease',
-            overflowY: 'auto'
-          }}
-            className="lg:relative">
-            {/* Close button for mobile */}
-            <button
-              onClick={() => setIsMobileMenuOpen(false)}
-              className="lg:hidden"
-              style={{
-                position: 'absolute',
-                top: '16px',
-                right: '16px',
-                background: 'none',
-                border: 'none',
-                fontSize: '32px',
-                color: '#999',
-                cursor: 'pointer'
-              }}
-            >
-              ×
-            </button>
-
+            height: 'fit-content'
+          }}>
             <h2 style={{
               fontSize: '22px',
               fontWeight: 'bold',
@@ -1102,10 +1049,7 @@ export default function ProfilePage() {
             {/* Navigation */}
             <div>
               <button
-                onClick={() => {
-                  setActiveTab('account');
-                  setIsMobileMenuOpen(false);
-                }}
+                onClick={() => setActiveTab('account')}
                 style={{
                   width: '100%',
                   display: 'flex',
@@ -1128,10 +1072,7 @@ export default function ProfilePage() {
 
               {currentUser?.admin_role === 'Admin' && (
                 <button
-                  onClick={() => {
-                    setActiveTab('access');
-                    setIsMobileMenuOpen(false);
-                  }}
+                  onClick={() => setActiveTab('access')}
                   style={{
                     width: '100%',
                     display: 'flex',
@@ -1153,23 +1094,6 @@ export default function ProfilePage() {
               )}
             </div>
           </div>
-
-          {/* Overlay for mobile menu */}
-          {isMobileMenuOpen && (
-            <div
-              onClick={() => setIsMobileMenuOpen(false)}
-              className="lg:hidden"
-              style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: 'rgba(0,0,0,0.5)',
-                zIndex: 999
-              }}
-            />
-          )}
 
           {/* Main Content */}
           <div style={{ flex: 1 }}>
@@ -1203,12 +1127,7 @@ export default function ProfilePage() {
                 }}>Profile Information</h2>
                 
                 <div style={{ marginBottom: '24px' }}>
-                <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
-                    gap: '20px', 
-                    marginBottom: '20px' 
-                  }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
                   <div>
                     <label style={{
                       display: 'block',
@@ -1270,12 +1189,7 @@ export default function ProfilePage() {
                   </div>
                 </div>
 
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
-                  gap: '20px', 
-                  marginBottom: '32px' 
-                }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '32px' }}>
                 <div>
                   <label style={{
                     display: 'block',
@@ -1445,47 +1359,43 @@ export default function ProfilePage() {
             </div>
           </div>
         ) : activeTab === 'access' && currentUser?.admin_role === 'Admin' ? (
-            <div style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              padding: '20px lg:32px lg:40px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-            }}>
               <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '16px',
-                marginBottom: '32px'
-              }}
-              className="sm:flex-row sm:justify-between sm:items-center">
-                <h2 style={{
-                  fontSize: '20px lg:22px',
-                  fontWeight: 'bold',
-                  color: '#7d1f1f'
-                }}>Access Control</h2>
-                <button 
-                  onClick={() => setShowCreateModal(true)}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#ff5722',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    width: '100%'
-                  }}
-                  className="sm:w-auto"
-                >
-                  <Plus size={18}/>
-                  Create Account
-                </button>
-              </div>
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                padding: '32px 40px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+              }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '32px'
+                }}>
+                  <h2 style={{
+                    fontSize: '22px',
+                    fontWeight: 'bold',
+                    color: '#7d1f1f'
+                  }}>Access Control</h2>
+                  <button 
+                    onClick={() => setShowCreateModal(true)}
+                    style={{
+                      padding: '10px 20px',
+                      backgroundColor: '#ff5722',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    <Plus size={18}/>
+                    Create Account
+                  </button>
+                </div>
 
                 <div style={{ marginBottom: '24px' }}>
                   <div style={{ position: 'relative', maxWidth: '400px' }}>
@@ -1518,15 +1428,7 @@ export default function ProfilePage() {
                 </div>
                 
 
-                <div style={{ 
-                  overflowX: 'auto',
-                  WebkitOverflowScrolling: 'touch'
-                }}>
-                  <table style={{ 
-                    width: '100%', 
-                    minWidth: '800px',
-                    borderCollapse: 'collapse' 
-                  }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid #eee' }}>
                     <th style={{
@@ -1671,33 +1573,11 @@ export default function ProfilePage() {
                   )}
                 </tbody>
               </table>
-                </div>
               </div>
             ) : null}
           </div>
         </div>
       </div>
-
-      <style jsx>{`
-        @media (max-width: 1024px) {
-          /* Tablet adjustments */
-        }
-        
-        @media (max-width: 768px) {
-          /* Mobile adjustments */
-          .modal-content {
-            padding: 24px !important;
-            margin: 10px !important;
-          }
-        }
-        
-        @media (max-width: 640px) {
-          /* Small mobile adjustments */
-          input, select, button {
-            font-size: 16px !important; /* Prevents zoom on iOS */
-          }
-        }
-      `}</style>
 
       {/* Create Account Modal */}
       {showCreateModal && (

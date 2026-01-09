@@ -631,7 +631,7 @@ const handleAddClientProducts = async () => {
     setModalStep(2);
   };
 
-  const handleSubmit = async () => {
+ const handleSubmit = async () => {
   // Validate step 2 fields
   if (!formData.client_person_incharge || !formData.client_person_contact || !formData.client_email) {
     setMessage({ type: 'error', text: 'Please fill in all required fields' });
@@ -659,12 +659,20 @@ const handleAddClientProducts = async () => {
     setLoading(true);
     setMessage({ type: '', text: '' });
 
-    // Save the current admin session before creating client
-    const { data: { session: adminSession } } = await supabase.auth.getSession();
+    // Check if email exists in client_user table
+    const { data: existingClient } = await supabase
+      .from('client_user')
+      .select('client_auth_id, client_email')
+      .eq('client_email', formData.client_email)
+      .maybeSingle();
 
-    // Generate new client ID
+    if (existingClient) {
+      throw new Error('A client account with this email already exists. Please use a different email.');
+    }
+
+    // Generate new client ID and password
     const clientId = await generateClientId();
-    const clientPassword = clientId; // Password same as client_id
+    const clientPassword = clientId;
     
     let acraFilePath = null;
 
@@ -695,30 +703,49 @@ const handleAddClientProducts = async () => {
       acraFilePath = fileName;
     }
 
-    // Create user in Supabase Auth with display name
+    // Format account date for display in email
+    const formattedAccountDate = new Date(formData.client_account_date).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
+    console.log('Creating new client user account for:', formData.client_email);
+
+    // Create user account using signUp (client-side method)
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: formData.client_email,
       password: clientPassword,
       options: {
+        emailRedirectTo: `${window.location.origin}/client/dashboard`,
         data: {
           display_name: formData.client_person_incharge,
-          client_id: clientId
-        },
-        emailRedirectTo: undefined // Prevent confirmation email
+          client_id: clientId,
+          person_incharge: formData.client_person_incharge,
+          business_name: formData.client_businessName,
+          account_date: formattedAccountDate,
+          client_password: clientPassword
+        }
       }
     });
 
     if (authError) {
       console.error('Auth error:', authError);
+      
       // Rollback - delete uploaded file if exists
       if (acraFilePath) {
         await supabase.storage.from('gwc_files').remove([acraFilePath]);
       }
+      
+      // Check if it's a "User already registered" error
+      if (authError.message.includes('already registered')) {
+        throw new Error('This email is already registered. Please use a different email.');
+      }
+      
       throw new Error('Failed to create authentication: ' + authError.message);
     }
 
-    if (!authData.user) {
-      // Rollback - delete uploaded file if exists
+    if (!authData?.user) {
       if (acraFilePath) {
         await supabase.storage.from('gwc_files').remove([acraFilePath]);
       }
@@ -726,14 +753,7 @@ const handleAddClientProducts = async () => {
     }
 
     const authId = authData.user.id;
-
-    // IMPORTANT: Restore admin session immediately after client creation
-    if (adminSession) {
-      await supabase.auth.setSession({
-        access_token: adminSession.access_token,
-        refresh_token: adminSession.refresh_token
-      });
-    }
+    console.log('New client user created:', authId);
 
     // Insert client into database
     const { data: insertData, error: insertError } = await supabase
@@ -763,15 +783,16 @@ const handleAddClientProducts = async () => {
 
     if (insertError) {
       console.error('Database insert error:', insertError);
-      // Rollback - delete uploaded file and auth user
+      // Rollback - delete uploaded file
       if (acraFilePath) {
         await supabase.storage.from('gwc_files').remove([acraFilePath]);
       }
-      // Note: You may want to delete the auth user here if possible
+      // Note: We cannot delete auth user from client side, admin will need to clean up manually if needed
       throw new Error('Failed to save client data: ' + insertError.message);
     }
 
-    console.log('Insert successful:', insertData);
+    console.log('Client account created successfully:', insertData);
+    console.log('Confirmation email sent automatically by Supabase to:', formData.client_email);
 
     // Refresh clients list
     await fetchClients();
@@ -800,8 +821,11 @@ const handleAddClientProducts = async () => {
     });
     setAcraFile(null);
 
-    setMessage({ type: 'success', text: 'Client added successfully!' });
-    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    setMessage({ 
+      type: 'success', 
+      text: `Client added successfully! Confirmation email sent to ${formData.client_email}` 
+    });
+    setTimeout(() => setMessage({ type: '', text: '' }), 5000);
 
   } catch (error) {
     console.error('Error submitting form:', error);
@@ -814,7 +838,6 @@ const handleAddClientProducts = async () => {
     setLoading(false);
   }
 };
-
   const openModal = async () => {
     const newId = await generateClientId();
     setFormData(prev => ({ ...prev, client_id: newId }));
@@ -1126,8 +1149,6 @@ const handleUpdate = async () => {
       if (!matchesSearch) return false;
 
       // Status and business type filter
-      if (filterBy === 'online') return client.is_online;
-      if (filterBy === 'offline') return !client.is_online;
       if (filterBy === 'sole') return client.client_type_business === 'Sole Proprietor';
       if (filterBy === 'partnership') return client.client_type_business === 'Partnership';
       if (filterBy === 'private') return client.client_type_business === 'Private Limited';
@@ -1395,27 +1416,6 @@ const handleUpdate = async () => {
                         All Clients
                       </button>
                       <div className="border-t border-gray-200 my-1"></div>
-                      <div className="px-4 py-2 text-xs text-gray-500 font-medium">Status</div>
-                      <button
-                        onClick={() => {
-                          setFilterBy('online');
-                          setIsFilterDropdownOpen(false);
-                          setCurrentPage(1);
-                        }}
-                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'online' ? 'bg-orange-50 text-orange-600' : ''}`}
-                      >
-                        Online
-                      </button>
-                      <button
-                        onClick={() => {
-                          setFilterBy('offline');
-                          setIsFilterDropdownOpen(false);
-                          setCurrentPage(1);
-                        }}
-                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${filterBy === 'offline' ? 'bg-orange-50 text-orange-600' : ''}`}
-                      >
-                        Offline
-                      </button>
                       <div className="border-t border-gray-200 my-1"></div>
                       <div className="px-4 py-2 text-xs text-gray-500 font-medium">Business Type</div>
                       <button
@@ -1507,9 +1507,6 @@ const handleUpdate = async () => {
                     <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
                       DELIVERY ADDRESS
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                      STATUS
-                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1546,11 +1543,6 @@ const handleUpdate = async () => {
                         <td className="py-3 px-4 text-sm">{client.client_email}</td>
                         <td className="py-3 px-4 text-sm">{client.client_person_contact}</td>
                         <td className="py-3 px-4 text-sm">{client.client_delivery_address}</td>
-                        <td className="py-3 px-4">
-                          <span className={`text-sm ${client.is_online ? 'text-green-600' : 'text-gray-500'}`}>
-                            {client.is_online ? 'Online' : 'Offline'}
-                          </span>
-                        </td>
                       </tr>
                     ))
                   )}
@@ -2376,12 +2368,6 @@ const handleUpdate = async () => {
                     <div>
                       <p className="text-sm text-gray-600">Account Opened Date</p>
                       <p className="font-medium">{new Date(selectedClient.client_account_date).toLocaleDateString()}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Status</p>
-                      <p className={`font-medium ${selectedClient.is_online ? 'text-green-600' : 'text-gray-500'}`}>
-                        {selectedClient.is_online ? 'Online' : 'Offline'}
-                      </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-600">Created At</p>
