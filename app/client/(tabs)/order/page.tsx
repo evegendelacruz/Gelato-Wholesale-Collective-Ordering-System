@@ -8,6 +8,7 @@ import supabase from '@/lib/client';
 interface OrderItem {
   id: number;
   product_name: string;
+  product_billingName?: string; 
   product_description?: string;
   quantity: number;
   unit_price: number;
@@ -69,14 +70,14 @@ export default function OrderPage() {
             (itemsData || []).map(async (item) => {
               const { data: productData } = await supabase
                 .from('product_list')
-                .select('product_image, product_description')
+                .select('product_image, product_description, product_billingName')  
                 .eq('id', item.product_id)
                 .single();
 
               return {
                 ...item,
-                product_image: productData?.product_image || null,
-                product_description: productData?.product_description || item.product_name
+                product_description: productData?.product_description || item.product_name,
+                product_billingName: productData?.product_billingName || item.product_name  
               };
             })
           );
@@ -306,7 +307,7 @@ export default function OrderPage() {
       let yPos = tableStartY + 13;
 
       order.items.forEach((item) => {
-        const productText = `${item.product_name}`;
+        const productText = `${item.product_billingName || item.product_name}`;
         const descriptionText = `${item.product_description}` || `${item.product_name}`;
         
         doc.setFont('helvetica', 'bold');

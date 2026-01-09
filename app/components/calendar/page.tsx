@@ -32,10 +32,10 @@ export default function Calendar() {
           id,
           order_id,
           client_auth_id,
-          order_date,
+          delivery_date,
           client_user!client_order_client_auth_id_fkey(client_businessName)
         `)
-        .order('order_date', { ascending: true });
+        .order('delivery_date', { ascending: true });
 
       if (ordersError) throw ordersError;
 
@@ -45,7 +45,7 @@ export default function Calendar() {
           id: string;
           order_id: string;
           client_auth_id: string;
-          order_date: string;
+          delivery_date: string;
           client_user: { client_businessName: string } | { client_businessName: string }[] | null;
         }) => {
           const { data: items } = await supabase
@@ -68,7 +68,7 @@ export default function Calendar() {
             id: order.id,
             order_id: order.order_id,
             companyName,
-            date: new Date(order.order_date),
+            date: new Date(order.delivery_date),
             totalQuantity
           };
         })
