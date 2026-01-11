@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { X, Calendar } from 'lucide-react';
 import supabase from '@/lib/client';
 import LoadingSpinner from '../loader/page';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 
 interface OrderFormProps {
   isOpen: boolean;
@@ -149,10 +151,6 @@ export default function OrderForm({
     onSubmit(formData);
   };
 
-  const getMinDate = () => {
-    return getMinDeliveryDate();
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -187,30 +185,42 @@ export default function OrderForm({
                     Delivery Date <span className="text-red-500">*</span>
                   </label>
                   <p className="text-xs text-gray-600 mb-2">
-                    * Minimum 2-day lead time required. Orders placed today can be delivered starting from {new Date(getMinDeliveryDate()).toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' })}.
+                    * Minimum 2-day lead time required. Orders placed today can be delivered starting from {new Date(getMinDeliveryDate()).toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' })}. Sundays are not available.
                   </p>
                   <div className="relative">
                     <Calendar 
-                      className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" 
+                      className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none z-10" 
                       size={20} 
                     />
-                    <input
-                      type="date"
-                      name="deliveryDate"
-                      value={formData.deliveryDate}
-                      onChange={handleInputChange}
-                      min={getMinDate()}
+                    <DatePicker
+                      selected={formData.deliveryDate ? new Date(formData.deliveryDate) : null}
+                      onChange={(date: Date | null) => {
+                        if (date) {
+                          const year = date.getFullYear();
+                          const month = String(date.getMonth() + 1).padStart(2, '0');
+                          const day = String(date.getDate()).padStart(2, '0');
+                          const formattedDate = `${year}-${month}-${day}`;
+                          
+                          setFormData(prev => ({
+                            ...prev,
+                            deliveryDate: formattedDate
+                          }));
+                        }
+                      }}
+                      minDate={new Date(getMinDeliveryDate())}
+                      filterDate={(date) => {
+                        // Disable Sundays (0 = Sunday)
+                        return date.getDay() !== 0;
+                      }}
+                      dateFormat="dd/MM/yyyy"
+                      placeholderText="Select delivery date"
+                      disabled={loading}
                       required
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                      disabled={loading}
-                      onClick={(e) => {
-                        const input = e.target as HTMLInputElement;
-                        input.showPicker?.();
-                      }}
+                      wrapperClassName="w-full"
                     />
                   </div>
                 </div>
-
                 {/* Client Name */}
                 <div>
                   <label className="block text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>

@@ -26,6 +26,7 @@ interface Order {
   tracking_no: string;
   order_date: string;
   delivery_address: string;
+  delivery_date?: string; 
   total_amount: number;
   status: string;
   notes: string | null;
@@ -156,245 +157,6 @@ export default function OrderPage() {
     return subtotal * 0.09;
   };
 
-  const handleViewInvoice = async (order: Order) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data: clientData } = await supabase
-        .from('client_user')
-        .select('client_businessName, client_delivery_address, client_person_incharge')
-        .eq('client_auth_id', user.id)
-        .single();
-
-      if (!clientData) return;
-
-      // Generate PDF and open in new tab
-      const jsPDF = (await import('jspdf')).default;
-      
-      const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      const subtotal = getSubtotal(order);
-      const gst = getGST(order);
-
-      doc.setFont('helvetica');
-
-      // Add logo
-      try {
-        const logo = document.createElement('img') as HTMLImageElement;
-        logo.crossOrigin = 'anonymous';
-        logo.src = '/assets/Picture1.jpg';
-        await new Promise((resolve, reject) => {
-          logo.onload = resolve;
-          logo.onerror = reject;
-        });
-        
-        const canvas = document.createElement('canvas');
-        const scale = 3;
-        canvas.width = logo.width * scale;
-        canvas.height = logo.height * scale;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(logo, 0, 0, canvas.width, canvas.height);
-        }
-        const logoData = canvas.toDataURL('image/jpeg', 0.95);
-        
-        const logoWidth = 28.6;
-        const logoHeight = 7.4;
-        const logoX = 161.4;
-        const logoY = 15;
-        doc.addImage(logoData, 'JPEG', logoX, logoY, logoWidth, logoHeight);
-      } catch {
-        console.log('Logo loading failed, continuing without logo');
-      }
-
-      // Header - Company Info
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Momolato Pte Ltd', 20, 20);
-      doc.setFont('helvetica', 'normal');
-      doc.text('21 Tampines Street 92, #04-06', 20, 25);
-      doc.text('Singapore', 20, 30);
-      doc.text('finance@momolato.com', 20, 35);
-      doc.text('GST Registration No. : 201319550R', 20, 40);
-      doc.text('Company Registration No. UEN:', 20, 45);
-      doc.text('201319550R', 20, 50);
-
-      // Title
-      doc.setFontSize(16);
-      doc.setTextColor("#0D909A");
-      doc.text('Tax Invoice', 20, 57);
-      doc.setTextColor(0, 0, 0);
-
-      // Bill To, Ship To, Invoice Details
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text('BILL TO', 20, 67);
-      doc.setFont('helvetica', 'normal');
-      doc.text(clientData.client_businessName || 'N/A', 20, 72);
-      const billAddress = doc.splitTextToSize(order.delivery_address || clientData.client_delivery_address || 'N/A', 45);
-      doc.text(billAddress, 20, 77);
-
-      doc.setFont('helvetica', 'bold');
-      doc.text('SHIP TO', 75, 67);
-      doc.setFont('helvetica', 'normal');
-      doc.text(clientData.client_businessName || 'N/A', 75, 72);
-      const shipAddress = doc.splitTextToSize(order.delivery_address || clientData.client_delivery_address || 'N/A', 45);
-      doc.text(shipAddress, 75, 77);
-
-      // Invoice Details
-      const labelX = 155;
-      const valueX = 157;
-      doc.setFont('helvetica', 'bold');
-      doc.text('INVOICE NO.', labelX, 67, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.text(order.invoice_id, valueX, 67);
-
-      doc.setFont('helvetica', 'bold');
-      doc.text('DATE', labelX, 72, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.text(formatDate(order.order_date), valueX, 72);
-
-      doc.setFont('helvetica', 'bold');
-      doc.text('DUE DATE', labelX, 77, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.text(formatDate(order.order_date), valueX, 77);
-
-      doc.setFont('helvetica', 'bold');
-      doc.text('TERMS', labelX, 82, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.text('Due on receipt', valueX, 82);
-
-      // Horizontal line
-      doc.setDrawColor(77, 184, 186);
-      doc.line(20, 87, 190, 87);
-
-      // Shipping info
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text('SHIP DATE', 20, 93);
-      doc.setFont('helvetica', 'normal');
-      doc.text(formatDate(order.order_date), 20, 98);
-      doc.setFont('helvetica', 'bold');
-      doc.text('TRACKING NO.', 100, 93);
-      doc.setFont('helvetica', 'normal');
-      doc.text(order.tracking_no, 100, 98);
-
-      // Table Header
-      const tableStartY = 104;
-      doc.setFillColor(184, 230, 231);
-      doc.rect(20, tableStartY, 170, 8, 'F');
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor("#0D909A");
-      doc.setFontSize(9);
-      doc.text('PRODUCT /', 22, tableStartY + 3);
-      doc.text('SERVICES', 22, tableStartY + 6);
-      doc.text('DESCRIPTION', 60, tableStartY + 5);
-      doc.text('QTY', 150, tableStartY + 5, { align: 'center' });
-      doc.text('UNIT', 168, tableStartY + 3, { align: 'right' });
-      doc.text('PRICE', 168, tableStartY + 6, { align: 'right' });
-      doc.text('AMOUNT', 185, tableStartY + 5, { align: 'right' });
-
-      // Table Rows
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(0, 0, 0);
-      let yPos = tableStartY + 13;
-
-      order.items.forEach((item) => {
-        const productText = `${item.product_billingName || item.product_name}`;
-        const descriptionText = `${item.product_description}` || `${item.product_name}`;
-        
-        doc.setFont('helvetica', 'bold');
-        const productLines = doc.splitTextToSize(productText, 30);
-        doc.text(productLines, 22, yPos);
-        
-        doc.setFont('helvetica', 'normal');
-        const descLines = doc.splitTextToSize(descriptionText, 88);
-        doc.text(descLines, 60, yPos);
-        
-        const maxLines = Math.max(productLines.length, descLines.length);
-        const centerY = yPos + ((maxLines - 1) * 4) / 2;
-        
-        doc.text(item.quantity.toString(), 150, centerY, { align: 'center' });
-        doc.text(item.unit_price.toFixed(2), 168, centerY, { align: 'right' });
-        doc.text(item.subtotal.toFixed(2), 185, centerY, { align: 'right' });
-        
-        yPos += (maxLines * 4) + 1;
-      });
-
-      doc.setDrawColor('#e0e0e0');
-      doc.setLineWidth(0.2);
-      for (let i = 20; i < 190; i += 1.5) {
-        doc.line(i, yPos + 2, i + 0.75, yPos + 2);
-      }
-
-      // Terms & Conditions
-      yPos += 7;
-      doc.setFont('helvetica', 'normal');
-      doc.text('Terms & Conditions', 20, yPos);
-      doc.setFontSize(10);
-      const terms1 = doc.splitTextToSize(
-        'We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.',
-        70
-      );
-      doc.text(terms1, 20, yPos + 5);
-
-      const terms2 = doc.splitTextToSize(
-        'We are not liable for any damage to products once stored at your premises. Please keep frozen products (gelato and / or popsicles) frozen at -18 degree Celsius and below.',
-        70
-      );
-      doc.text(terms2, 20, yPos + 25);
-
-      // Signature line
-      doc.setDrawColor(0, 0, 0);
-      doc.line(20, yPos + 50, 85, yPos + 50);
-      doc.setFontSize(10);
-      doc.text("Client's Signature & Company Stamp", 20, yPos + 55);
-
-      const totalsLabelX = 100;
-      const totalsValueX = 185;
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text('SUBTOTAL', totalsLabelX, yPos + 5);
-      doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: 'right' });
-
-      doc.text('GST TOTAL', totalsLabelX, yPos + 10);
-      doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: 'right' });
-
-      doc.text('TOTAL', totalsLabelX, yPos + 15);
-      doc.text(order.total_amount.toFixed(2), totalsValueX, yPos + 15, { align: 'right' });
-
-      doc.text('BALANCE DUE', totalsLabelX, yPos + 23);
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`S$${order.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
-
-      // Footer
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      const footerY = 275;
-      doc.text('The team at Momolato deeply appreciates your kind support.', 105, footerY, { align: 'center' });
-      doc.text('Payment instructions:', 105, footerY + 4, { align: 'center' });
-      doc.text('PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)', 105, footerY + 8, { align: 'center' });
-      doc.text('OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd', 105, footerY + 12, { align: 'center' });
-
-      // Open PDF in new tab
-      const pdfBlob = doc.output('blob');
-      const blobUrl = URL.createObjectURL(pdfBlob);
-      window.open(blobUrl, '_blank');
-
-    } catch (error) {
-      console.error('Error loading invoice:', error);
-      alert('Failed to open invoice. Please try again.');
-    }
-  };
-
   return (
     <div className="min-h-screen flex flex-col" style={{ fontFamily: '"Roboto Condensed"', backgroundColor: '#f5e6d3' }}>
       <ClientHeader />
@@ -432,8 +194,11 @@ export default function OrderPage() {
                       Order #{order.order_id}
                     </h3>
                     <p className="text-sm text-gray-600">
-                      Placed on {formatDate(order.order_date)}
+                      Order on {formatDate(order.order_date)}
                     </p>
+                    <span className="text-sm text-gray-600 font-bold" style={{ color: '#7d3c3c' }}>
+                      Delivery on {order.delivery_date ? formatDate(order.delivery_date) : 'Not scheduled'}
+                  </span>
                   </div>
                   <div className="text-right">
                     <span 
@@ -485,14 +250,8 @@ export default function OrderPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => handleViewInvoice(order)}
-                    className="flex-1 px-4 py-2 rounded text-white font-medium hover:opacity-90 transition-opacity"
-                    style={{ backgroundColor: '#e84e1b' }}
-                  >
-                    View Invoice
-                  </button>
+                <div className="border-t border-gray-200 pt-4">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => router.push('/client')}
                     className="flex-1 px-4 py-2 rounded border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
@@ -500,6 +259,7 @@ export default function OrderPage() {
                     Order Again
                   </button>
                 </div>
+              </div>
               </div>
             ))}
           </div>
