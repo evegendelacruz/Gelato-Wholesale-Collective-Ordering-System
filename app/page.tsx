@@ -229,9 +229,14 @@ export default function Home() {
 
             {/* Forgot Password Link */}
             <div className="mt-3 text-center">
-              <a href="#" className="text-sm hover:underline" style={{ color: '#7d3c3c' }}>
+              <button
+                type="button"
+                onClick={() => router.push('/reset')}
+                className="text-sm hover:underline"
+                style={{ color: '#e84e1b' }}
+              >
                 Forgot Password?
-              </a>
+              </button>
             </div>
           </div>
         </div>

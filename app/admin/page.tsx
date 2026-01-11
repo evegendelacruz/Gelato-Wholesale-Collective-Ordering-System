@@ -274,15 +274,20 @@ export default function AdminLogin() {
             {/* Back to User Login Link */}
             <div className="mt-4 text-center">
               <Link href="/" className="text-sm hover:underline" style={{ color: '#7d3c3c' }}>
-                Back
+                Client Here
               </Link>
             </div>
 
             {/* Forgot Password Link */}
-            <div className="mt-4 text-center">
-              <a href="#" className="text-sm hover:underline" style={{ color: '#7d3c3c' }}>
+            <div className="mt-3 text-center">
+              <button
+                type="button"
+                onClick={() => router.push('/admin/reset')}
+                className="text-sm hover:underline"
+                style={{ color: '#e84e1b' }}
+              >
                 Forgot Password?
-              </a>
+              </button>
             </div>
           </div>
         </div>
