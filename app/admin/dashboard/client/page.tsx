@@ -1,7 +1,7 @@
 'use client';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
-import { downloadCredentialImage } from '@/app/components/credentialGenerator/page';
+import { downloadCredentialImage } from '@/app/components/credentialGenerator/credentialGenerator';
 import { useState, useEffect } from 'react';
 import { Search, Filter, Plus, X, Upload, Check, UserMinus, Download } from 'lucide-react';
 import supabase from '@/lib/client';
