@@ -1,4 +1,4 @@
-// app/components/CredentialImageGenerator.tsx
+// app/components/credentialGenerator/credentialGenerator.ts
 'use client';
 
 interface CredentialData {
