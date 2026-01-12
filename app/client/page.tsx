@@ -345,7 +345,6 @@ export default function ClientPage() {
         throw new Error('Not authenticated. Please log in.');
       }
 
-      // Fetch products assigned to this client with their details
       const { data, error } = await supabase
         .from('client_product')
         .select(`
@@ -364,6 +363,7 @@ export default function ClientPage() {
         `)
         .eq('client_auth_id', user.id)
         .eq('is_available', true)
+        .eq('is_published', true) 
         .order('created_at', { ascending: false });
 
       if (error) {

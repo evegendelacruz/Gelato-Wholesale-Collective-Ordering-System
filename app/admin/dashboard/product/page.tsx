@@ -942,19 +942,19 @@ export default function ProductPage() {
           product_id: productListId,
           custom_price: Number(formData.price_sgd), // Use product price as default
           is_available: true,
+          is_published: false, // NOT PUBLISHED - needs customization
           created_at: new Date().toISOString()
         }));
 
         const { error: clientProductError } = await supabase
-        .from('client_product')
-        .insert(clientProductInserts);
+          .from('client_product')
+          .insert(clientProductInserts);
 
         if (clientProductError) {
-        console.error('Error adding product to clients:', clientProductError);
-        // Don't fail the whole operation, just log the error
+          console.error('Error adding product to clients:', clientProductError);
+          // Don't fail the whole operation, just log the error
+        }
       }
-    }
-
       // Refresh products list
       await fetchProducts();
 
