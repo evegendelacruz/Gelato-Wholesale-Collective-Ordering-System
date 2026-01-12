@@ -95,11 +95,16 @@ export default function OrderForm({
   };
 
   const getMinDeliveryDate = (): string => {
-    const today = new Date();
-    // Add 2 days lead time (today + 2 days)
-    today.setDate(today.getDate() + 2);
-    return today.toISOString().split('T')[0];
-  };
+  const today = new Date();
+  today.setDate(today.getDate() + 2);
+  
+  // If the minimum delivery date falls on Sunday, push to Monday
+  if (today.getDay() === 0) {
+    today.setDate(today.getDate() + 1);
+  }
+  
+  return today.toISOString().split('T')[0];
+};
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
