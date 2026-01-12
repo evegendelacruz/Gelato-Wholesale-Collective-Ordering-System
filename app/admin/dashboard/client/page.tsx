@@ -105,6 +105,7 @@ export default function ClientAccountPage() {
   const [isClientProductListModalOpen, setIsClientProductListModalOpen] = useState(false);
   const [editingProducts, setEditingProducts] = useState<Map<number, number>>(new Map());
   const itemsPerPage = 10;
+  const [assignedProductCount, setAssignedProductCount] = useState(0);
   const [contactErrors, setContactErrors] = useState({
     business: '',
     person: ''
@@ -376,34 +377,45 @@ const handleSaveProductChanges = async () => {
     }
   };
 
-  const fetchAvailableProducts = async (clientAuthId: string) => {
+  // Modify fetchAvailableProducts to show assigned products at top
+const fetchAvailableProducts = async (clientAuthId: string) => {
   try {
-    // Fetch all products
-    const { data: productsData, error: productsError } = await supabase
+    // Fetch products that were assigned to this client during product creation
+    const { data: assignedProductsData, error: assignedError } = await supabase
+      .from('client_product')
+      .select('product_id')
+      .eq('client_auth_id', clientAuthId);
+
+    if (assignedError) throw assignedError;
+
+    const assignedProductIds = new Set(assignedProductsData?.map(item => item.product_id) || []);
+
+    // Fetch ALL products
+    const { data: allProducts, error: productsError } = await supabase
       .from('product_list')
       .select('*')
       .order('product_name', { ascending: true });
 
     if (productsError) throw productsError;
 
-    // Fetch products already assigned to this client using client_auth_id
-    const { data: assignedData, error: assignedError } = await supabase
-      .from('client_product')
-      .select('product_id')
-      .eq('client_auth_id', clientAuthId)
-      .eq('is_available', true);
+    // Separate into assigned and other products
+    const assignedProducts: Product[] = [];
+    const otherProducts: Product[] = [];
 
-    if (assignedError) throw assignedError;
+    allProducts?.forEach(product => {
+      if (assignedProductIds.has(product.id)) {
+        assignedProducts.push(product);
+      } else {
+        otherProducts.push(product);
+      }
+    });
 
-    // Create a Set of assigned product IDs
-    const assignedProductIds = new Set(assignedData?.map(item => item.product_id) || []);
-
-    // Filter out already assigned products
-    const availableProductsFiltered = productsData?.filter(
-      product => !assignedProductIds.has(product.id)
-    ) || [];
-
-    setAvailableProducts(availableProductsFiltered);
+    // Combine with assigned products first
+    setAvailableProducts([...assignedProducts, ...otherProducts]);
+    
+    // Store the count of assigned products for rendering
+    setAssignedProductCount(assignedProducts.length);
+    
   } catch (error) {
     console.error('Error fetching products:', error);
     setMessage({ 
@@ -494,14 +506,39 @@ const handleAddClientProducts = async () => {
     
     console.log('Using Client Auth ID:', selectedClientAuthId);
 
-    // Prepare data for insertion using client_auth_id and product_list.id
-    const clientProducts = Array.from(selectedProducts.entries()).map(([productListId, customPrice]) => ({
-      client_auth_id: selectedClientAuthId, // Use the stored client_auth_id directly
-      product_id: parseInt(productListId),
-      custom_price: customPrice,
-      is_available: true,
-      created_at: new Date().toISOString()
-    }));
+    // First, check for existing products for this client
+    const { data: existingProducts, error: checkError } = await supabase
+      .from('client_product')
+      .select('product_id')
+      .eq('client_auth_id', selectedClientAuthId);
+
+    if (checkError) {
+      console.error('Error checking existing products:', checkError);
+      throw new Error('Failed to check existing products');
+    }
+
+    const existingProductIds = new Set(existingProducts?.map(p => p.product_id) || []);
+
+    // Prepare data for insertion, filtering out products that already exist
+    const clientProducts = Array.from(selectedProducts.entries())
+      .filter(([productListId]) => !existingProductIds.has(parseInt(productListId)))
+      .map(([productListId, customPrice]) => ({
+        client_auth_id: selectedClientAuthId,
+        product_id: parseInt(productListId),
+        custom_price: customPrice,
+        is_available: true,
+        created_at: new Date().toISOString()
+      }));
+
+    if (clientProducts.length === 0) {
+      setMessage({ 
+        type: 'error', 
+        text: 'All selected products are already assigned to this client.' 
+      });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      setLoading(false);
+      return;
+    }
 
     console.log('Client Products to Insert:', clientProducts);
 
@@ -512,7 +549,13 @@ const handleAddClientProducts = async () => {
 
     if (error) {
       console.error('Supabase Insert Error:', error);
-      throw error;
+      throw new Error(error.message || 'Failed to add products to client');
+    }
+
+    const skippedCount = selectedProducts.size - clientProducts.length;
+    let successMessage = `${clientProducts.length} product(s) added to client successfully!`;
+    if (skippedCount > 0) {
+      successMessage += ` (${skippedCount} product(s) were already assigned and skipped)`;
     }
 
     // Close modal and show success
@@ -520,9 +563,9 @@ const handleAddClientProducts = async () => {
     setIsClientProductSuccessOpen(true);
     setSelectedProducts(new Map());
     setProductSearchQuery('');
-    setSelectedClientAuthId(null); // Clear the stored client_auth_id
+    setSelectedClientAuthId(null);
 
-    setMessage({ type: 'success', text: 'Products added to client successfully!' });
+    setMessage({ type: 'success', text: successMessage });
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
 
   } catch (error) {
@@ -536,7 +579,6 @@ const handleAddClientProducts = async () => {
     setLoading(false);
   }
 };
-
 
   const generateClientId = async (): Promise<string> => {
     try {
@@ -1713,7 +1755,7 @@ const handleUpdate = async () => {
         </main>
       </div>
 
-      {/* Add Client Product Modal */}
+      {/* Client Product Modal - Modified */}
       {isClientProductModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
           <div className="bg-white rounded-lg w-full max-w-5xl mx-4 max-h-[90vh] overflow-y-auto">
@@ -1732,7 +1774,8 @@ const handleUpdate = async () => {
                     setIsClientProductModalOpen(false);
                     setSelectedProducts(new Map());
                     setProductSearchQuery('');
-                    setSelectedClientAuthId(null); // Clear the stored client_auth_id
+                    setSelectedClientAuthId(null);
+                    setAssignedProductCount(0);
                   }} 
                   disabled={loading} 
                   className="text-gray-400 hover:text-gray-600 disabled:cursor-not-allowed"
@@ -1773,67 +1816,149 @@ const handleUpdate = async () => {
                 </div>
               </div>
 
-              {/* Products Table */}
-              <div className="overflow-x-auto max-h-96 border border-gray-200 rounded-lg">
-                <table className="w-full">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr className="border-b">
-                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F', width: '50px' }}>
-                        SELECT
-                      </th>
-                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                        PRODUCT ID
-                      </th>
-                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                        PRODUCT NAME
-                      </th>
-                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                        TYPE
-                      </th>
-                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                        DEFAULT PRICE
-                      </th>
-                      <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                        CUSTOM PRICE
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {availableProducts
-                      .filter(product => 
-                        product.product_name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-                        product.product_id.toLowerCase().includes(productSearchQuery.toLowerCase())
-                      )
-                      .map((product) => (
-                      <tr key={product.product_id} className="border-b hover:bg-gray-50">
-                        <td className="py-3 px-4">
-                          <input 
-                            type="checkbox" 
-                            className="w-4 h-4 cursor-pointer"
-                            checked={selectedProducts.has(product.id.toString())}
-                            onChange={(e) => handleProductSelection(product.id, e.target.checked, product.product_price)}
-                          />
-                        </td>
-                        <td className="py-3 px-4 text-sm">{product.product_id}</td>
-                        <td className="py-3 px-4 text-sm">{product.product_name}</td>
-                        <td className="py-3 px-4 text-sm">{product.product_type}</td>
-                        <td className="py-3 px-4 text-sm">S$ {product.product_price.toFixed(2)}</td>
-                        <td className="py-3 px-4">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={selectedProducts.get(product.id.toString()) || ''}
-                            onChange={(e) => handleCustomPriceChange(product.id.toString(), e.target.value)}
-                            disabled={!selectedProducts.has(product.id.toString())}
-                            placeholder="0.00"
-                            className="w-32 px-3 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
-                          />
-                        </td>
+              {/* Assigned Products Section */}
+              {assignedProductCount > 0 && (
+                <>
+                  <div className="mb-3">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                      Products Assigned to This Client ({assignedProductCount})
+                    </h3>
+                    <div className="overflow-x-auto max-h-64 border border-orange-200 rounded-lg bg-orange-50">
+                      <table className="w-full">
+                        <thead className="bg-orange-100 sticky top-0">
+                          <tr className="border-b border-orange-200">
+                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F', width: '50px' }}>
+                              SELECT
+                            </th>
+                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                              PRODUCT ID
+                            </th>
+                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                              PRODUCT NAME
+                            </th>
+                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                              TYPE
+                            </th>
+                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                              DEFAULT PRICE
+                            </th>
+                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                              CUSTOM PRICE
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {availableProducts
+                            .slice(0, assignedProductCount)
+                            .filter(product => 
+                              product.product_name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+                              product.product_id.toLowerCase().includes(productSearchQuery.toLowerCase())
+                            )
+                            .map((product) => (
+                            <tr key={product.product_id} className="border-b border-orange-200 hover:bg-orange-100 bg-white">
+                              <td className="py-3 px-4">
+                                <input 
+                                  type="checkbox" 
+                                  className="w-4 h-4 cursor-pointer"
+                                  checked={selectedProducts.has(product.id.toString())}
+                                  onChange={(e) => handleProductSelection(product.id, e.target.checked, product.product_price)}
+                                />
+                              </td>
+                              <td className="py-3 px-4 text-sm">{product.product_id}</td>
+                              <td className="py-3 px-4 text-sm">{product.product_name}</td>
+                              <td className="py-3 px-4 text-sm">{product.product_type}</td>
+                              <td className="py-3 px-4 text-sm">S$ {product.product_price.toFixed(2)}</td>
+                              <td className="py-3 px-4">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={selectedProducts.get(product.id.toString()) || ''}
+                                  onChange={(e) => handleCustomPriceChange(product.id.toString(), e.target.value)}
+                                  disabled={!selectedProducts.has(product.id.toString())}
+                                  placeholder="0.00"
+                                  className="w-32 px-3 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="my-4 border-t-2 border-gray-300"></div>
+                </>
+              )}
+
+              {/* Other Products Section */}
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                  Other Available Products ({availableProducts.length - assignedProductCount})
+                </h3>
+                <div className="overflow-x-auto max-h-64 border border-gray-200 rounded-lg">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr className="border-b">
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F', width: '50px' }}>
+                          SELECT
+                        </th>
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          PRODUCT ID
+                        </th>
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          PRODUCT NAME
+                        </th>
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          TYPE
+                        </th>
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          DEFAULT PRICE
+                        </th>
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                          CUSTOM PRICE
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {availableProducts
+                        .slice(assignedProductCount)
+                        .filter(product => 
+                          product.product_name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+                          product.product_id.toLowerCase().includes(productSearchQuery.toLowerCase())
+                        )
+                        .map((product) => (
+                        <tr key={product.product_id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 px-4">
+                            <input 
+                              type="checkbox" 
+                              className="w-4 h-4 cursor-pointer"
+                              checked={selectedProducts.has(product.id.toString())}
+                              onChange={(e) => handleProductSelection(product.id, e.target.checked, product.product_price)}
+                            />
+                          </td>
+                          <td className="py-3 px-4 text-sm">{product.product_id}</td>
+                          <td className="py-3 px-4 text-sm">{product.product_name}</td>
+                          <td className="py-3 px-4 text-sm">{product.product_type}</td>
+                          <td className="py-3 px-4 text-sm">S$ {product.product_price.toFixed(2)}</td>
+                          <td className="py-3 px-4">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={selectedProducts.get(product.id.toString()) || ''}
+                              onChange={(e) => handleCustomPriceChange(product.id.toString(), e.target.value)}
+                              disabled={!selectedProducts.has(product.id.toString())}
+                              placeholder="0.00"
+                              className="w-32 px-3 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* Selected Count */}

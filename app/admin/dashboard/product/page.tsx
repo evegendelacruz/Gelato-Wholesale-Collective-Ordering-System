@@ -97,6 +97,14 @@ export default function ProductPage() {
   const [addOptionLabel, setAddOptionLabel] = useState("");
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
+  const [availableClients, setAvailableClients] = useState<Array<{
+    client_id: string;
+    client_auth_id: string;
+    client_businessName: string;
+    client_person_incharge: string;
+  }>>([]);
+  const [selectedClients, setSelectedClients] = useState<Set<string>>(new Set());
+  const [clientSearchQuery, setClientSearchQuery] = useState('');
 
   const [formData, setFormData] = useState({
     product_id: "",
@@ -142,6 +150,32 @@ export default function ProductPage() {
     };
     loadOptions();
   }, []);
+
+    // Add function to fetch clients
+  const fetchClients = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('client_user')
+        .select('client_id, client_auth_id, client_businessName, client_person_incharge')
+        .order('client_businessName', { ascending: true });
+
+      if (error) throw error;
+      setAvailableClients(data || []);
+    } catch (error) {
+      console.error('Error fetching clients:', error);
+    }
+  };
+
+  // Add handler for client selection
+  const handleClientSelection = (clientAuthId: string, isSelected: boolean) => {
+    const newSelected = new Set(selectedClients);
+    if (isSelected) {
+      newSelected.add(clientAuthId);
+    } else {
+      newSelected.delete(clientAuthId);
+    }
+    setSelectedClients(newSelected);
+  };
 
   const handleRowClick = (product: Product) => {
     setViewProduct(product);
@@ -900,6 +934,27 @@ export default function ProductPage() {
 
       console.log("Insert successful:", insertData);
 
+      // Add product to selected clients if any
+      if (selectedClients.size > 0 && insertData && insertData[0]) {
+        const productListId = insertData[0].id;
+        const clientProductInserts = Array.from(selectedClients).map(clientAuthId => ({
+          client_auth_id: clientAuthId,
+          product_id: productListId,
+          custom_price: Number(formData.price_sgd), // Use product price as default
+          is_available: true,
+          created_at: new Date().toISOString()
+        }));
+
+        const { error: clientProductError } = await supabase
+        .from('client_product')
+        .insert(clientProductInserts);
+
+        if (clientProductError) {
+        console.error('Error adding product to clients:', clientProductError);
+        // Don't fail the whole operation, just log the error
+      }
+    }
+
       // Refresh products list
       await fetchProducts();
 
@@ -926,28 +981,32 @@ export default function ProductPage() {
         cost: "",
       });
       setProductPhoto(null);
-      setPhotoPreview("");
+      setPhotoPreview('');
+      setSelectedClients(new Set());
+      setClientSearchQuery('');
 
-      setMessage({ type: "success", text: "Product added successfully!" });
-      setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+      setMessage({ type: 'success', text: 'Product added successfully!' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (error) {
-      console.error("Error submitting form:", error);
+      console.error('Error submitting form:', error);
       setMessage({
-        type: "error",
+        type: 'error',
         text:
           error instanceof Error
             ? error.message
-            : "Failed to add product. Please try again.",
+            : 'Failed to add product. Please try again.',
       });
-      setTimeout(() => setMessage({ type: "", text: "" }), 5000);
+      setTimeout(() => setMessage({ type: '', text: '' }), 5000);
     } finally {
       setLoading(false);
     }
   };
 
+ // Call fetchClients when modal opens
   const openModal = async () => {
     const newId = await generateProductId();
     setFormData((prev) => ({ ...prev, product_id: newId }));
+    await fetchClients(); 
     setIsModalOpen(true);
   };
 
@@ -956,23 +1015,25 @@ export default function ProductPage() {
     setIsEditMode(false);
     setSelectedProduct(null);
     setProductPhoto(null);
-    setPhotoPreview("");
-    setMessage({ type: "", text: "" });
+    setPhotoPreview('');
+    setMessage({ type: '', text: '' });
+    setSelectedClients(new Set());
+    setClientSearchQuery('');
     setFormData({
-      product_id: "",
-      product_name: "",
-      product_type: "",
-      gelato_type: "",
-      weight_kg: "",
-      milk_based_kg: "",
-      sugar_syrup_based_kg: "",
-      shelf_life: "",
-      price_sgd: "",
-      allergen: "",
-      ingredient: "",
-      billing_name: "",
-      description: "",
-      cost: "",
+      product_id: '',
+      product_name: '',
+      product_type: '',
+      gelato_type: '',
+      weight_kg: '',
+      milk_based_kg: '',
+      sugar_syrup_based_kg: '',
+      shelf_life: '',
+      price_sgd: '',
+      allergen: '',
+      ingredient: '',
+      billing_name: '',
+      description: '',
+      cost: '',
     });
   };
 
@@ -1894,6 +1955,69 @@ export default function ProductPage() {
                     </div>
                   </div>
                 </div>
+                {/* Client Assignment Section - Only show when NOT in edit mode */}
+                {!isEditMode && (
+                  <div>
+                    <h3 className="text-base font-semibold mb-3 text-gray-700">
+                      ASSIGN TO CLIENTS (Optional)
+                    </h3>
+                    <div className="border border-gray-300 rounded-lg p-4">
+                      {/* Client Search */}
+                      <div className="mb-3">
+                        <div className="relative">
+                          <Search 
+                            className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" 
+                            size={16} 
+                          />
+                          <input
+                            type="text"
+                            placeholder="Search clients..."
+                            value={clientSearchQuery}
+                            onChange={(e) => setClientSearchQuery(e.target.value)}
+                            className="pl-9 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Clients List */}
+                      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded">
+                        {availableClients.length === 0 ? (
+                          <div className="text-center py-6 text-gray-500 text-sm">
+                            No clients available
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-gray-200">
+                            {availableClients
+                              .filter(client => 
+                                client.client_businessName.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
+                                client.client_person_incharge.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
+                                client.client_id.toLowerCase().includes(clientSearchQuery.toLowerCase())
+                              )
+                              .map((client) => (
+                                <div key={client.client_auth_id} className="flex items-center gap-3 p-3 hover:bg-gray-50">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedClients.has(client.client_auth_id)}
+                                    onChange={(e) => handleClientSelection(client.client_auth_id, e.target.checked)}
+                                    className="w-4 h-4 cursor-pointer"
+                                  />
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium text-gray-900">{client.client_businessName}</p>
+                                    <p className="text-xs text-gray-500">{client.client_id} • {client.client_person_incharge}</p>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Selected Count */}
+                      <div className="mt-3 text-sm text-gray-600">
+                        {selectedClients.size} client{selectedClients.size !== 1 ? 's' : ''} selected
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex justify-center mt-6">
                   <button

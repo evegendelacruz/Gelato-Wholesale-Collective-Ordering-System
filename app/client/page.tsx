@@ -34,7 +34,7 @@ interface Message {
 
 function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBasketAdded: (productName: string) => void }) {
   const [isAdding, setIsAdding] = useState(false);
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(0);
   const getImageUrl = (imagePath: string | null): string => {
     if (!imagePath) return ''; 
     
@@ -98,7 +98,7 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
       }
 
       onBasketAdded(product.product_list.product_name);
-      setQuantity(1); // Reset quantity after adding
+      setQuantity(0); // Reset quantity after adding
 
     } catch (error) {
       console.error('Error adding to basket:', error);
@@ -192,7 +192,7 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
               className="px-2 min-[360px]:px-3 py-2 rounded text-white text-[10px] min-[360px]:text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50 whitespace-nowrap"
               style={{ backgroundColor: '#e84e1b' }}
               onClick={handleAddToBasket}
-              disabled={isAdding}
+              disabled={isAdding || quantity === 0}
             >
               {isAdding ? 'Adding...' : 'Add to order'}
             </button>
@@ -271,7 +271,7 @@ function ProductCard({ product, onBasketAdded }: { product: ClientProduct; onBas
           className="w-full py-2 rounded text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
           style={{ backgroundColor: '#e84e1b' }}
           onClick={handleAddToBasket}
-          disabled={isAdding}
+          disabled={isAdding || quantity === 0}
         >
           {isAdding ? 'Adding...' : 'Add to order'}
         </button>
