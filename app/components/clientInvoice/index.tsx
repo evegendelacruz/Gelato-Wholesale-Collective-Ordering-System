@@ -1,11 +1,10 @@
 'use client';
-import Image from "next/image";
 
 interface OrderItem {
   id: number;
   product_name: string;
+  product_type?: string;
   product_billingName?: string;
-  product_description?: string; 
   quantity: number;
   unit_price: number;
   subtotal: number;
@@ -17,6 +16,7 @@ interface Order {
   invoice_id: string;
   tracking_no: string;
   order_date: string;
+  delivery_date: string;
   delivery_address: string;
   total_amount: number;
   status: string;
@@ -36,6 +36,18 @@ interface ClientInvoiceProps {
   formatDate: (dateString: string) => string;
   getSubtotal: (order: Order) => number;
   getGST: (order: Order) => number;
+  selectedHeader?: {
+    id: number;
+    option_name: string;
+    line1: string;
+    line2: string;
+    line3: string;
+    line4: string;
+    line5: string;
+    line6: string;
+    line7: string;
+    is_default: boolean;
+  } | null;
 }
 
 export default function ClientInvoice({
@@ -43,7 +55,8 @@ export default function ClientInvoice({
   clientData,
   formatDate,
   getSubtotal,
-  getGST
+  getGST,
+  selectedHeader
 }: ClientInvoiceProps) {
   const subtotal = getSubtotal(order);
   const gst = getGST(order);
@@ -52,24 +65,22 @@ export default function ClientInvoice({
     <div style={{
       width: '100%',
       minHeight: '100%',
-      backgroundColor: '#525659',
-      padding: '40px',
+      backgroundColor: 'white',
+      padding: '0',
       boxSizing: 'border-box',
       position: 'relative'
     }}>
       <div 
         id="invoice-content"
         style={{ 
-          width: '8.5in', 
-          height: '13in',
-          margin: '0 auto',
+          width: '100%', 
+          minHeight: '11in',
+          margin: '0',
           padding: '0.5in 0.5in 0.19in 0.5in',
           backgroundColor: 'white',
           position: 'relative',
           fontFamily: 'Arial MT, sans-serif',
-          boxSizing: 'border-box',
-          boxShadow: '0 0 15px rgba(0,0,0,0.4)',
-          marginBottom: '40px'
+          boxSizing: 'border-box'
         }}>
         <style jsx>{`
           @media print {
@@ -107,23 +118,7 @@ export default function ClientInvoice({
             font-weight: bold;
             margin-bottom: 0px;
           }
-          .logo {
-            font-family: 'Brush Script MT', cursive;
-            font-size: 38px;
-            font-style: italic;
-            color: #000;
-            font-weight: normal;
-            width: 120px;
-            height: 50px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          }
-          .logo img {
-            max-width: 100%;
-            height: auto;
-            display: block;
-          }
+ 
           .tax-invoice-title {
             font-size: 20px;
             color: #0D909A;
@@ -308,27 +303,18 @@ export default function ClientInvoice({
           {/* Header */}
           <div className="header-section">
             <div className="company-info">
-              <div className="company-name">Momolato Pte Ltd</div>
-              <div>21 Tampines Street 92, #04-06</div>
-              <div>Singapore</div>
-              <div>finance@momolato.com</div>
-              <div>GST Registration No. : 201319550R</div>
-              <div>Company Registration No. UEN:</div>
-              <div>201319550R</div>
-            </div>
-            <div className="logo">
-            <Image 
-                src="/assets/Picture1.jpg" 
-                alt="Momolato" 
-                width={120}
-                height={50}
-                style={{ maxWidth: '100%', height: 'auto' }}
-            />
+              <div className="company-name">{selectedHeader?.line1 || 'Momolato Pte Ltd'}</div>
+              <div>{selectedHeader?.line2 || '21 Tampines Street 92, #04-06'}</div>
+              <div>{selectedHeader?.line3 || 'Singapore'}</div>
+              <div>{selectedHeader?.line4 || 'finance@momolato.com'}</div>
+              <div>{selectedHeader?.line5 || 'GST Registration No. : 201319550R'}</div>
+              <div>{selectedHeader?.line6 || 'Company Registration No. UEN:'}</div>
+              <div>{selectedHeader?.line7 || '201319550R'}</div>
             </div>
           </div>
 
           {/* Tax Invoice Title */}
-          <h1 className="tax-invoice-title">Tax Invoice</h1>
+          <h1 className="tax-invoice-title">Invoice</h1>
 
           {/* Three Column Section: Bill To, Ship To, Invoice Details */}
           <div className="three-column-section">
@@ -346,8 +332,8 @@ export default function ClientInvoice({
 
             <div className="info-box invoice-meta-box">
               <p><strong>INVOICE NO.</strong> {order.invoice_id}</p>
-              <p><strong>DATE</strong> {formatDate(order.order_date)}</p>
-              <p><strong>DUE DATE</strong> {formatDate(order.order_date)}</p>
+              <p><strong>DATE</strong> {formatDate(order.delivery_date)}</p>
+              <p><strong>DUE DATE</strong> {formatDate(order.delivery_date)}</p>
               <p><strong>TERMS</strong> Due on receipt</p>
             </div>
           </div>
@@ -359,7 +345,7 @@ export default function ClientInvoice({
           <div className="shipping-section">
             <div className="shipping-item">
               <strong>SHIP DATE</strong>
-              <span>{formatDate(order.order_date)}</span>
+              <span>{formatDate(order.delivery_date)}</span>
             </div>
             <div className="shipping-item">
               <strong>TRACKING NO.</strong>
@@ -379,8 +365,8 @@ export default function ClientInvoice({
 
             {order.items.map((item) => (
               <div key={item.id} className="table-row">
-                <div className="table-col">{item.product_billingName || item.product_name} </div>
-                <div className="table-col">{item.product_description || item.product_name}</div>
+                <div className="table-col">{item.product_type || item.product_name} </div>
+                <div className="table-col">{item.product_billingName || item.product_name}</div>
                 <div className="table-col qty">{item.quantity}</div>
                 <div className="table-col price">{item.unit_price.toFixed(2)}</div>
                 <div className="table-col amount">{item.subtotal.toFixed(2)}</div>
@@ -413,7 +399,7 @@ export default function ClientInvoice({
                 <div className="totals-value">{subtotal.toFixed(2)}</div>
               </div>
               <div className="totals-row">
-                <div className="totals-label">GST TOTAL</div>
+                <div className="totals-label">GST 9%</div>
                 <div className="totals-value">{gst.toFixed(2)}</div>
               </div>
               <div className="totals-row">

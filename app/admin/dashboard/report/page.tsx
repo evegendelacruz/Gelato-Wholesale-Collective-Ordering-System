@@ -422,8 +422,8 @@ const handleDownload = async (report: Report) => {
       { header: 'Delivery Date', key: 'deliveryDate', width: 12 },
       { header: 'Customer Full Name', key: 'customerName', width: 25 },
       { header: 'Memo/Description', key: 'description', width: 55 },
-      { header: 'Type', key: 'type', width: 25 },
       { header: 'Quantity', key: 'quantity', width: 15 },
+      { header: 'Type', key: 'type', width: 25 },
       { header: 'Gelato Type', key: 'gelatoType', width: 15 },
       { header: 'Weight (kg)', key: 'weight', width: 15 },
       { header: 'Milk Production (kg)', key: 'milkProduction', width: 25 }
@@ -475,8 +475,8 @@ const handleDownload = async (report: Report) => {
         deliveryDate: item ? formatDateShort(item.deliveryDate) : '',
         customerName: item ? item.customerName : '',
         description: item ? item.productName : '',
-        type: item ? item.type : '',
         quantity: item ? item.quantity : '',
+        type: item ? item.type : '',
         gelatoType: item ? item.gelatoType : '',
         weight: item ? item.weight : '',
         milkProduction: summaryItem ? summaryItem.text : ''
@@ -1167,11 +1167,11 @@ const handleDownload = async (report: Report) => {
                                 <th className="border border-black px-2 py-2 text-center font-bold" style={{ fontSize: '7px', width: '390px' }}>
                                   Memo/Description
                                 </th>
-                                <th className="border border-black px-2 py-2 text-center font-bold" style={{ fontSize: '7px', width: '150px' }}>
-                                  Type
-                                </th>
                                 <th className="border border-black px-2 py-2 text-center font-bold" style={{ fontSize: '7px', width: '10px' }}>
                                   Quantity
+                                </th>
+                                <th className="border border-black px-2 py-2 text-center font-bold" style={{ fontSize: '7px', width: '150px' }}>
+                                  Type
                                 </th>
                                 <th className="border border-black px-2 py-2 text-center font-bold" style={{ fontSize: '7px', width: '90px' }}>
                                   Gelato Type
@@ -1237,10 +1237,10 @@ const handleDownload = async (report: Report) => {
                                         {item ? item.productName : ''}
                                       </td>
                                       <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                        {item ? item.type : ''}
+                                        {item ? item.quantity : ''}
                                       </td>
                                       <td className="border border-black text-center" style={{ fontSize: '7px' }}>
-                                        {item ? item.quantity : ''}
+                                        {item ? item.type : ''}
                                       </td>
                                       <td className="border border-black text-center" style={{ fontSize: '7px' }}>
                                         {isReportDataItem(item) ? item.gelatoType : ''}

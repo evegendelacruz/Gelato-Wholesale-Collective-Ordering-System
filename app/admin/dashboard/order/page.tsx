@@ -44,6 +44,8 @@ interface SupabaseOrderResponse {
   client_user?: { client_businessName?: string } | Array<{ client_businessName?: string }>;
 }
 
+
+
 export default function OrderPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -72,6 +74,20 @@ export default function OrderPage() {
   const [isDeleteSuccessOpen, setIsDeleteSuccessOpen] = useState(false);
   const [isEditSuccessOpen, setIsEditSuccessOpen] = useState(false);
   const [showEditOrderModal, setShowEditOrderModal] = useState(false);
+  const [headerOptions, setHeaderOptions] = useState([]);
+const [selectedHeaderId, setSelectedHeaderId] = useState(null);
+const [showHeaderEditor, setShowHeaderEditor] = useState(false);
+const [editingHeaderId, setEditingHeaderId] = useState(null);
+const [headerFormData, setHeaderFormData] = useState({
+  option_name: '',
+  line1: '',
+  line2: '',
+  line3: '',
+  line4: '',
+  line5: '',
+  line6: '',
+  line7: '',
+});
   
   const toggleRowExpansion = (orderId) => {
   setExpandedRows(prev => ({
@@ -79,6 +95,31 @@ export default function OrderPage() {
     [orderId]: !prev[orderId]
   }));
 };
+
+// Fetch header options
+useEffect(() => {
+  const fetchHeaderOptions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('header_options')
+        .select('*')
+        .order('is_default', { ascending: false });
+      
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        setHeaderOptions(data);
+        // Set the default header as selected
+        const defaultHeader = data.find(h => h.is_default) || data[0];
+        setSelectedHeaderId(defaultHeader.id);
+      }
+    } catch (error) {
+      console.error('Error fetching header options:', error);
+    }
+  };
+
+  fetchHeaderOptions();
+}, []);
 
 // Add this new useEffect to check for date filter from calendar
 useEffect(() => {
@@ -236,6 +277,177 @@ useEffect(() => {
       return '-';
     }
   };
+
+  const handleSaveHeaderOption = async () => {
+  try {
+    if (!headerFormData.option_name.trim()) {
+      alert('Please enter an option name');
+      return;
+    }
+
+    if (editingHeaderId) {
+      // Update existing header
+      const { error } = await supabase
+        .from('header_options')
+        .update({
+          option_name: headerFormData.option_name,
+          line1: headerFormData.line1,
+          line2: headerFormData.line2,
+          line3: headerFormData.line3,
+          line4: headerFormData.line4,
+          line5: headerFormData.line5,
+          line6: headerFormData.line6,
+          line7: headerFormData.line7,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingHeaderId);
+
+      if (error) throw error;
+
+      // Refresh header options
+      const { data: updatedData } = await supabase
+        .from('header_options')
+        .select('*')
+        .order('is_default', { ascending: false });
+      
+      if (updatedData) {
+        setHeaderOptions(updatedData);
+      }
+
+      alert('Header option updated successfully!');
+    } else {
+      // Create new header
+      const { data, error } = await supabase
+        .from('header_options')
+        .insert([{
+          option_name: headerFormData.option_name,
+          line1: headerFormData.line1,
+          line2: headerFormData.line2,
+          line3: headerFormData.line3,
+          line4: headerFormData.line4,
+          line5: headerFormData.line5,
+          line6: headerFormData.line6,
+          line7: headerFormData.line7,
+          is_default: false
+        }])
+        .select();
+
+      if (error) throw error;
+
+      // Refresh header options
+      const { data: updatedData } = await supabase
+        .from('header_options')
+        .select('*')
+        .order('is_default', { ascending: false });
+      
+      if (updatedData) {
+        setHeaderOptions(updatedData);
+        if (data && data[0]) {
+          setSelectedHeaderId(data[0].id);
+        }
+      }
+
+      alert('Header option created successfully!');
+    }
+
+    setShowHeaderEditor(false);
+    setEditingHeaderId(null);
+    setHeaderFormData({
+      option_name: '',
+      line1: '',
+      line2: '',
+      line3: '',
+      line4: '',
+      line5: '',
+      line6: '',
+      line7: '',
+    });
+  } catch (error) {
+    console.error('Error saving header option:', error);
+    alert('Failed to save header option');
+  }
+};
+
+const handleEditHeaderOption = (header) => {
+  setEditingHeaderId(header.id);
+  setHeaderFormData({
+    option_name: header.option_name,
+    line1: header.line1 || '',
+    line2: header.line2 || '',
+    line3: header.line3 || '',
+    line4: header.line4 || '',
+    line5: header.line5 || '',
+    line6: header.line6 || '',
+    line7: header.line7 || '',
+  });
+  setShowHeaderEditor(true);
+};
+
+const handleDeleteHeaderOption = async (headerId) => {
+  if (!confirm('Are you sure you want to delete this header option?')) {
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from('header_options')
+      .delete()
+      .eq('id', headerId);
+
+    if (error) throw error;
+
+    // Refresh header options
+    const { data: updatedData } = await supabase
+      .from('header_options')
+      .select('*')
+      .order('is_default', { ascending: false });
+    
+    if (updatedData) {
+      setHeaderOptions(updatedData);
+      if (selectedHeaderId === headerId && updatedData.length > 0) {
+        setSelectedHeaderId(updatedData[0].id);
+      }
+    }
+
+    alert('Header option deleted successfully!');
+  } catch (error) {
+    console.error('Error deleting header option:', error);
+    alert('Failed to delete header option');
+  }
+};
+
+const renderHeaderInPDF = (doc, selectedHeader) => {
+  if (!selectedHeader) return;
+
+  doc.setFontSize(10);
+  let yPos = 20;
+  const lineHeight = 5;
+
+  // Line 1 - Bold
+  if (selectedHeader.line1) {
+    doc.setFont('helvetica', 'bold');
+    doc.text(selectedHeader.line1, 20, yPos);
+    yPos += lineHeight;
+  }
+
+  // Lines 2-7 - Normal
+  doc.setFont('helvetica', 'normal');
+  const lines = [
+    selectedHeader.line2,
+    selectedHeader.line3,
+    selectedHeader.line4,
+    selectedHeader.line5,
+    selectedHeader.line6,
+    selectedHeader.line7,
+  ];
+
+  lines.forEach(line => {
+    if (line) {
+      doc.text(line, 20, yPos);
+      yPos += lineHeight;
+    }
+  });
+};
 
   const handleSelectAll = (checked: boolean) => {
   if (checked) {
@@ -508,53 +720,13 @@ const handlePrintInvoice = async () => {
 
     doc.setFont('helvetica');
 
-    // Add logo
-    try {
-      const logo = document.createElement('img');
-      logo.crossOrigin = 'anonymous';
-      logo.src = '/assets/Picture1.jpg';
-      await new Promise((resolve, reject) => {
-        logo.onload = resolve;
-        logo.onerror = reject;
-      });
-      
-      const canvas = document.createElement('canvas');
-      const scale = 3;
-      canvas.width = logo.width * scale;
-      canvas.height = logo.height * scale;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(logo, 0, 0, canvas.width, canvas.height);
-      }
-      const logoData = canvas.toDataURL('image/jpeg', 0.95);
-      
-      const logoWidth = 28.6;
-      const logoHeight = 7.4;
-      const logoX = 161.4;
-      const logoY = 15;
-      doc.addImage(logoData, 'JPEG', logoX, logoY, logoWidth, logoHeight);
-    } catch {
-      console.log('Logo loading failed, continuing without logo');
-    }
-
-    // Header - Company Info
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Momolato Pte Ltd', 20, 20);
-    doc.setFont('helvetica', 'normal');
-    doc.text('21 Tampines Street 92, #04-06', 20, 25);
-    doc.text('Singapore', 20, 30);
-    doc.text('finance@momolato.com', 20, 35);
-    doc.text('GST Registration No. : 201319550R', 20, 40);
-    doc.text('Company Registration No. UEN:', 20, 45);
-    doc.text('201319550R', 20, 50);
+    const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
+    renderHeaderInPDF(doc, selectedHeader);
 
     // Title
     doc.setFontSize(16);
     doc.setTextColor("#0D909A");
-    doc.text('Tax Invoice', 20, 57);
+    doc.text('Invoice', 20, 57);
     doc.setTextColor(0, 0, 0);
 
     // Bill To, Ship To, Invoice Details
@@ -584,12 +756,12 @@ const handlePrintInvoice = async () => {
     doc.setFont('helvetica', 'bold');
     doc.text('DATE', labelX, 72, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), valueX, 72);
+    doc.text(formatDate(selectedOrder.delivery_date), valueX, 72);
 
     doc.setFont('helvetica', 'bold');
     doc.text('DUE DATE', labelX, 77, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), valueX, 77);
+    doc.text(formatDate(selectedOrder.delivery_date), valueX, 77);
 
     doc.setFont('helvetica', 'bold');
     doc.text('TERMS', labelX, 82, { align: 'right' });
@@ -605,7 +777,7 @@ const handlePrintInvoice = async () => {
     doc.setFont('helvetica', 'bold');
     doc.text('SHIP DATE', 20, 93);
     doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), 20, 98);
+    doc.text(formatDate(selectedOrder.delivery_date), 20, 98);
     doc.setFont('helvetica', 'bold');
     doc.text('TRACKING NO.', 100, 93);
     doc.setFont('helvetica', 'normal');
@@ -632,11 +804,11 @@ const handlePrintInvoice = async () => {
     let yPos = tableStartY + 13;
 
     orderItems.forEach((item) => {
-      const productText = `${item.product_billingName || item.product_name}`;
+      const productText = `${item.product_type || item.product_name}`;
       
       doc.setFont('helvetica', 'bold');
       const productLines = doc.splitTextToSize(productText, 30);
-      const descriptionText = item.product_description || productText;
+      const descriptionText = item.product_billingName || productText;
       doc.text(productLines, 22, yPos);
       
       doc.setFont('helvetica', 'normal');
@@ -691,7 +863,7 @@ const handlePrintInvoice = async () => {
     doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
-    doc.text('GST TOTAL', totalsLabelX, yPos + 10);
+    doc.text('GST 9%', totalsLabelX, yPos + 10);
     doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
@@ -746,53 +918,13 @@ const handleDownloadPDF = async () => {
 
     doc.setFont('helvetica');
 
-    // Add logo
-    try {
-      const logo = document.createElement('img');
-      logo.crossOrigin = 'anonymous';
-      logo.src = '/assets/Picture1.jpg';
-      await new Promise((resolve, reject) => {
-        logo.onload = resolve;
-        logo.onerror = reject;
-      });
-      
-      const canvas = document.createElement('canvas');
-      const scale = 3;
-      canvas.width = logo.width * scale;
-      canvas.height = logo.height * scale;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(logo, 0, 0, canvas.width, canvas.height);
-      }
-      const logoData = canvas.toDataURL('image/jpeg', 0.95);
-      
-      const logoWidth = 28.6;
-      const logoHeight = 7.4;
-      const logoX = 161.4;
-      const logoY = 15;
-      doc.addImage(logoData, 'JPEG', logoX, logoY, logoWidth, logoHeight);
-    } catch {
-      console.log('Logo loading failed, continuing without logo');
-    }
-
-    // Header - Company Info
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Momolato Pte Ltd', 20, 20);
-    doc.setFont('helvetica', 'normal');
-    doc.text('21 Tampines Street 92, #04-06', 20, 25);
-    doc.text('Singapore', 20, 30);
-    doc.text('finance@momolato.com', 20, 35);
-    doc.text('GST Registration No. : 201319550R', 20, 40);
-    doc.text('Company Registration No. UEN:', 20, 45);
-    doc.text('201319550R', 20, 50);
+    const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
+    renderHeaderInPDF(doc, selectedHeader);
 
     // Title
     doc.setFontSize(16);
     doc.setTextColor("#0D909A");
-    doc.text('Tax Invoice', 20, 57);
+    doc.text('Invoice', 20, 57);
     doc.setTextColor(0, 0, 0);
 
     // Bill To, Ship To, Invoice Details
@@ -822,12 +954,12 @@ const handleDownloadPDF = async () => {
     doc.setFont('helvetica', 'bold');
     doc.text('DATE', labelX, 72, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), valueX, 72);
+    doc.text(formatDate(selectedOrder.delivery_date), valueX, 72);
 
     doc.setFont('helvetica', 'bold');
     doc.text('DUE DATE', labelX, 77, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), valueX, 77);
+    doc.text(formatDate(selectedOrder.delivery_date), valueX, 77);
 
     doc.setFont('helvetica', 'bold');
     doc.text('TERMS', labelX, 82, { align: 'right' });
@@ -843,7 +975,7 @@ const handleDownloadPDF = async () => {
     doc.setFont('helvetica', 'bold');
     doc.text('SHIP DATE', 20, 93);
     doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.order_date), 20, 98);
+    doc.text(formatDate(selectedOrder.delivery_date), 20, 98);
     doc.setFont('helvetica', 'bold');
     doc.text('TRACKING NO.', 100, 93);
     doc.setFont('helvetica', 'normal');
@@ -870,11 +1002,11 @@ const handleDownloadPDF = async () => {
     let yPos = tableStartY + 13;
 
     orderItems.forEach((item) => {
-      const productText = `${item.product_billingName || item.product_name}`;
+      const productText = `${item.product_type || item.product_name}`;
       
       doc.setFont('helvetica', 'bold');
       const productLines = doc.splitTextToSize(productText, 30);
-      const descriptionText = item.product_description || productText;
+      const descriptionText = item.product_billingName || productText;
       doc.text(productLines, 22, yPos);
       
       doc.setFont('helvetica', 'normal');
@@ -930,7 +1062,7 @@ const handleDownloadPDF = async () => {
     doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
-    doc.text('GST TOTAL', totalsLabelX, yPos + 10);
+    doc.text('GST 9%', totalsLabelX, yPos + 10);
     doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
@@ -953,7 +1085,7 @@ const handleDownloadPDF = async () => {
     doc.text('OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd', 105, footerY + 12, { align: 'center' });
 
     // Save PDF
-    const fileName = `Invoice_${selectedOrder.invoice_id}_${formatDate(selectedOrder.order_date).replace(/\//g, '-')}.pdf`;
+    const fileName = `Invoice_${selectedOrder.invoice_id}_${formatDate(selectedOrder.delivery_date).replace(/\//g, '-')}.pdf`;
     
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
@@ -987,27 +1119,27 @@ const handleViewInvoice = async (order) => {
       .eq('client_auth_id', order.client_auth_id)
       .single();
 
-    // Fetch order items with product description
+    // Fetch order items with product type and billing name
     const { data: items } = await supabase
       .from('client_order_item')
       .select(`
          *,
-        product:product_id (
-          product_description,
+        product_list!client_order_item_product_id_fkey(
+          product_type,
           product_billingName
         )
       `)
       .eq('order_id', order.id);
 
-    // Map the items to include product_description at the root level
-    const itemsWithDescription = items?.map(item => ({
+    // Map the items to include product_type and product_billingName at the root level
+    const itemsWithDetails = items?.map(item => ({
       ...item,
-      product_description: item.product?.[0]?.product_description || item.product?.product_description || 'No description available',
-      product_billingName: item.product?.[0]?.product_billingName || item.product?.product_billingName || item.product_name
+      product_type: item.product_list?.product_type || item.product_list?.[0]?.product_type || item.product_name,
+      product_billingName: item.product_list?.product_billingName || item.product_list?.[0]?.product_billingName || item.product_name
     })) || [];
 
     setClientData(client);
-    setOrderItems(itemsWithDescription);
+    setOrderItems(itemsWithDetails);
     setSelectedOrder(order);
     setShowInvoiceModal(true);
   } catch (error) {
@@ -1565,65 +1697,331 @@ const handleViewInvoice = async (order) => {
           </div>
           {/* Invoice Modal */}
           {showInvoiceModal && selectedOrder && clientData && (
-            <div 
-              className="fixed inset-0 flex items-center justify-center z-50 p-4"
-              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
-              onClick={() => setShowInvoiceModal(false)}
-            >
-              <div 
-                className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] relative flex flex-col"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shrink-0 rounded-t-lg">
+            <div className="fixed inset-0 z-50 overflow-auto flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+              <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
+                {/* Header */}
+                <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4 shrink-0 rounded-t-lg flex justify-between items-center">
                   <h3 className="text-xl font-bold" style={{ color: '#5C2E1F' }}>
                     Invoice Preview
                   </h3>
                   <button
                     onClick={() => setShowInvoiceModal(false)}
-                    className="text-gray-500 hover:text-gray-700 text-2xl"
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
                   >
-                    ×
+                    <X size={24} />
                   </button>
                 </div>
-                
-                <div className="flex-1 overflow-auto">
-                  <ClientInvoice 
-                    order={{...selectedOrder, items: orderItems}}
-                    clientData={clientData}
-                    formatDate={formatDate}
-                    getSubtotal={() => getSubtotal(orderItems)}
-                    getGST={() => getGST(orderItems)}
-                  />
+
+                {/* Header Editor Modal */}
+                {showHeaderEditor && (
+                  <div 
+                    className="fixed inset-0 flex items-center justify-center z-50 p-4"
+                    style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+                    onClick={() => {
+                      setShowHeaderEditor(false);
+                      setEditingHeaderId(null);
+                      setHeaderFormData({
+                        option_name: '',
+                        line1: '',
+                        line2: '',
+                        line3: '',
+                        line4: '',
+                        line5: '',
+                        line6: '',
+                        line7: '',
+                      });
+                    }}
+                  >
+                    <div 
+                      className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-auto"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+                        <h3 className="text-xl font-bold" style={{ color: '#5C2E1F' }}>
+                          {editingHeaderId ? 'Edit Header Option' : 'Create Header Option'}
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          {editingHeaderId && (
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleDeleteHeaderOption(editingHeaderId);
+                              }}
+                              className="text-red-600 hover:text-red-800 text-sm px-3 py-1 border border-red-300 rounded hover:bg-red-50"
+                              title="Delete this header"
+                            >
+                              Delete
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setShowHeaderEditor(false);
+                              setEditingHeaderId(null);
+                              setHeaderFormData({
+                                option_name: '',
+                                line1: '',
+                                line2: '',
+                                line3: '',
+                                line4: '',
+                                line5: '',
+                                line6: '',
+                                line7: '',
+                        
+                              });
+                            }}
+                            className="text-gray-500 hover:text-gray-700 text-2xl"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="p-6 space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                            Option Name *
+                          </label>
+                          <input
+                            type="text"
+                            value={headerFormData.option_name}
+                            onChange={(e) => setHeaderFormData({ ...headerFormData, option_name: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            placeholder="e.g., Momolato Pte Ltd"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                            Line 1 (Company Name - Bold)
+                          </label>
+                          <input
+                            type="text"
+                            value={headerFormData.line1}
+                            onChange={(e) => setHeaderFormData({ ...headerFormData, line1: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            placeholder="Momolato Pte Ltd"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                            Line 2 (Address Line 1)
+                          </label>
+                          <input
+                            type="text"
+                            value={headerFormData.line2}
+                            onChange={(e) => setHeaderFormData({ ...headerFormData, line2: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            placeholder="21 Tampines Street 92, #04-06"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                            Line 3 (Address Line 2)
+                          </label>
+                          <input
+                            type="text"
+                            value={headerFormData.line3}
+                            onChange={(e) => setHeaderFormData({ ...headerFormData, line3: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            placeholder="Singapore"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                            Line 4 (Email/Contact No.)
+                          </label>
+                          <input
+                            type="text"
+                            value={headerFormData.line4}
+                            onChange={(e) => setHeaderFormData({ ...headerFormData, line4: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            placeholder="finance@momolato.com"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                            Line 5 (GST Registration/ Email)
+                          </label>
+                          <input
+                            type="text"
+                            value={headerFormData.line5}
+                            onChange={(e) => setHeaderFormData({ ...headerFormData, line5: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            placeholder="GST Registration No. : 201319550R"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                            Line 6 (Company Registration Label)
+                          </label>
+                          <input
+                            type="text"
+                            value={headerFormData.line6}
+                            onChange={(e) => setHeaderFormData({ ...headerFormData, line6: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            placeholder="Company Registration No. UEN:"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                            Line 7 (Company Registration Number)
+                          </label>
+                          <input
+                            type="text"
+                            value={headerFormData.line7}
+                            onChange={(e) => setHeaderFormData({ ...headerFormData, line7: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            placeholder="201319550R"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3">
+                        <button
+                          onClick={handleSaveHeaderOption}
+                          className="flex-1 px-4 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"
+                          style={{ backgroundColor: '#FF5722' }}
+                        >
+                          {editingHeaderId ? 'Update' : 'Create'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowHeaderEditor(false);
+                            setEditingHeaderId(null);
+                            setHeaderFormData({
+                              option_name: '',
+                              line1: '',
+                              line2: '',
+                              line3: '',
+                              line4: '',
+                              line5: '',
+                              line6: '',
+                              line7: '',
+                            });
+                          }}
+                          className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                          style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Header Options Selection */}
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <label className="text-sm font-medium" style={{ color: '#5C2E1F' }}>
+                      Invoice Header:
+                    </label>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {headerOptions.map((header) => (
+                        <label key={header.id} className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-gray-200 hover:border-orange-300 transition-colors">
+                          <input
+                            type="radio"
+                            name="headerOption"
+                            value={header.id}
+                            checked={selectedHeaderId === header.id}
+                            onChange={() => setSelectedHeaderId(header.id)}
+                            className="cursor-pointer accent-orange-500"
+                          />
+                          <span className="text-sm font-medium">{header.option_name}</span>
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleEditHeaderOption(header);
+                            }}
+                            className="text-blue-600 hover:text-blue-800 text-xs ml-1 underline"
+                            title="Edit this header"
+                          >
+                            Edit
+                          </button>
+                        </label>
+                      ))}
+                      <button
+                        onClick={() => {
+                          setEditingHeaderId(null);
+                          setHeaderFormData({
+                            option_name: '',
+                            line1: '',
+                            line2: '',
+                            line3: '',
+                            line4: '',
+                            line5: '',
+                            line6: '',
+                            line7: '',
+                          });
+                          setShowHeaderEditor(true);
+                        }}
+                        className="text-sm px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 transition-colors font-medium"
+                        style={{ color: '#5C2E1F' }}
+                      >
+                        + New Header
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg">
-                <button
-                  onClick={handlePrintInvoice}
-                  className="flex-1 px-4 py-3 rounded text-white font-medium hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: '#FF5722' }}
-                >
-                  Print Invoice
-                </button>
-                <button
-                  onClick={handleDownloadPDF}
-                  disabled={isGeneratingPDF}
-                  className="flex-1 px-4 py-3 rounded text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#4db8ba' }}
-                >
-                  {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
-                </button>
-                <button
-                  onClick={() => setShowInvoiceModal(false)}
-                  className="flex-1 px-4 py-3 rounded border-2 font-medium hover:bg-gray-50 transition-colors"
-                  style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
-                >
-                  Close
-                </button>
-              </div>
+                {/* Invoice Content */}
+                <div className="flex-1 overflow-auto p-6 bg-gray-100">
+                  <div className="bg-white shadow-lg rounded-lg">
+                    <ClientInvoice 
+                      order={{...selectedOrder, items: orderItems}}
+                      clientData={clientData}
+                      formatDate={formatDate}
+                      getSubtotal={() => getSubtotal(orderItems)}
+                      getGST={() => getGST(orderItems)}
+                      selectedHeader={headerOptions.find(h => h.id === selectedHeaderId)}
+                    />
+                  </div>
+                </div>
+
+                {/* Footer Actions */}
+                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg shadow-lg">
+                  <button
+                    onClick={handlePrintInvoice}
+                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                      <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                      <rect x="6" y="14" width="12" height="8"></rect>
+                    </svg>
+                    Print Invoice
+                  </button>
+                  <button
+                    onClick={handleDownloadPDF}
+                    disabled={isGeneratingPDF}
+                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    style={{ backgroundColor: '#4db8ba' }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
+                  </button>
+                  <button
+                    onClick={() => setShowInvoiceModal(false)}
+                    className="flex-1 px-4 py-3 rounded-lg border-2 font-medium hover:bg-gray-50 transition-colors"
+                    style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           )}
-
+                  
           {/* Label Generator Modal */}
           {showLabelGenerator && selectedOrderItems.length > 0 && selectedClientData && (
             <LabelGenerator 
@@ -1926,7 +2324,6 @@ const handleViewInvoice = async (order) => {
               </div>
             </div>
           )}
-       
         </main>
       </div>
     </div>
