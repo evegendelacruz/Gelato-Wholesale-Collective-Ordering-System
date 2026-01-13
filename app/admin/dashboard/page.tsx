@@ -3,6 +3,7 @@
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import Calendar from '@/app/components/calendar/page';
+import ProtectedRoute from '@/app/components/security/protectedroute';
 
 export default function DashboardLayout({
   children,
@@ -10,6 +11,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
+    <ProtectedRoute>
     <div className="min-h-screen flex" style={{ fontFamily: '"Roboto Condensed", sans-serif' }}>
       {/* Sidebar Component */}
       <Sidepanel />
@@ -23,5 +25,6 @@ export default function DashboardLayout({
         </main>
       </div>
     </div>
+  </ProtectedRoute>
   );
 }

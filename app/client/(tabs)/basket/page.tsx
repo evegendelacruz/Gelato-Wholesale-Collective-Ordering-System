@@ -141,12 +141,8 @@ export default function BasketPage() {
     try {
       setLoading(true);
       
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       
-      if (authError || !user) {
-        throw new Error('Not authenticated. Please log in.');
-      }
-
       const { data, error } = await supabase
         .from('client_basket')
         .select(`
