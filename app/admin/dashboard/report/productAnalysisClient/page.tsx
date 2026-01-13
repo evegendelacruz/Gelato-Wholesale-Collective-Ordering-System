@@ -3,7 +3,7 @@ import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import ExcelJS from 'exceljs';
 import { useState, useEffect } from 'react';
-import { Search, Filter, Download, FileSpreadsheet, RefreshCw } from 'lucide-react';
+import { Search, Filter, Download, FileSpreadsheet, RefreshCw, ChevronDown } from 'lucide-react';
 import supabase from '@/lib/client';
 interface ReportDataItem {
   deliveryDate: string;
@@ -746,8 +746,8 @@ const handleDownload = async (report: Report) => {
                     }}
                     className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <Filter size={20} />
-                    <span>Sort by</span>
+                    <ChevronDown size={20} />
+                    <span>Sort</span>
                   </button>
                   
                   {showSortDropdown && (

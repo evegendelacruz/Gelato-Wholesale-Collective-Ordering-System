@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Search, Filter, ArrowUpDown, X } from 'lucide-react';
+import { Search, Filter, X, ChevronDown } from 'lucide-react';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import supabase from '@/lib/client';
@@ -970,7 +970,7 @@ const handleDownloadStatement = async () => {
                     onClick={() => setShowSortMenu(!showSortMenu)}
                     className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <ArrowUpDown size={20} />
+                    <ChevronDown size={20} />
                     <span>Sort</span>
                   </button>
                   

@@ -3,7 +3,7 @@ import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 
 import { useState, useEffect } from 'react';
-import { Search, Filter, X, Image as ImageIcon } from 'lucide-react';
+import { Search, Filter, X, Image as ImageIcon, ChevronDown } from 'lucide-react';
 import supabase from '@/lib/client';
 import Image from 'next/image';
 
@@ -255,8 +255,8 @@ export default function IngredientsPage() {
                     }}
                     className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <Filter size={20} />
-                    <span>Sort by</span>
+                    <ChevronDown size={20} />
+                    <span>Sort</span>
                   </button>
                   
                   {isSortDropdownOpen && (

@@ -7,7 +7,7 @@ import ClientOrderModal from '@/app/components/clientOrderModal/page';
 import LabelGenerator from '@/app/components/orderLabel/page';
 import EditOrderModal from '@/app/components/editOrder/page';
 import { useState, useEffect, Fragment } from 'react';
-import { Search, Filter, Plus, X, Check } from 'lucide-react';
+import { Search, Filter, Plus, X, Check, ChevronDown } from 'lucide-react';
 
 interface Order {
   id: number;
@@ -1216,11 +1216,8 @@ const handleViewInvoice = async (order) => {
                   }}
                   className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  <Filter size={20} />
-                  <span>Sort by</span>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <ChevronDown size={20} />
+                  <span>Sort</span>
                 </button>
                 
                 {showSortDropdown && (
@@ -1337,9 +1334,6 @@ const handleViewInvoice = async (order) => {
                       1
                     </span>
                   )}
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
                 </button>
                 
                 {showFilterDropdown && (

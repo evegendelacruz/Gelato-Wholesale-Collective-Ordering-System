@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Search, Filter, Download, FileSpreadsheet, RefreshCw } from 'lucide-react';
+import { Search, Download, FileSpreadsheet, RefreshCw, ChevronDown } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
@@ -531,8 +531,8 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                     onClick={() => setShowSortDropdown(!showSortDropdown)}
                     className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <Filter size={20} />
-                    <span>Sort by</span>
+                    <ChevronDown size={20} />
+                    <span>Sort</span>
                   </button>
                   
                   {showSortDropdown && (
