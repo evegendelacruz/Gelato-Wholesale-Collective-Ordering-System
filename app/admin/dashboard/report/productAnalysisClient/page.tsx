@@ -82,7 +82,7 @@ interface SupabaseReportResponse {
   } | null;
 }
 
-export default function ReportPage() {
+export default function ReportClientPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [reports, setReports] = useState<Report[]>([]);
@@ -319,7 +319,11 @@ export default function ReportPage() {
         });
       });
 
-      items.sort((a, b) => a.productName.localeCompare(b.productName));
+      items.sort((a, b) => {
+        const nameCompare = a.customerName.localeCompare(b.customerName);
+        if (nameCompare !== 0) return nameCompare;
+        return a.productName.localeCompare(b.productName);
+      });
 
       const typeTotals = new Map<string, number>();
       items.forEach(item => {
@@ -429,11 +433,13 @@ const handleDownload = async (report: Report) => {
       { header: 'Milk Production (kg)', key: 'milkProduction', width: 25 }
     ];
 
-    // Filter only ReportDataItem items and sort by product name
+    // Filter only ReportDataItem items and sort by customer name, then product name
     const reportItems = dateData.items.filter(isReportDataItem);
-    const sortedItems = [...reportItems].sort((a, b) => 
-      a.productName.localeCompare(b.productName)
-    );
+    const sortedItems = [...reportItems].sort((a, b) => {
+      const nameCompare = a.customerName.localeCompare(b.customerName);
+      if (nameCompare !== 0) return nameCompare;
+      return a.productName.localeCompare(b.productName);
+    });
 
     // Track the number of data rows
     const dataRowsCount = sortedItems.length;
@@ -668,7 +674,7 @@ const handleDownload = async (report: Report) => {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `Product_Analysis_(by_Product)_${report.year}.xlsx`;
+  link.download = `Product_Analysis_(by_Client)_${report.year}.xlsx`;
   link.click();
   window.URL.revokeObjectURL(url);
 };
@@ -711,7 +717,7 @@ const handleDownload = async (report: Report) => {
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-3xl font-bold" style={{ color: '#5C2E1F' }}>
-                Product Analysis (By Product)
+                Product Analysis (By Client)
               </h1>
 
               <div className="flex items-center gap-4">

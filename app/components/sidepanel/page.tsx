@@ -42,7 +42,10 @@ export default function Sidepanel() {
       id: 'client',
       label: 'Client Account',
       icon: User,
-      path: '/admin/dashboard/client'
+      submenu: [
+        { id: 'client', label: 'Client Account', path: '/admin/dashboard/client' },
+        { id: 'statement', label: 'Client Statement', path: '/admin/dashboard/client/statement' }
+      ]
     },
     {
       id: 'product',
@@ -63,7 +66,11 @@ export default function Sidepanel() {
       id: 'report',
       label: 'Reports',
       icon: FileText,
-      path: '/admin/dashboard/report'
+      submenu: [
+        { id: 'product-analysis', label: 'Product Analysis (Product)', path: '/admin/dashboard/report' },
+        { id: 'product-analysis-customer', label: 'Product Analysis (Client)', path: '/admin/dashboard/report/productAnalysisClient' },
+        { id: 'delivery-list', label: 'Delivery List', path: '/admin/dashboard/report/deliveryList' }
+      ]
     }
   ];
 

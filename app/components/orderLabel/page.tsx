@@ -10,6 +10,7 @@ const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
   const [editableData, setEditableData] = useState([]);
   const [applyBestBeforeToAll, setApplyBestBeforeToAll] = useState(false);
   const [applyBatchNumberToAll, setApplyBatchNumberToAll] = useState(false);
+  
 
   // Wrap getHalalImageBase64 in useCallback
   const getHalalImageBase64 = useCallback((): Promise<string> => {
