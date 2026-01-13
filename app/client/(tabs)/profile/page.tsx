@@ -20,6 +20,9 @@ interface ClientUser {
   client_profile: string | null;
   client_auth_id: string;
   client_password: string | null;
+  ad_streetName: string | null;
+  ad_country: string | null;
+  ad_postal: string | null;
 }
 
 interface Message {
@@ -49,6 +52,9 @@ export default function ClientProfilePage() {
     businessName: '',
     operationName: '',
     deliveryAddress: '',
+    ad_streetName: '',
+    ad_country: '',
+    ad_postal: '',
     businessContact: '',
     typeBusiness: '',
     password: '',
@@ -124,6 +130,9 @@ export default function ClientProfilePage() {
         businessName: data.client_businessName || '',
         operationName: data.client_operationName || '',
         deliveryAddress: data.client_delivery_address || '',
+        ad_streetName: data.ad_streetName || '',
+        ad_country: data.ad_country || '',
+        ad_postal: data.ad_postal || '',
         businessContact: data.client_business_contact?.toString() || '',
         typeBusiness: data.client_type_business || '',
         password: '',
@@ -201,8 +210,14 @@ export default function ClientProfilePage() {
       if (formData.operationName !== user.client_operationName) {
         updateData.client_operationName = formData.operationName;
       }
-      if (formData.deliveryAddress !== user.client_delivery_address) {
-        updateData.client_delivery_address = formData.deliveryAddress;
+      if (formData.ad_streetName !== user.ad_streetName) {
+        updateData.ad_streetName = formData.ad_streetName;
+      }
+      if (formData.ad_country !== user.ad_country) {
+        updateData.ad_country = formData.ad_country;
+      }
+      if (formData.ad_postal !== user.ad_postal) {
+        updateData.ad_postal = formData.ad_postal;
       }
       if (formData.businessContact !== user.client_business_contact?.toString()) {
         updateData.client_business_contact = formData.businessContact ? parseInt(formData.businessContact) : null;
@@ -265,6 +280,9 @@ export default function ClientProfilePage() {
         businessName: user.client_businessName || '',
         operationName: user.client_operationName || '',
         deliveryAddress: user.client_delivery_address || '',
+        ad_streetName: user.ad_streetName || '',
+        ad_country: user.ad_country || '',
+        ad_postal: user.ad_postal || '',
         businessContact: user.client_business_contact?.toString() || '',
         typeBusiness: user.client_type_business || '',
         password: '',
@@ -1275,7 +1293,8 @@ export default function ClientProfilePage() {
                     </div>
                   </div>
                   
-                  <div style={{ marginBottom: '20px' }}>
+                  <div className="form-grid">
+                  <div>
                     <label style={{
                       display: 'block',
                       fontSize: '13px',
@@ -1283,14 +1302,14 @@ export default function ClientProfilePage() {
                       color: '#333',
                       marginBottom: '8px'
                     }}>
-                      Business/Delivery Address
+                      Street Name
                     </label>
-                    <textarea
-                      name="deliveryAddress"
-                      value={formData.deliveryAddress}
+                    <input
+                      type="text"
+                      name="ad_streetName"
+                      value={formData.ad_streetName}
                       onChange={handleInputChange}
                       disabled={!isEditMode || loading || saving}
-                      rows={3}
                       style={{
                         width: '100%',
                         padding: '10px 14px',
@@ -1300,12 +1319,71 @@ export default function ClientProfilePage() {
                         outline: 'none',
                         backgroundColor: (!isEditMode || loading || saving) ? '#f5f5f5' : 'white',
                         cursor: (!isEditMode || loading || saving) ? 'not-allowed' : 'text',
-                        color: (!isEditMode || loading || saving) ? '#666' : '#333',
-                        resize: 'vertical',
-                        fontFamily: '"Roboto Condensed"'
+                        color: (!isEditMode || loading || saving) ? '#666' : '#333'
                       }}
                     />
                   </div>
+
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: '#333',
+                      marginBottom: '8px'
+                    }}>
+                      Country
+                    </label>
+                    <input
+                      type="text"
+                      name="ad_country"
+                      value={formData.ad_country}
+                      onChange={handleInputChange}
+                      disabled={!isEditMode || loading || saving}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        border: '1px solid #ddd',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        outline: 'none',
+                        backgroundColor: (!isEditMode || loading || saving) ? '#f5f5f5' : 'white',
+                        cursor: (!isEditMode || loading || saving) ? 'not-allowed' : 'text',
+                        color: (!isEditMode || loading || saving) ? '#666' : '#333'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    color: '#333',
+                    marginBottom: '8px'
+                  }}>
+                    Postal Code
+                  </label>
+                  <input
+                    type="text"
+                    name="ad_postal"
+                    value={formData.ad_postal}
+                    onChange={handleInputChange}
+                    disabled={!isEditMode || loading || saving}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      border: '1px solid #ddd',
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      outline: 'none',
+                      backgroundColor: (!isEditMode || loading || saving) ? '#f5f5f5' : 'white',
+                      cursor: (!isEditMode || loading || saving) ? 'not-allowed' : 'text',
+                      color: (!isEditMode || loading || saving) ? '#666' : '#333'
+                    }}
+                  />
+                </div>
 
                   <div className="form-grid">
                     <div>
