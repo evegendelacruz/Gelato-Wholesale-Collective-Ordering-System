@@ -784,7 +784,7 @@ const handleDownloadStatement = async () => {
     if (!data || data.length === 0) {
       console.warn('No statements found in the database');
       setStatements([]);
-      setMessage({ type: 'error', text: 'No statements available. Please generate statements first.' });
+      setMessage({ type: 'error', text: 'Statements will be available once there is an order and a generated invoice.' });
     } else {
       console.log(`Successfully fetched ${data.length} statements`);
       
