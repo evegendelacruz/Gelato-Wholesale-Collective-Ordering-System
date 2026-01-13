@@ -75,10 +75,18 @@ export default function OrderPage() {
   const [isEditSuccessOpen, setIsEditSuccessOpen] = useState(false);
   const [showEditOrderModal, setShowEditOrderModal] = useState(false);
   const [headerOptions, setHeaderOptions] = useState([]);
-const [selectedHeaderId, setSelectedHeaderId] = useState(null);
-const [showHeaderEditor, setShowHeaderEditor] = useState(false);
-const [editingHeaderId, setEditingHeaderId] = useState(null);
-const [headerFormData, setHeaderFormData] = useState({
+  const [selectedHeaderId, setSelectedHeaderId] = useState(null);
+  const [showHeaderEditor, setShowHeaderEditor] = useState(false);
+  const [editingHeaderId, setEditingHeaderId] = useState(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [showWarningModal, setShowWarningModal] = useState(false);
+  const [warningMessage, setWarningMessage] = useState('');
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [headerToDelete, setHeaderToDelete] = useState(null);
+  const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
+  const [headerToEdit, setHeaderToEdit] = useState(null);
+  const [headerFormData, setHeaderFormData] = useState({
   option_name: '',
   line1: '',
   line2: '',
@@ -281,12 +289,12 @@ useEffect(() => {
   const handleSaveHeaderOption = async () => {
   try {
     if (!headerFormData.option_name.trim()) {
-      alert('Please enter an option name');
+      setWarningMessage('Please enter an option name');
+      setShowWarningModal(true);
       return;
     }
 
     if (editingHeaderId) {
-      // Update existing header
       const { error } = await supabase
         .from('header_options')
         .update({
@@ -304,7 +312,6 @@ useEffect(() => {
 
       if (error) throw error;
 
-      // Refresh header options
       const { data: updatedData } = await supabase
         .from('header_options')
         .select('*')
@@ -314,9 +321,8 @@ useEffect(() => {
         setHeaderOptions(updatedData);
       }
 
-      alert('Header option updated successfully!');
+      setSuccessMessage('Header option updated successfully!');
     } else {
-      // Create new header
       const { data, error } = await supabase
         .from('header_options')
         .insert([{
@@ -334,7 +340,6 @@ useEffect(() => {
 
       if (error) throw error;
 
-      // Refresh header options
       const { data: updatedData } = await supabase
         .from('header_options')
         .select('*')
@@ -347,9 +352,10 @@ useEffect(() => {
         }
       }
 
-      alert('Header option created successfully!');
+      setSuccessMessage('Header option created successfully!');
     }
 
+    setShowSuccessModal(true);
     setShowHeaderEditor(false);
     setEditingHeaderId(null);
     setHeaderFormData({
@@ -364,12 +370,14 @@ useEffect(() => {
     });
   } catch (error) {
     console.error('Error saving header option:', error);
-    alert('Failed to save header option');
+    setWarningMessage('Failed to save header option');
+    setShowWarningModal(true);
   }
 };
 
 const handleEditHeaderOption = (header) => {
   setEditingHeaderId(header.id);
+  setShowEditConfirmModal(true);
   setHeaderFormData({
     option_name: header.option_name,
     line1: header.line1 || '',
@@ -384,36 +392,8 @@ const handleEditHeaderOption = (header) => {
 };
 
 const handleDeleteHeaderOption = async (headerId) => {
-  if (!confirm('Are you sure you want to delete this header option?')) {
-    return;
-  }
-
-  try {
-    const { error } = await supabase
-      .from('header_options')
-      .delete()
-      .eq('id', headerId);
-
-    if (error) throw error;
-
-    // Refresh header options
-    const { data: updatedData } = await supabase
-      .from('header_options')
-      .select('*')
-      .order('is_default', { ascending: false });
-    
-    if (updatedData) {
-      setHeaderOptions(updatedData);
-      if (selectedHeaderId === headerId && updatedData.length > 0) {
-        setSelectedHeaderId(updatedData[0].id);
-      }
-    }
-
-    alert('Header option deleted successfully!');
-  } catch (error) {
-    console.error('Error deleting header option:', error);
-    alert('Failed to delete header option');
-  }
+  setHeaderToDelete(headerId);
+  setShowDeleteConfirmModal(true);
 };
 
 const renderHeaderInPDF = (doc, selectedHeader) => {
@@ -2315,6 +2295,210 @@ const handleViewInvoice = async (order) => {
                 >
                   OK
                 </button>
+              </div>
+            </div>
+          )}
+          {/* Success Modal */}
+          {showSuccessModal && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+              onClick={() => setShowSuccessModal(false)}
+            >
+              <div 
+                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                    <Check size={24} className="text-green-600" />
+                  </div>
+                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                    Success!
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-6">
+                    {successMessage}
+                  </p>
+                  <button
+                    onClick={() => setShowSuccessModal(false)}
+                    className="w-full px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    OK
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Warning Modal */}
+          {showWarningModal && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+              onClick={() => setShowWarningModal(false)}
+            >
+              <div 
+                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100 mb-4">
+                    <svg className="h-6 w-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                    Warning
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-6">
+                    {warningMessage}
+                  </p>
+                  <button
+                    onClick={() => setShowWarningModal(false)}
+                    className="w-full px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    OK
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Delete Confirmation Modal */}
+          {showDeleteConfirmModal && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
+              <div 
+                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
+                    <X size={24} className="text-red-600" />
+                  </div>
+                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                    Confirm Deletion
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-6">
+                    Are you sure you want to delete this header option? This action cannot be undone.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setShowDeleteConfirmModal(false);
+                        setHeaderToDelete(null);
+                      }}
+                      className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                      style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (headerToDelete) {
+                          try {
+                            const { error } = await supabase
+                              .from('header_options')
+                              .delete()
+                              .eq('id', headerToDelete);
+
+                            if (error) throw error;
+
+                            const { data: updatedData } = await supabase
+                              .from('header_options')
+                              .select('*')
+                              .order('is_default', { ascending: false });
+                            
+                            if (updatedData) {
+                              setHeaderOptions(updatedData);
+                              if (selectedHeaderId === headerToDelete && updatedData.length > 0) {
+                                setSelectedHeaderId(updatedData[0].id);
+                              }
+                            }
+
+                            setShowDeleteConfirmModal(false);
+                            setHeaderToDelete(null);
+                            setShowHeaderEditor(false);
+                            setSuccessMessage('Header option deleted successfully!');
+                            setShowSuccessModal(true);
+                          } catch (error) {
+                            console.error('Error deleting header option:', error);
+                            setShowDeleteConfirmModal(false);
+                            setHeaderToDelete(null);
+                            setWarningMessage('Failed to delete header option');
+                            setShowWarningModal(true);
+                          }
+                        }
+                      }}
+                      className="flex-1 px-4 py-2 rounded font-medium text-white hover:opacity-90 transition-opacity"
+                      style={{ backgroundColor: '#DC2626' }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Edit Confirmation Modal */}
+          {showEditConfirmModal && headerToEdit && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
+              <div 
+                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
+                    <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                    Edit Header Option
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-6">
+                    Do you want to edit &quot;{headerToEdit.option_name}&quot;?
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setShowEditConfirmModal(false);
+                        setHeaderToEdit(null);
+                      }}
+                      className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                      style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingHeaderId(headerToEdit.id);
+                        setHeaderFormData({
+                          option_name: headerToEdit.option_name,
+                          line1: headerToEdit.line1 || '',
+                          line2: headerToEdit.line2 || '',
+                          line3: headerToEdit.line3 || '',
+                          line4: headerToEdit.line4 || '',
+                          line5: headerToEdit.line5 || '',
+                          line6: headerToEdit.line6 || '',
+                          line7: headerToEdit.line7 || '',
+                        });
+                        setShowHeaderEditor(true);
+                        setShowEditConfirmModal(false);
+                        setHeaderToEdit(null);
+                      }}
+                      className="flex-1 px-4 py-2 rounded font-medium text-white hover:opacity-90 transition-opacity"
+                      style={{ backgroundColor: '#FF5722' }}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}

@@ -36,6 +36,10 @@ export default function ClientStatementPage() {
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
   const [editingHeaderId, setEditingHeaderId] = useState(null);
   const [agingCategory, setAgingCategory] = useState('1-30_days');
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [showWarningModal, setShowWarningModal] = useState(false);
+  const [warningMessage, setWarningMessage] = useState('');
   const [headerFormData, setHeaderFormData] = useState({
     option_name: '',
     line1: '',
@@ -234,90 +238,93 @@ const generateStatementsForOrders = async () => {
 };
 
   const handleSaveHeaderOption = async () => {
-    try {
-      if (!headerFormData.option_name.trim()) {
-        alert('Please enter an option name');
-        return;
-      }
-
-      if (editingHeaderId) {
-        const { error } = await supabase
-          .from('header_options')
-          .update({
-            option_name: headerFormData.option_name,
-            line1: headerFormData.line1,
-            line2: headerFormData.line2,
-            line3: headerFormData.line3,
-            line4: headerFormData.line4,
-            line5: headerFormData.line5,
-            line6: headerFormData.line6,
-            line7: headerFormData.line7,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', editingHeaderId);
-
-        if (error) throw error;
-
-        const { data: updatedData } = await supabase
-          .from('header_options')
-          .select('*')
-          .order('is_default', { ascending: false });
-        
-        if (updatedData) {
-          setHeaderOptions(updatedData);
-        }
-
-        alert('Header option updated successfully!');
-      } else {
-        const { data, error } = await supabase
-          .from('header_options')
-          .insert([{
-            option_name: headerFormData.option_name,
-            line1: headerFormData.line1,
-            line2: headerFormData.line2,
-            line3: headerFormData.line3,
-            line4: headerFormData.line4,
-            line5: headerFormData.line5,
-            line6: headerFormData.line6,
-            line7: headerFormData.line7,
-            is_default: false
-          }])
-          .select();
-
-        if (error) throw error;
-
-        const { data: updatedData } = await supabase
-          .from('header_options')
-          .select('*')
-          .order('is_default', { ascending: false });
-        
-        if (updatedData) {
-          setHeaderOptions(updatedData);
-          if (data && data[0]) {
-            setSelectedHeaderId(data[0].id);
-          }
-        }
-
-        alert('Header option created successfully!');
-      }
-
-      setShowHeaderEditor(false);
-      setEditingHeaderId(null);
-      setHeaderFormData({
-        option_name: '',
-        line1: '',
-        line2: '',
-        line3: '',
-        line4: '',
-        line5: '',
-        line6: '',
-        line7: '',
-      });
-    } catch (error) {
-      console.error('Error saving header option:', error);
-      alert('Failed to save header option');
+  try {
+    if (!headerFormData.option_name.trim()) {
+      setWarningMessage('Please enter an option name');
+      setShowWarningModal(true);
+      return;
     }
-  };
+
+    if (editingHeaderId) {
+      const { error } = await supabase
+        .from('header_options')
+        .update({
+          option_name: headerFormData.option_name,
+          line1: headerFormData.line1,
+          line2: headerFormData.line2,
+          line3: headerFormData.line3,
+          line4: headerFormData.line4,
+          line5: headerFormData.line5,
+          line6: headerFormData.line6,
+          line7: headerFormData.line7,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingHeaderId);
+
+      if (error) throw error;
+
+      const { data: updatedData } = await supabase
+        .from('header_options')
+        .select('*')
+        .order('is_default', { ascending: false });
+      
+      if (updatedData) {
+        setHeaderOptions(updatedData);
+      }
+
+      setSuccessMessage('Header option updated successfully!');
+    } else {
+      const { data, error } = await supabase
+        .from('header_options')
+        .insert([{
+          option_name: headerFormData.option_name,
+          line1: headerFormData.line1,
+          line2: headerFormData.line2,
+          line3: headerFormData.line3,
+          line4: headerFormData.line4,
+          line5: headerFormData.line5,
+          line6: headerFormData.line6,
+          line7: headerFormData.line7,
+          is_default: false
+        }])
+        .select();
+
+      if (error) throw error;
+
+      const { data: updatedData } = await supabase
+        .from('header_options')
+        .select('*')
+        .order('is_default', { ascending: false });
+      
+      if (updatedData) {
+        setHeaderOptions(updatedData);
+        if (data && data[0]) {
+          setSelectedHeaderId(data[0].id);
+        }
+      }
+
+      setSuccessMessage('Header option created successfully!');
+    }
+
+    setShowSuccessModal(true);
+    setShowHeaderEditor(false);
+    setEditingHeaderId(null);
+    setHeaderFormData({
+      option_name: '',
+      line1: '',
+      line2: '',
+      line3: '',
+      line4: '',
+      line5: '',
+      line6: '',
+      line7: '',
+    });
+  } catch (error) {
+    console.error('Error saving header option:', error);
+    setSuccessMessage('Failed to save header option');
+    setShowSuccessModal(true);
+  }
+};
 
   const handleEditHeaderOption = (header) => {
     setEditingHeaderId(header.id);
@@ -438,10 +445,12 @@ const handleSaveAgingCategory = async () => {
         : stmt
     ));
     
-    alert('Aging category updated successfully!');
+    setSuccessMessage('Aging category updated successfully!');
+    setShowSuccessModal(true);
   } catch (error) {
     console.error('Error updating aging category:', error);
-    alert('Failed to update aging category');
+    setSuccessMessage('Failed to update aging category');
+    setShowSuccessModal(true);
   }
 };
 
@@ -1103,6 +1112,7 @@ const handleDownloadStatement = async () => {
               </div>
             )}
           </div>
+
           {/* Statement Preview Modal */}
           {showStatementModal && selectedStatement && statementInvoices && (
             <div className="fixed inset-0 z-50 overflow-auto flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
@@ -1478,6 +1488,75 @@ const handleDownloadStatement = async () => {
                     style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
                   >
                     Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Success Modal */}
+          {showSuccessModal && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+              onClick={() => setShowSuccessModal(false)}
+            >
+              <div 
+                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                    <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                    Success!
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-6">
+                    {successMessage}
+                  </p>
+                  <button
+                    onClick={() => setShowSuccessModal(false)}
+                    className="w-full px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    OK
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Warning Modal */}
+          {showWarningModal && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+              onClick={() => setShowWarningModal(false)}
+            >
+              <div 
+                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100 mb-4">
+                    <svg className="h-6 w-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                    Warning
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-6">
+                    {warningMessage}
+                  </p>
+                  <button
+                    onClick={() => setShowWarningModal(false)}
+                    className="w-full px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    OK
                   </button>
                 </div>
               </div>

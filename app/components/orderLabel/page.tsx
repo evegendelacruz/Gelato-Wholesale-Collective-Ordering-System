@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import supabase from '@/lib/client';
+import {Check} from 'lucide-react';
 
 const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -10,6 +11,8 @@ const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
   const [editableData, setEditableData] = useState([]);
   const [applyBestBeforeToAll, setApplyBestBeforeToAll] = useState(false);
   const [applyBatchNumberToAll, setApplyBatchNumberToAll] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
   // Wrap getHalalImageBase64 in useCallback
   const getHalalImageBase64 = useCallback((): Promise<string> => {
@@ -1308,7 +1311,8 @@ useEffect(() => {
                       onUpdate(updatedOrderItems);
                     }
                     
-                    alert('Label information saved successfully!');
+                    setSuccessMessage('Label saved successfully!');
+                    setShowSuccessModal(true);
                   } catch (error) {
                     console.error('Error saving label information:', error);
                     alert('Failed to save label information: ' + error.message);
@@ -1323,6 +1327,38 @@ useEffect(() => {
                   className="px-6 py-3 border-2 border-gray-800 text-gray-800 rounded font-medium hover:bg-gray-50"
                 >
                   Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Success Modal */}
+        {showSuccessModal && (
+          <div 
+            className="fixed inset-0 flex items-center justify-center z-50 p-4"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            onClick={() => setShowSuccessModal(false)}
+          >
+            <div 
+              className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center">
+                <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                  <Check size={24} className="text-green-600" />
+                </div>
+                <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                  Success!
+                </h3>
+                <p className="text-sm text-gray-600 mb-6">
+                  {successMessage}
+                </p>
+                <button
+                  onClick={() => setShowSuccessModal(false)}
+                  className="w-full px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: '#FF5722' }}
+                >
+                  OK
                 </button>
               </div>
             </div>
