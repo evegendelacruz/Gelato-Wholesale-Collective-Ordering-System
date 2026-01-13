@@ -5,6 +5,7 @@ import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import supabase from '@/lib/client';
 import Image from 'next/image';
+import { downloadAdminCredentialImage } from '@/app/components/credentialGenerator/adminCredentialGenerator';
 
 interface AdminUser {
   admin_auth_id: string;
@@ -216,132 +217,6 @@ export default function ProfilePage() {
       return 'GWC-0000001';
     }
   };
-
-  const sendEmailNotification = async (userData: {
-  accountId: string;
-  fullName: string;
-  email: string;
-  role: string;
-  password: string;
-  createdAt: string;
-}) => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const emailContent = `
-  <!DOCTYPE html>
-  <html>
-  <head>
-    <style>
-      body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-      .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-      .header { background-color: #ff5722; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-      .content { background-color: #f9f9f9; padding: 30px; border: 1px solid #ddd; }
-      .details { background-color: white; padding: 20px; border-radius: 6px; margin: 20px 0; }
-      .detail-row { display: flex; padding: 10px 0; border-bottom: 1px solid #eee; }
-      .label { font-weight: bold; width: 150px; color: #666; }
-      .value { color: #333; }
-      .warning { background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
-      .footer { text-align: center; color: #999; padding: 20px; font-size: 12px; }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <div class="header">
-        <h1 style="margin: 0;">Account Created Successfully</h1>
-      </div>
-      <div class="content">
-        <p>Hello <strong>${userData.fullName}</strong>,</p>
-        <p>Your admin account has been created successfully. Below are your account details:</p>
-        
-        <div class="details">
-          <div class="detail-row">
-            <span class="label">Account ID:</span>
-            <span class="value">${userData.accountId}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Full Name:</span>
-            <span class="value">${userData.fullName}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Email:</span>
-            <span class="value">${userData.email}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Role:</span>
-            <span class="value">${userData.role}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Password:</span>
-            <span class="value">${userData.password}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Created At:</span>
-            <span class="value">${new Date(userData.createdAt).toLocaleString('en-US', {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            })}</span>
-          </div>
-        </div>
-
-        <div class="warning">
-          <strong>⚠️ IMPORTANT:</strong>
-          <ul style="margin: 10px 0; padding-left: 20px;">
-            <li>Please keep your credentials secure and confidential</li>
-            <li>We recommend changing your password after your first login</li>
-            <li>Never share your password with anyone</li>
-          </ul>
-        </div>
-
-        <p>If you have any questions or didn't request this account, please contact your administrator immediately.</p>
-      </div>
-      <div class="footer">
-        <p>This is an automated notification. Please do not reply to this email.</p>
-        <p>&copy; ${new Date().getFullYear()} Your Company. All rights reserved.</p>
-      </div>
-    </div>
-  </body>
-  </html>
-    `;
-
-    // Console log for testing
-    console.log('========================================');
-    console.log('EMAIL NOTIFICATION');
-    console.log('========================================');
-    console.log('To:', userData.email);
-    console.log('Subject: Account Created Successfully');
-    console.log('========================================');
-    console.log('Account Details:');
-    console.log('Account ID:', userData.accountId);
-    console.log('Full Name:', userData.fullName);
-    console.log('Email:', userData.email);
-    console.log('Role:', userData.role);
-    console.log('Password:', userData.password);
-    console.log('Created At:', userData.createdAt);
-    console.log('========================================');
-    
-    // TODO: Implement actual email sending with Supabase Edge Functions
-    // When ready, uncomment and use emailContent variable:
-    /*
-    const { data, error } = await supabase.functions.invoke('send-email', {
-      body: { 
-        to: userData.email, 
-        subject: 'Account Created Successfully - Your Login Credentials',
-        html: emailContent 
-      }
-    });
-    
-    if (error) throw error;
-    */
-    
-    return true;
-  } catch (error) {
-    console.error('Error sending email:', error);
-    return false;
-  }
-};
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -627,76 +502,87 @@ export default function ProfilePage() {
   };
 
   const handleAddUser = async () => {
-    setLoading(true);
-    setMessage({ type: '', text: '' });
+  setLoading(true);
+  setMessage({ type: '', text: '' });
 
-    try {
-      // Validate input
-      if (!newUserData.fullName || !newUserData.email) {
-        setMessage({ type: 'error', text: 'Please fill in all required fields' });
-        setLoading(false);
-        return;
-      }
+  try {
+    // Validate input
+    if (!newUserData.fullName || !newUserData.email) {
+      setMessage({ type: 'error', text: 'Please fill in all required fields' });
+      setLoading(false);
+      return;
+    }
 
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(newUserData.email)) {
-        setMessage({ type: 'error', text: 'Please enter a valid email address' });
-        setLoading(false);
-        return;
-      }
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newUserData.email)) {
+      setMessage({ type: 'error', text: 'Please enter a valid email address' });
+      setLoading(false);
+      return;
+    }
 
-      // Check if email already exists
-     const { data: existingUsers, error: checkError } = await supabase
-        .from('admin_user')  
-        .select('admin_email')
-        .eq('admin_email', newUserData.email);
+    // Check if email already exists
+    const { data: existingUsers, error: checkError } = await supabase
+      .from('admin_user')  
+      .select('admin_email')
+      .eq('admin_email', newUserData.email);
 
-      if (checkError) {
-        console.error('Error checking existing email:', checkError);
-        throw checkError;
-      }
+    if (checkError) {
+      console.error('Error checking existing email:', checkError);
+      throw checkError;
+    }
 
-      if (existingUsers && existingUsers.length > 0) {
-        setMessage({ type: 'error', text: 'Email already exists' });
-        setLoading(false);
-        return;
-      }
+    if (existingUsers && existingUsers.length > 0) {
+      setMessage({ type: 'error', text: 'Email already exists' });
+      setLoading(false);
+      return;
+    }
 
-      // Generate account ID
-      const accountId = await generateAccountId();
-      
-      // Password is same as account ID
-      const password = accountId;
+    // Generate account ID
+    const accountId = await generateAccountId();
+    
+    // Password is same as account ID
+    const password = accountId;
 
-      // Create user in Supabase Auth using signUp
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+    console.log('Creating new admin user account for:', newUserData.email);
+
+    // Create admin user via API route (won't send email or end current session)
+    const signUpResponse = await fetch('/api/create-admin-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         email: newUserData.email,
         password: password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/admin/dashboard`,
-          data: {
-            full_name: newUserData.fullName,
-            role: newUserData.role,
-            account_id: accountId,
-            admin_password: password,
-          }
+        user_metadata: {
+          full_name: newUserData.fullName,
+          role: newUserData.role,
+          account_id: accountId,
+          admin_password: password
         }
-      });
+      })
+    });
 
-      if (authError) {
-        console.error('Error creating auth user:', authError);
-        throw new Error(`Failed to create user account: ${authError.message}`);
+    if (!signUpResponse.ok) {
+      const errorData = await signUpResponse.json();
+      console.error('Auth error:', errorData);
+      
+      if (errorData.error?.includes('already registered') || errorData.error?.includes('already exists')) {
+        throw new Error('This email is already registered. Please use a different email.');
       }
+      
+      throw new Error('Failed to create authentication: ' + (errorData.error || 'Unknown error'));
+    }
 
-      if (!authData.user) {
-        throw new Error('Failed to create user account: No user data returned');
-      }
+    const authResult = await signUpResponse.json();
 
-      // Get the auth user ID
-      const authUserId = authData.user.id;
+    if (!authResult.user) {
+      throw new Error('Failed to create user account');
+    }
 
-      // Insert user into admin_user table with the auth user ID
+    const authUserId = authResult.user.id;
+    console.log('New admin user created:', authUserId);
+
+    // Insert user into admin_user table
     const { error: insertError } = await supabase
       .from('admin_user')  
       .insert([
@@ -715,52 +601,57 @@ export default function ProfilePage() {
       console.error('Error inserting user into admin_user table:', insertError);
       throw insertError;
     }
-    // Send email notification
-      const emailSent = await sendEmailNotification({
+
+    // Generate and download credential image
+    try {
+      await downloadAdminCredentialImage({
         accountId,
         fullName: newUserData.fullName,
         email: newUserData.email,
-        role: newUserData.role,
         password,
-        createdAt: new Date().toISOString()
+        role: newUserData.role
       });
-
-      // Refresh user list
-      await fetchUsers();
-
-      // Store the account ID and show success modal
-      setCreatedAccountId(accountId);
-      setShowCreateModal(false);
-      setShowSuccessModal(true);
-
-      // Show success message
-      setMessage({ 
-        type: 'success', 
-        text: `Account created successfully! ID: ${accountId} ${emailSent ? '(Check console for credentials)' : ''}`
-      });
-
-      // Reset form
-      setNewUserData({
-        fullName: '',
-        email: '',
-        role: 'User'
-      });
-      
-      // Clear message after 2 seconds
-      setTimeout(() => {
-        setMessage({ type: '', text: '' });
-      }, 2000);
-
-    } catch (error) {
-      console.error('Error creating user:', error);
-      setMessage({ 
-        type: 'error', 
-        text: error instanceof Error ? error.message : 'Failed to create account. Please try again.' 
-      });
-    } finally {
-      setLoading(false);
+    } catch (credError) {
+      console.error('Error generating credential image:', credError);
+      // Don't fail the whole process if credential generation fails
     }
-  };
+
+    // Refresh user list
+    await fetchUsers();
+
+    // Store the account ID and show success modal
+    setCreatedAccountId(accountId);
+    setShowCreateModal(false);
+    setShowSuccessModal(true);
+
+    // Show success message
+    setMessage({ 
+      type: 'success', 
+      text: `Account created successfully! ID: ${accountId}. Credential image downloaded.`
+    });
+
+    // Reset form
+    setNewUserData({
+      fullName: '',
+      email: '',
+      role: 'User'
+    });
+    
+    // Clear message after 2 seconds
+    setTimeout(() => {
+      setMessage({ type: '', text: '' });
+    }, 2000);
+
+  } catch (error) {
+    console.error('Error creating user:', error);
+    setMessage({ 
+      type: 'error', 
+      text: error instanceof Error ? error.message : 'Failed to create account. Please try again.' 
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleDeleteUser = async () => {
   if (!userToDelete) return;

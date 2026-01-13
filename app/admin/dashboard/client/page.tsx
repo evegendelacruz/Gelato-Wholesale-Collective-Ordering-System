@@ -862,7 +862,7 @@ const handleAddClientProducts = async () => {
     }
   };
 
-  const handleProceed = () => {
+ const handleProceed = () => {
   // Validate step 1 fields
   if (!formData.client_account_date || !formData.client_businessName || 
       !formData.ad_streetName || !formData.ad_country || !formData.ad_postal || 
@@ -873,7 +873,8 @@ const handleAddClientProducts = async () => {
   }
   
   // Validate mobile contact has exactly 8 digits (excluding +65)
-  const businessDigits = formData.client_business_contact.replace(/^\+65/, '');
+  const businessContact = String(formData.client_business_contact || '');
+  const businessDigits = businessContact.replace(/^\+65/, '');
   if (businessDigits.length !== 8) {
     setMessage({ type: 'error', text: 'Business mobile number must be exactly 8 digits' });
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
@@ -893,7 +894,8 @@ const handleAddClientProducts = async () => {
   }
 
   // Validate person mobile contact has exactly 8 digits (excluding +65)
-  const personDigits = formData.client_person_contact.replace(/^\+65/, '');
+  const personContact = String(formData.client_person_contact || '');
+  const personDigits = personContact.replace(/^\+65/, '');
   if (personDigits.length !== 8) {
     setMessage({ type: 'error', text: 'Mobile number must be exactly 8 digits' });
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
@@ -1017,11 +1019,11 @@ const handleAddClientProducts = async () => {
         ad_streetName: formData.ad_streetName,
         ad_country: formData.ad_country,
         ad_postal: formData.ad_postal,
-        client_business_contact: formData.client_business_contact,
+        client_business_contact: String(formData.client_business_contact),
         client_business_activities: formData.client_business_activities || null,
         client_type_business: formData.client_type_business,
         client_person_incharge: formData.client_person_incharge,
-        client_person_contact: formData.client_person_contact,
+        client_person_contact: String(formData.client_person_contact),
         client_email: formData.client_email,
         client_billing_address: formData.ad_billing_streetName && formData.ad_billing_country && formData.ad_billing_postal 
         ? `${formData.ad_billing_streetName}, ${formData.ad_billing_country}, ${formData.ad_billing_postal}` 
@@ -1290,7 +1292,8 @@ const handleUpdate = async () => {
   }
 
   // Validate business mobile contact
-  const businessDigits = formData.client_business_contact.replace(/^\+65/, '');
+  const businessContact = String(formData.client_business_contact || '');
+  const businessDigits = businessContact.replace(/^\+65/, '');
   if (businessDigits.length !== 8) {
     setMessage({ type: 'error', text: 'Business mobile number must be exactly 8 digits' });
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
@@ -1305,7 +1308,8 @@ const handleUpdate = async () => {
   }
 
   // Validate person mobile contact
-  const personDigits = formData.client_person_contact.replace(/^\+65/, '');
+  const personContact = String(formData.client_person_contact || '');
+  const personDigits = personContact.replace(/^\+65/, '');
   if (personDigits.length !== 8) {
     setMessage({ type: 'error', text: 'Mobile number must be exactly 8 digits' });
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
@@ -1361,12 +1365,12 @@ const handleUpdate = async () => {
         ad_streetName: formData.ad_streetName,
         ad_country: formData.ad_country,
         ad_postal: formData.ad_postal,
-        client_business_contact: formData.client_business_contact,
+        client_business_contact: String(formData.client_business_contact), 
         client_business_activities: formData.client_business_activities || null,
         client_type_business: formData.client_type_business,
         // Step 2 fields
         client_person_incharge: formData.client_person_incharge,
-        client_person_contact: formData.client_person_contact,
+        client_person_contact: String(formData.client_person_contact),
         client_email: formData.client_email,
         client_billing_address: formData.ad_billing_streetName && formData.ad_billing_country && formData.ad_billing_postal 
         ? `${formData.ad_billing_streetName}, ${formData.ad_billing_country}, ${formData.ad_billing_postal}` 
