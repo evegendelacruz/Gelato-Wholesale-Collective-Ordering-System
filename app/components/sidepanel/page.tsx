@@ -69,7 +69,7 @@ export default function Sidepanel() {
       submenu: [
         { id: 'product-analysis', label: 'Product Analysis (Product)', path: '/admin/dashboard/report' },
         { id: 'product-analysis-customer', label: 'Product Analysis (Client)', path: '/admin/dashboard/report/productAnalysisClient' },
-        { id: 'delivery-list', label: 'Delivery List', path: '/admin/dashboard/report/deliveryList' }
+        { id: 'delivery-list', label: 'Delivery Report', path: '/admin/dashboard/report/deliveryList' }
       ]
     }
   ];
