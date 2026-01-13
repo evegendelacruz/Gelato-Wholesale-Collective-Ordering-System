@@ -44,6 +44,273 @@ const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
   return `${day}/${month}/${year}`;
 }, []);
 
+const handlePrintLabels = async () => {
+  try {
+    setIsGenerating(true);
+    
+    const jsPDF = (await import('jspdf')).default;
+    
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: [90, 50]
+    });
+
+    // Load Arial Narrow font from public folder
+    try {
+      // Arial Narrow
+      const arialNarrowResponse = await fetch('/assets/ARIALN.ttf');
+      const arialNarrowArrayBuffer = await arialNarrowResponse.arrayBuffer();
+      const arialNarrowBase64 = btoa(
+        new Uint8Array(arialNarrowArrayBuffer)
+          .reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
+      
+      // Arial Narrow Bold
+      const arialNarrowBoldResponse = await fetch('/assets/ARIALNB.ttf');
+      const arialNarrowBoldArrayBuffer = await arialNarrowBoldResponse.arrayBuffer();
+      const arialNarrowBoldBase64 = btoa(
+        new Uint8Array(arialNarrowBoldArrayBuffer)
+          .reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
+      
+      // Arial Normal
+      const arialResponse = await fetch('/assets/ARIAL.ttf');
+      const arialArrayBuffer = await arialResponse.arrayBuffer();
+      const arialBase64 = btoa(
+        new Uint8Array(arialArrayBuffer)
+          .reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
+      
+      // Arial Bold
+      const arialBoldResponse = await fetch('/assets/ARIALBD.ttf');
+      const arialBoldArrayBuffer = await arialBoldResponse.arrayBuffer();
+      const arialBoldBase64 = btoa(
+        new Uint8Array(arialBoldArrayBuffer)
+          .reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
+      
+      // Add all fonts to VFS
+      doc.addFileToVFS('ARIALN.ttf', arialNarrowBase64);
+      doc.addFileToVFS('ARIALNB.ttf', arialNarrowBoldBase64);
+      doc.addFileToVFS('ARIAL.ttf', arialBase64);
+      doc.addFileToVFS('ARIALBD.ttf', arialBoldBase64);
+      
+      // Register fonts
+      doc.addFont('ARIALN.ttf', 'ArialNarrow', 'normal');
+      doc.addFont('ARIALNB.ttf', 'ArialNarrow', 'bold');
+      doc.addFont('ARIAL.ttf', 'Arial', 'normal');
+      doc.addFont('ARIALBD.ttf', 'Arial', 'bold');
+      
+      doc.setFont('ArialNarrow', 'normal'); // Set as default font
+    } catch (fontError) {
+      console.warn('Failed to load Arial fonts, using helvetica:', fontError);
+      doc.setFont('helvetica', 'normal'); // Fallback font
+    }
+
+    let isFirstPage = true;
+    const halalBase64 = await getHalalImageBase64();
+
+    for (let i = 0; i < orderItems.length; i++) {
+      const item = orderItems[i];
+      const quantity = item.quantity || 1;
+      
+      for (let q = 0; q < quantity; q++) {
+        if (!isFirstPage) {
+          doc.addPage([90, 50], 'landscape');
+        }
+        isFirstPage = false;
+
+        const data = editableData[i] || {
+          companyName: clientData?.client_businessName || 'Company Name',
+          productName: item.product_name || 'Product Name',
+          ingredients: item.ingredients || 'Ingredients not available',
+          allergen: item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+          bestBefore: calculateBestBefore(item.order_date || new Date()),
+          batchNumber: ''
+        };
+
+        doc.setFont('ArialNarrow', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+
+        const marginLeft = 5.5;
+        const marginTop = 8.5;
+        const leftSectionWidth = 47;
+        const rightSectionX = leftSectionWidth + 2;
+        
+        let leftY = marginTop;
+
+        // Company Name
+        doc.setFontSize(11);
+        doc.setFont('ArialNarrow', 'normal');
+        doc.text(data.companyName, marginLeft, leftY);
+        leftY += 5;
+
+        // Product Name (Bold)
+        doc.setFontSize(8);
+        doc.setFont('ArialNarrow', 'bold');
+        const productLines = doc.splitTextToSize(data.productName, 43);
+        productLines.slice(0, 3).forEach(line => {
+          doc.text(line, marginLeft, leftY);
+          leftY += 4;
+        });
+        leftY += 0;
+
+        // INGREDIENTS section
+        doc.setFontSize(4.5);
+        doc.setFont('Arial', 'bold');
+        doc.text('INGREDIENTS:', marginLeft, leftY);
+        leftY += 1;
+        
+        // Underline for INGREDIENTS
+        doc.getTextWidth('INGREDIENTS:');
+        doc.setLineWidth(0.2);
+        doc.line(marginLeft, leftY + 0.5, marginLeft + 40, leftY + 0.5);
+        leftY += 3;
+
+        // Ingredients text (normal)
+        doc.setFont('Arial', 'normal');
+        doc.setFontSize(4.5);
+        const ingredientsLines = doc.splitTextToSize(data.ingredients, 38);
+        ingredientsLines.slice(0, 3).forEach(line => {
+          doc.text(line, marginLeft, leftY);
+          leftY += 2;
+        });
+
+        // ALLERGENS section - positioned at specific Y
+        const allergensY = 33;
+        doc.setFontSize(4.5);
+        doc.setFont('Arial', 'bold');
+        doc.text('ALLERGENS:', marginLeft, allergensY);
+        
+        let allergenContentY = allergensY + 2.5;
+        
+        // Allergen title (bold)
+        doc.setFont('Arial', 'bold');
+        doc.setFontSize(4.5);
+        const allergenLines = doc.splitTextToSize(data.allergen, 34); // 34mm width
+        allergenLines.forEach(line => {
+          doc.text(line, marginLeft, allergenContentY);
+          allergenContentY += 2;
+        });
+
+        allergenContentY += 1;
+        // Crafted text (normal)
+        doc.setFont('Arial', 'normal');
+        const craftedText = 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.';
+        const craftedLines = doc.splitTextToSize(craftedText, 31);
+        craftedLines.forEach(line => {
+          doc.text(line, marginLeft, allergenContentY);
+          allergenContentY += 2;
+        });
+        allergenContentY += 0.3;
+
+        // Storage instructions
+        const storageText = 'Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
+        const storageLines = doc.splitTextToSize(storageText, 32);
+        storageLines.forEach(line => {
+          doc.text(line, marginLeft, allergenContentY);
+          allergenContentY += 2;
+        });
+
+        // Halal Logo - positioned to match image
+        if (halalBase64) {
+          const logoSize = 13;
+          const logoX = marginLeft + 28.5;
+          const logoY = 32.8;
+          doc.addImage(halalBase64, 'PNG', logoX, logoY, logoSize, logoSize);
+        }
+
+        // RIGHT SECTION
+        let rightY = marginTop + 4.5;
+        const rightX = rightSectionX;
+
+        // Best Before label
+        doc.setFontSize(5);
+        doc.setFont('Arial', 'normal');
+        doc.text('Best Before (dd/mm/yyyy)', rightX, rightY);
+        rightY += 4;
+
+      // Best Before Value (white on black)
+        doc.setFontSize(8);
+        doc.setFont('ArialNarrow', 'bold');
+        const bestBeforeText = (data.bestBefore || '').trim();
+        const bestBeforeWidth = doc.getTextWidth(bestBeforeText);
+        const fontSize = 8;
+
+        doc.setFillColor(0, 0, 0);
+        doc.rect(
+          rightX, 
+          rightY - (fontSize * 0.283), 
+          bestBeforeWidth, 
+          fontSize * 0.353, 
+          'F'
+        );
+
+        doc.setTextColor(255, 255, 255);
+        doc.text(bestBeforeText, rightX, rightY);
+        doc.setTextColor(0, 0, 0);
+        rightY += 6;
+
+        // Batch Number label
+        doc.setFontSize(5);
+        doc.setFont('Arial', 'normal');
+        doc.text('Batch Number', rightX, rightY);
+        rightY += 4;
+
+        // Batch Number value (white on black)
+        doc.setFontSize(8);
+        doc.setFont('ArialNarrow', 'bold');
+        const batchNumberText = (data.batchNumber || '').trim();
+        const batchWidth = doc.getTextWidth(batchNumberText);
+
+        doc.setFillColor(0, 0, 0);
+        doc.rect(
+          rightX, 
+          rightY - (fontSize * 0.283), 
+          batchWidth, 
+          fontSize * 0.353, 
+          'F'
+        );
+
+        doc.setTextColor(255, 255, 255);
+        doc.text(batchNumberText, rightX, rightY);
+        doc.setTextColor(0, 0, 0);
+
+        // Manufacturer Info - positioned at bottom
+        doc.setFontSize(5);
+        doc.setFont('Arial', 'normal');
+        const mfgY = 36;
+        const lineSpacing = 2.2;
+        
+        const mfgLines = [
+          'Manufactured by:',
+          'Momolato Pte Ltd',
+          '21 Tampines St 92 #04-06',
+          'Singapore 528891',
+          'UEN: 201319550R'
+        ];
+        
+        mfgLines.forEach((line, idx) => {
+          doc.text(line, rightX, mfgY + (idx * lineSpacing));
+        });
+      }
+    }
+
+    doc.autoPrint();
+    const pdfBlob = doc.output('blob');
+    const blobUrl = URL.createObjectURL(pdfBlob);
+    window.open(blobUrl, '_blank');
+    
+    setIsGenerating(false);
+  } catch (error) {
+    console.error('Error generating PDF for print:', error);
+    alert('Failed to open print preview. Please try again.');
+    setIsGenerating(false);
+  }
+};
+
   const generatePreviewHTML = useCallback((items, halalImageSrc = '/assets/halal.png') => {
   const pages = items.map((item, index) => {
     const data = editableData[index] || {
@@ -55,7 +322,8 @@ const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
       batchNumber: ''
     };
     
-    const storageInfo = `${data.allergen} Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.`;
+    const storageInfo = `Our products are crafted in a facility that also processes dairy, gluten, and nuts. Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.`;
+
 
     return `
       <div class="page" data-page="${index}">
@@ -64,6 +332,7 @@ const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
             <div class="company-name">${data.companyName}</div>
             <div class="product-name">${data.productName}</div>
             <div class="ingredients-text">${data.ingredients}</div>
+            <div class="allergen-text">${data.allergen}</div>
             <div class="storage-info">
               ${storageInfo}
             </div>
@@ -131,7 +400,7 @@ const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
         }
         
         .left-section {
-          width: 53mm;
+          width: 56mm;
           display: flex;
           flex-direction: column;
           gap: 0;
@@ -141,7 +410,8 @@ const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
         
         .right-section {
           flex: 1;
-          margin-left: 2mm;
+          margin-left: 1mm;
+          margin-top: -3mm;
           display: flex;
           flex-direction: column;
           position: relative;
@@ -149,17 +419,17 @@ const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
         
         .company-name {
           font-family: 'Arial Narrow', Arial, sans-serif;
-          font-size: 13px;
+          font-size: 12px;
           line-height: 1.2;
-          margin-bottom: 3mm;
+          margin-bottom: 1mm;
         }
         
         .product-name {
           font-family: 'Arial Narrow', Arial, sans-serif;
-          font-size: 11px;
+          font-size: 10px;
           font-weight: bold;
           line-height: 1.3;
-          margin-bottom: 2mm;
+          margin-bottom: 1mm;
           max-height: 16mm;
           overflow: hidden;
           word-wrap: break-word;
@@ -167,27 +437,58 @@ const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
         
         .ingredients-text {
           font-family: Arial, sans-serif;
-          font-size: 7px;
-          font-weight: bold;
-          line-height: 1.4;
-          margin-bottom: 2mm;
-          max-height: 14mm;
-          max-width: 35mm;
+          font-size: 6px;
+          line-height: 1.2;
+          margin-bottom: 6mm;
+          max-height: 18mm;
+          max-width: 43mm;
           overflow: hidden;
           word-wrap: break-word;
         }
-        
+
+        .ingredients-text::before {
+          content: 'INGREDIENTS:';
+          display: block;
+          font-weight: bold;
+          margin-bottom: 1mm;
+          padding-bottom: 0.5mm;
+          border-bottom: 1.5px solid black;
+        }
+
         .storage-info {
           font-family: Arial, sans-serif;
-          font-size: 7px;
+          font-size: 6px;
           line-height: 1.4;
           position: absolute;
           bottom: 0;
           left: 0;
-          right: 25mm;
-          max-height: 15mm;
+          right: 10mm;
+          max-height: 18mm;
           overflow: hidden;
           word-wrap: break-word;
+          max-width: 30mm;
+        }
+
+        .storage-info::before {
+          content: 'ALLERGENS:';
+          display: block;
+          font-weight: bold;
+          margin-bottom: 5mm;
+        }
+
+        .allergen-text {
+          font-family: Arial, sans-serif;
+          font-size: 6px;
+          line-height: 1.4;
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 10mm;
+          margin-bottom: 10mm;
+          max-height: 18mm;
+          overflow: hidden;
+          word-wrap: break-word;
+          max-width: 30mm;
         }
         
         .field-label {
@@ -368,8 +669,8 @@ useEffect(() => {
       // Font sizes at 300 DPI - matching your image exactly
       const companyFontSize = Math.round(12 * (dpi/96)); // Larger for Company Name
       const productFontSize = Math.round(10 * (dpi/96)); // Bold product name
-      const ingredientsFontSize = Math.round(7 * (dpi/96)); // Ingredients
-      const storageFontSize = Math.round(7 * (dpi/96)); // Storage info
+      const ingredientsFontSize = Math.round(6 * (dpi/96)); // Ingredients
+      const storageFontSize = Math.round(6 * (dpi/96)); // Storage info
       const rightSectionFontSize = Math.round(7 * (dpi/96)); // Right section labels
       const manufacturerFontSize = Math.round(7 * (dpi/96)); // Manufacturer info
       
@@ -399,43 +700,82 @@ useEffect(() => {
       
       // LEFT SECTION
       let leftY = marginTop;
-      const leftMaxWidth = leftSectionWidth - marginLeft - Math.round(6 * mmToPx);
+      const leftMaxWidth = leftSectionWidth - marginLeft - Math.round(5 * mmToPx);
+      const adjustedMaxWidth = leftMaxWidth * 1.1;
 
       // Company Name - Arial Nova Condensed (fallback to Arial Narrow/Arial)
       ctx.font = `${companyFontSize}px Arial Narrow, Arial`;
       ctx.fillText(companyName, marginLeft, leftY);
-      leftY += Math.round(7 * mmToPx);
+      leftY += Math.round(5 * mmToPx);
 
       // Product Name - Arial Nova Condensed Bold (fallback to Arial Narrow/Arial)
-      const productLines = wrapText(productName, leftMaxWidth, productFontSize, 'Arial Narrow, Arial', true);
+      const productLines = wrapText(productName, adjustedMaxWidth, productFontSize, 'Arial Narrow, Arial', true);
       ctx.font = `bold ${productFontSize}px Arial Narrow, Arial`;
-      for (let i = 0; i < Math.min(productLines.length, 3); i++) {
+      for (let i = 0; i < Math.min(productLines.length, 10); i++) {
         ctx.fillText(productLines[i], marginLeft, leftY);
-        leftY += Math.round(4.5 * mmToPx);
+        leftY += Math.round(3.2 * mmToPx);
       }
-      leftY += Math.round(2 * mmToPx);
+      leftY += Math.round(2.2 * mmToPx);
+    
 
-      // Ingredients - Arial
-      const ingredientsLines = wrapText(ingredients, leftMaxWidth, ingredientsFontSize, 'Arial');
+      // Draw "INGREDIENTS:" label with underline
+      leftY -= Math.round(2 * mmToPx); // Add this line to move INGREDIENTS higher
       ctx.font = `bold ${ingredientsFontSize}px Arial`;
-      const maxIngredientsLines = 4;
+      ctx.fillText('INGREDIENTS:', marginLeft, leftY);
+      const ingredientsLabelWidth = ctx.measureText('INGREDIENTS:').width;
+      leftY += Math.round(3 * mmToPx);
+
+      // Draw underline
+      ctx.fillRect(marginLeft, leftY - Math.round(0.7 * mmToPx), ingredientsLabelWidth + Math.round(27 * mmToPx), Math.round(0.2 * mmToPx));
+      leftY += Math.round(1 * mmToPx);
+
+      // Draw ingredients text (normal weight)
+      const ingredientsMaxWidth = leftMaxWidth + Math.round(1 * mmToPx);
+      const ingredientsLines = wrapText(ingredients, ingredientsMaxWidth, ingredientsFontSize, 'Arial');
+      ctx.font = `${ingredientsFontSize}px Arial`; // Normal weight
+      const maxIngredientsLines = 3;
       for (let i = 0; i < Math.min(ingredientsLines.length, maxIngredientsLines); i++) {
         ctx.fillText(ingredientsLines[i], marginLeft, leftY);
-        leftY += Math.round(3 * mmToPx);
+        leftY += Math.round(2 * mmToPx);
       }
 
-      // Storage Info - Positioned at bottom (absolute position) - Arial
+      leftY += Math.round(1 * mmToPx);
+
+      // ALLERGENS Section - Positioned at bottom
       ctx.font = `${storageFontSize}px Arial`;
-      const storageText = `${allergenInfo} Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.`;
-      const storageMaxWidth = leftMaxWidth - Math.round(6 * mmToPx);
+      const storageMaxWidth = leftMaxWidth + Math.round(3 * mmToPx);
+      const storageStartY = height - marginBottom - Math.round(14 * mmToPx);
 
-      // Calculate storage position from bottom
-      const storageStartY = height - marginBottom - Math.round(11 * mmToPx);
+      // Draw "ALLERGENS:" label (bold)
+      ctx.font = `bold ${storageFontSize}px Arial`;
+      ctx.fillText('ALLERGENS:', marginLeft, storageStartY);
+      let allergenY = storageStartY + Math.round(3 * mmToPx);
 
-      const storageLines = wrapText(storageText, storageMaxWidth, storageFontSize, 'Arial');
+      // Draw allergen title (bold) - e.g., "Dairy, Egg and Nuts"
+      ctx.font = `bold ${storageFontSize}px Arial`;
+      ctx.fillText(allergenInfo, marginLeft, allergenY);
+      allergenY += Math.round(0 * mmToPx);
+
+      // Draw crafted text (normal)
+      ctx.font = `${storageFontSize}px Arial`;
+      const craftedText = `Our products are crafted in a facility that also processes dairy, gluten, and nuts.`;
+      const craftedMaxWidth = storageMaxWidth - Math.round(8 * mmToPx);
+      const craftedLines = wrapText(craftedText, craftedMaxWidth, storageFontSize, 'Arial');
+      craftedLines.forEach((line, idx) => {
+        if (idx < 3) {
+          ctx.fillText(line, marginLeft, allergenY + Math.round(3 * mmToPx) + (idx * Math.round(2.3 * mmToPx)));
+        }
+      });
+
+      // Draw storage instructions - calculate based on actual crafted lines
+      const craftedTextHeight = craftedLines.length * Math.round(2.3 * mmToPx);
+      const storageY = allergenY + Math.round(2.5 * mmToPx) + craftedTextHeight + Math.round(0.4 * mmToPx); // Small gap between texts
+      const storageText = 'Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
+      const storageMaxWidthReduced = storageMaxWidth - Math.round(8 * mmToPx);
+      const storageLines = wrapText(storageText, storageMaxWidthReduced, storageFontSize, 'Arial');
       storageLines.forEach((line, idx) => {
-        if (idx < 5) { 
-          ctx.fillText(line, marginLeft, storageStartY + (idx * Math.round(2.3 * mmToPx)));
+        if (idx < 3) {
+          ctx.fillText(line, marginLeft, storageY + (idx * Math.round(2.3 * mmToPx)));
         }
       });
       
@@ -449,7 +789,7 @@ useEffect(() => {
         
         // Best Before - Arial
         ctx.font = `${rightSectionFontSize}px  Arial`;
-        ctx.fillText('Best Before (mm/dd/yyyy)', rightX, rightY);
+        ctx.fillText('Best Before (dd/mm/yyyy)', rightX, rightY);
         rightY += Math.round(2 * mmToPx);  
 
         // Best Before Value - White text on black background
@@ -664,6 +1004,18 @@ useEffect(() => {
           className="px-6 py-3 bg-blue-600 text-white rounded font-medium hover:bg-blue-700"
         >
           Edit Labels
+        </button>
+        <button 
+          onClick={handlePrintLabels}
+          disabled={isGenerating}
+          className="flex-1 px-4 py-3  text-white rounded font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: '#FF5722' }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 6 2 18 2 18 9"></polyline>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+            <rect x="6" y="14" width="12" height="8"></rect>
+          </svg>
+          {isGenerating ? 'Generating PDF...' : 'Print Labels PDF'}
         </button>
         <button 
           onClick={handleDownloadImages} 
