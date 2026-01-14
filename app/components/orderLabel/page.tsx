@@ -181,40 +181,39 @@ const handlePrintLabels = async () => {
           leftY += 2;
         });
 
-        // ALLERGENS section - positioned at specific Y
-        const allergensY = 33;
-        doc.setFontSize(4.5);
-        doc.setFont('Arial', 'bold');
-        doc.text('ALLERGENS:', marginLeft, allergensY);
-        
-        let allergenContentY = allergensY + 2.5;
-        
-        // Allergen title (bold)
-        doc.setFont('Arial', 'bold');
-        doc.setFontSize(4.5);
-        const allergenLines = doc.splitTextToSize(data.allergen, 34); // 34mm width
-        allergenLines.forEach(line => {
-          doc.text(line, marginLeft, allergenContentY);
-          allergenContentY += 2;
-        });
+        const storageFixedY = 43; // Fixed position for storage text (near bottom)
 
-        allergenContentY += 1;
-        // Crafted text (normal)
+        doc.setFontSize(4.5);
+        doc.setFont('Arial', 'bold');
+
+        // Calculate allergen lines first
+        const allergenLines = doc.splitTextToSize(data.allergen, 32);
+        const allergenTextHeight = allergenLines.length * 2; // 2mm per line
+
+        // Calculate ALLERGENS label position (work backwards from storage)
+        const allergenContentEndY = storageFixedY - 1; // 1mm gap before storage
+        const allergenContentStartY = allergenContentEndY - allergenTextHeight;
+        const allergensLabelY = allergenContentStartY - 2.5;
+
+        // Draw "ALLERGENS:" label
+        doc.text('ALLERGENS:', marginLeft, allergensLabelY);
+
+        // Draw allergen content (normal)
         doc.setFont('Arial', 'normal');
-        const craftedText = 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.';
-        const craftedLines = doc.splitTextToSize(craftedText, 31);
-        craftedLines.forEach(line => {
-          doc.text(line, marginLeft, allergenContentY);
-          allergenContentY += 2;
+        let allergenY = allergenContentStartY;
+        allergenLines.forEach(line => {
+          doc.text(line, marginLeft, allergenY);
+          allergenY += 2;
         });
-        allergenContentY += 0.3;
 
-        // Storage instructions
+        // Storage instructions - fixed at bottom
+        doc.setFont('Arial', 'normal');
         const storageText = 'Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
         const storageLines = doc.splitTextToSize(storageText, 32);
+        let storageY = storageFixedY;
         storageLines.forEach(line => {
-          doc.text(line, marginLeft, allergenContentY);
-          allergenContentY += 2;
+          doc.text(line, marginLeft, storageY);
+          storageY += 2;
         });
 
         // Halal Logo - positioned to match image
@@ -325,7 +324,7 @@ const handlePrintLabels = async () => {
       batchNumber: ''
     };
     
-    const storageInfo = `Our products are crafted in a facility that also processes dairy, gluten, and nuts. Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.`;
+    const storageInfo = `Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.`;
 
 
     return `
@@ -458,41 +457,41 @@ const handlePrintLabels = async () => {
           border-bottom: 1.5px solid black;
         }
 
-        .storage-info {
-          font-family: Arial, sans-serif;
-          font-size: 6px;
-          line-height: 1.4;
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 10mm;
-          max-height: 18mm;
-          overflow: hidden;
-          word-wrap: break-word;
-          max-width: 30mm;
-        }
+      .allergen-text {
+        font-family: Arial, sans-serif;
+        font-size: 6px;
+        line-height: 1.4;
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 10mm;
+        margin-bottom: 5mm;
+        max-height: 18mm;
+        overflow: hidden;
+        word-wrap: break-word;
+        max-width: 30mm;
+      }
 
-        .storage-info::before {
-          content: 'ALLERGENS:';
-          display: block;
-          font-weight: bold;
-          margin-bottom: 5mm;
-        }
+      .allergen-text::before {
+        content: 'ALLERGENS:';
+        display: block;
+        font-weight: bold;
+        margin-bottom: 1mm;
+      }
 
-        .allergen-text {
-          font-family: Arial, sans-serif;
-          font-size: 6px;
-          line-height: 1.4;
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 10mm;
-          margin-bottom: 10mm;
-          max-height: 18mm;
-          overflow: hidden;
-          word-wrap: break-word;
-          max-width: 30mm;
-        }
+      .storage-info {
+        font-family: Arial, sans-serif;
+        font-size: 6px;
+        line-height: 1.4;
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 10mm;
+        max-height: 18mm;
+        overflow: hidden;
+        word-wrap: break-word;
+        max-width: 30mm;
+      }
         
         .field-label {
           font-family: Arial, sans-serif;
@@ -744,43 +743,47 @@ useEffect(() => {
 
       leftY += Math.round(1 * mmToPx);
 
-      // ALLERGENS Section - Positioned at bottom
-      ctx.font = `${storageFontSize}px Arial`;
-      const storageMaxWidth = leftMaxWidth + Math.round(3 * mmToPx);
-      const storageStartY = height - marginBottom - Math.round(14 * mmToPx);
+      // ALLERGENS Section - Positioned at bottom with dynamic upward adjustment
+ctx.font = `${storageFontSize}px Arial`;
+const storageMaxWidth = leftMaxWidth + Math.round(3 * mmToPx);
+const storageMaxWidthReduced = storageMaxWidth - Math.round(8 * mmToPx);
 
-      // Draw "ALLERGENS:" label (bold)
-      ctx.font = `bold ${storageFontSize}px Arial`;
-      ctx.fillText('ALLERGENS:', marginLeft, storageStartY);
-      let allergenY = storageStartY + Math.round(3 * mmToPx);
+// Calculate storage instructions lines first (these stay at the bottom)
+const storageText = 'Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
+const storageLines = wrapText(storageText, storageMaxWidthReduced, storageFontSize, 'Arial');
 
-      // Draw allergen title (bold) - e.g., "Dairy, Egg and Nuts"
-      ctx.font = `bold ${storageFontSize}px Arial`;
-      ctx.fillText(allergenInfo, marginLeft, allergenY);
-      allergenY += Math.round(0 * mmToPx);
 
-      // Draw crafted text (normal)
-      ctx.font = `${storageFontSize}px Arial`;
-      const craftedText = `Our products are crafted in a facility that also processes dairy, gluten, and nuts.`;
-      const craftedMaxWidth = storageMaxWidth - Math.round(8 * mmToPx);
-      const craftedLines = wrapText(craftedText, craftedMaxWidth, storageFontSize, 'Arial');
-      craftedLines.forEach((line, idx) => {
-        if (idx < 3) {
-          ctx.fillText(line, marginLeft, allergenY + Math.round(3 * mmToPx) + (idx * Math.round(2.3 * mmToPx)));
-        }
-      });
+// Calculate allergen lines
+ctx.font = `normal ${storageFontSize}px Arial`;
+const allergenLines = wrapText(allergenInfo, storageMaxWidthReduced, storageFontSize, 'Arial');
+const allergenHeight = allergenLines.length * Math.round(2.3 * mmToPx); // Changed from 0.5 to 2.3 to match line spacing
 
-      // Draw storage instructions - calculate based on actual crafted lines
-      const craftedTextHeight = craftedLines.length * Math.round(2.3 * mmToPx);
-      const storageY = allergenY + Math.round(2.5 * mmToPx) + craftedTextHeight + Math.round(0.4 * mmToPx); // Small gap between texts
-      const storageText = 'Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
-      const storageMaxWidthReduced = storageMaxWidth - Math.round(8 * mmToPx);
-      const storageLines = wrapText(storageText, storageMaxWidthReduced, storageFontSize, 'Arial');
-      storageLines.forEach((line, idx) => {
-        if (idx < 3) {
-          ctx.fillText(line, marginLeft, storageY + (idx * Math.round(2.3 * mmToPx)));
-        }
-      });
+// Calculate total height needed for allergens section
+const allergenLabelHeight = Math.round(3 * mmToPx); // Space after "ALLERGENS:" label
+const gapBetweenSections = Math.round(1 * mmToPx); // Gap between allergens and storage
+
+// Draw storage instructions at fixed position from bottom
+const storageY = height - marginBottom - Math.round(3.5 * mmToPx);
+storageLines.forEach((line, idx) => {
+  if (idx < 3) {
+    ctx.fillText(line, marginLeft, storageY + (idx * Math.round(2.3 * mmToPx)));
+  }
+});
+
+// Calculate starting Y position that moves up based on content
+// Position allergens above storage with proper spacing
+const allergenStartY = storageY - gapBetweenSections - allergenHeight - allergenLabelHeight;
+
+// Draw "ALLERGENS:" label (bold)
+ctx.font = `bold ${storageFontSize}px Arial`;
+ctx.fillText('ALLERGENS:', marginLeft, allergenStartY);
+
+// Draw allergen text
+ctx.font = `normal ${storageFontSize}px Arial`;
+const allergenY = allergenStartY + allergenLabelHeight;
+allergenLines.forEach((line, idx) => {
+  ctx.fillText(line, marginLeft, allergenY + (idx * Math.round(2.3 * mmToPx)));
+});
       
       const finalizeCanvas = (halalImage = null) => {
         // RIGHT SECTION
