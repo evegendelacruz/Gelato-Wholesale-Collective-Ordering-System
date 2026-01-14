@@ -715,14 +715,19 @@ const handlePrintInvoice = async () => {
     doc.text('BILL TO', 20, 67);
     doc.setFont('helvetica', 'normal');
     doc.text(clientData.client_businessName || 'N/A', 20, 72);
-    const billAddress = doc.splitTextToSize(clientData.client_delivery_address || 'N/A', 45);
+    const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
     doc.text(billAddress, 20, 77);
 
     doc.setFont('helvetica', 'bold');
     doc.text('SHIP TO', 75, 67);
     doc.setFont('helvetica', 'normal');
     doc.text(clientData.client_businessName || 'N/A', 75, 72);
-    const shipAddress = doc.splitTextToSize(selectedOrder.delivery_address || clientData.client_delivery_address || 'N/A', 45);
+    const shipAddressParts = [
+      clientData.ad_streetName,
+      clientData.ad_country,
+      clientData.ad_postal
+    ].filter(Boolean).join(', ') || selectedOrder.delivery_address || 'N/A';
+    const shipAddress = doc.splitTextToSize(shipAddressParts, 45);
     doc.text(shipAddress, 75, 77);
 
     // Invoice Details
@@ -854,7 +859,7 @@ const handlePrintInvoice = async () => {
     doc.text('BALANCE DUE', totalsLabelX, yPos + 23);
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text(`S$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+    doc.text(`$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
 
     // Footer
     doc.setFontSize(10);
@@ -913,14 +918,19 @@ const handleDownloadPDF = async () => {
     doc.text('BILL TO', 20, 67);
     doc.setFont('helvetica', 'normal');
     doc.text(clientData.client_businessName || 'N/A', 20, 72);
-    const billAddress = doc.splitTextToSize(clientData.client_delivery_address || 'N/A', 45);
+    const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
     doc.text(billAddress, 20, 77);
 
     doc.setFont('helvetica', 'bold');
     doc.text('SHIP TO', 75, 67);
     doc.setFont('helvetica', 'normal');
     doc.text(clientData.client_businessName || 'N/A', 75, 72);
-    const shipAddress = doc.splitTextToSize(selectedOrder.delivery_address || clientData.client_delivery_address || 'N/A', 45);
+    const shipAddressParts = [
+      clientData.ad_streetName,
+      clientData.ad_country,
+      clientData.ad_postal
+    ].filter(Boolean).join(', ') || selectedOrder.delivery_address || 'N/A';
+    const shipAddress = doc.splitTextToSize(shipAddressParts, 45);
     doc.text(shipAddress, 75, 77);
 
     // Invoice Details
@@ -1053,7 +1063,7 @@ const handleDownloadPDF = async () => {
     doc.text('BALANCE DUE', totalsLabelX, yPos + 23);
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text(`S$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+    doc.text(`$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
 
     // Footer
     doc.setFontSize(10);
@@ -1092,10 +1102,10 @@ const handleDownloadPDF = async () => {
 
 const handleViewInvoice = async (order) => {
   try {
-    // Fetch client data
+    // Fetch client data with address details
     const { data: client } = await supabase
       .from('client_user')
-      .select('client_businessName, client_delivery_address, client_person_incharge')
+      .select('client_businessName, client_billing_address, client_person_incharge, ad_streetName, ad_country, ad_postal')
       .eq('client_auth_id', order.client_auth_id)
       .single();
 
@@ -1118,7 +1128,16 @@ const handleViewInvoice = async (order) => {
       product_billingName: item.product_list?.product_billingName || item.product_list?.[0]?.product_billingName || item.product_name
     })) || [];
 
-    setClientData(client);
+    // Combine client data - keep all address fields from client_user
+    const combinedClientData = {
+      ...client,
+      // Only override if order has a specific delivery address
+      ...(order.delivery_address && order.delivery_address !== client.ad_streetName && {
+        ad_streetName: order.delivery_address
+      })
+    };
+
+    setClientData(combinedClientData);
     setOrderItems(itemsWithDetails);
     setSelectedOrder(order);
     setShowInvoiceModal(true);
@@ -1444,7 +1463,7 @@ const handleViewInvoice = async (order) => {
                     DELIVERY ADDRESS
                   </th>
                   <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    AMOUNT (S$)
+                    AMOUNT ($)
                   </th>
                   <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
                     STATUS
@@ -1585,7 +1604,7 @@ const handleViewInvoice = async (order) => {
                           <td className="py-2 px-2 text-xs font-bold text-center" style={{ color: 'gray' }}>QUANTITY</td>
                           <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>WEIGHT (kg)</td>
                           <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>UNIT PRICE</td>
-                          <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>AMOUNT (S$)</td>
+                          <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>AMOUNT ($)</td>
                           <td className="py-2 px-2"></td>
                           <td className="py-2 px-2"></td>
                         </tr>

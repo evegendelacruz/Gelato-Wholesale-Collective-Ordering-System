@@ -27,7 +27,11 @@ interface Order {
 interface ClientData {
   client_businessName: string;
   client_delivery_address: string;
+  client_billing_address: string;
   client_person_incharge: string;
+  ad_streetName: string;  
+  ad_country: string;   
+  ad_postal: string;     
 }
 
 interface ClientInvoiceProps {
@@ -277,12 +281,14 @@ export default function ClientInvoice({
           }
           .footer-section {
             position: absolute;
-            bottom: 0;
+            bottom: 0.5in;
             left: 0;
             right: 0;
             text-align: center;
             font-size: 10px;
             line-height: 1.6;
+            
+            bottom: -190px;
           }
           .footer-section p {
             margin: 4px 0;
@@ -291,12 +297,15 @@ export default function ClientInvoice({
             margin-bottom: 12px;
           }
           
-          @media print {
-            .footer-section {
-              position: fixed;
-              bottom: 0.5in;
-            }
+        @media print {
+          .footer-section {
+            position: fixed;
+            bottom: 0.5in;
+            left: 0.5in;
+            right: 0.5in;
           }
+        }
+        
         `}</style>
 
         <div className="invoice-content">
@@ -317,26 +326,32 @@ export default function ClientInvoice({
           <h1 className="tax-invoice-title">Invoice</h1>
 
           {/* Three Column Section: Bill To, Ship To, Invoice Details */}
-          <div className="three-column-section">
-            <div className="info-box">
-              <h3>BILL TO</h3>
-              <p><strong>{clientData?.client_businessName || 'N/A'}</strong></p>
-              <p>{clientData?.client_delivery_address || 'N/A'}</p>
-            </div>
-            
-            <div className="info-box">
-              <h3>SHIP TO</h3>
-              <p><strong>{clientData?.client_businessName || 'N/A'}</strong></p>
-              <p>{order.delivery_address || clientData?.client_delivery_address || 'N/A'}</p>
-            </div>
-
-            <div className="info-box invoice-meta-box">
-              <p><strong>INVOICE NO.</strong> {order.invoice_id}</p>
-              <p><strong>DATE</strong> {formatDate(order.delivery_date)}</p>
-              <p><strong>DUE DATE</strong> {formatDate(order.delivery_date)}</p>
-              <p><strong>TERMS</strong> Due on receipt</p>
-            </div>
+        <div className="three-column-section">
+          <div className="info-box">
+            <h3>BILL TO</h3>
+            <p><strong>{clientData?.client_businessName || 'N/A'}</strong></p>
+            <p style={{ maxWidth: '150px', wordWrap: 'break-word' }}>
+              {clientData?.client_billing_address || 'N/A'}
+            </p>
           </div>
+          
+          <div className="info-box">
+            <h3>SHIP TO</h3>
+            <p><strong>{clientData?.client_businessName || 'N/A'}</strong></p>
+            <p style={{ maxWidth: '150px', wordWrap: 'break-word' }}>
+              {[clientData?.ad_streetName, clientData?.ad_country, clientData?.ad_postal]
+                .filter(Boolean)
+                .join(', ') || order.delivery_address || 'N/A'}
+            </p>
+          </div>
+
+          <div className="info-box invoice-meta-box">
+            <p><strong>INVOICE NO.</strong> {order.invoice_id}</p>
+            <p><strong>DATE</strong> {formatDate(order.delivery_date)}</p>
+            <p><strong>DUE DATE</strong> {formatDate(order.delivery_date)}</p>
+            <p><strong>TERMS</strong> Due on receipt</p>
+          </div>
+        </div>
 
           {/* Horizontal Divider */}
           <hr className="horizontal-divider" />
@@ -408,7 +423,7 @@ export default function ClientInvoice({
               </div>
               <div className="totals-row balance-due-row">
                 <div className="totals-label">BALANCE DUE</div>
-                <div className="totals-value">S${order.total_amount.toFixed(2)}</div>
+                <div className="totals-value">${order.total_amount.toFixed(2)}</div>
               </div>
             </div>
           </div>
