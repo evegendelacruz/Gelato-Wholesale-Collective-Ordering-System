@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Search, Filter, X, ChevronDown } from 'lucide-react';
+import { Search, Filter, X, ChevronDown, RefreshCw } from 'lucide-react';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import supabase from '@/lib/client';
@@ -123,15 +123,14 @@ export default function ClientStatementPage() {
   initializeStatements();
 }, []);
 
-  // Add this function after the fetchStatementInvoices function
-const generateStatementsForOrders = async () => {
+ const generateStatementsForOrders = async () => {
   try {
     console.log('Checking for orders without statements...');
     
     // Get all orders that don't have a statement_id
     const { data: ordersWithoutStatement, error: ordersError } = await supabase
       .from('client_order')
-      .select('id, client_auth_id, delivery_date, total_amount')
+      .select('id, client_auth_id, delivery_date, total_amount, order_date')
       .is('statement_id', null);
 
     if (ordersError) throw ordersError;
@@ -143,11 +142,12 @@ const generateStatementsForOrders = async () => {
 
     console.log(`Found ${ordersWithoutStatement.length} orders without statements`);
 
-    // Group orders by client and month
+    // Group orders by client and month (based on delivery_date month)
     const groupedOrders: { [key: string]: typeof ordersWithoutStatement } = {};
     
     ordersWithoutStatement.forEach(order => {
       const deliveryDate = new Date(order.delivery_date);
+      // Use the actual month and year from delivery_date
       const monthKey = `${order.client_auth_id}_${deliveryDate.getFullYear()}_${deliveryDate.getMonth()}`;
       
       if (!groupedOrders[monthKey]) {
@@ -158,26 +158,47 @@ const generateStatementsForOrders = async () => {
 
     console.log(`Grouped into ${Object.keys(groupedOrders).length} unique client-month combinations`);
 
-    // Create statements for each group
-    for (const orders of Object.values(groupedOrders)) {
-      const firstOrder = orders[0];
-      const deliveryDate = new Date(firstOrder.delivery_date);
+    for (const [, orders] of Object.entries(groupedOrders)) {
+      // Sort orders by delivery_date to get the first invoice of the month
+      const sortedOrders = orders.sort((a, b) => 
+        new Date(a.delivery_date).getTime() - new Date(b.delivery_date).getTime()
+      );
       
-      // Set to first day of the month
-      const statementMonth = new Date(deliveryDate.getFullYear(), deliveryDate.getMonth(), 1);
+      const firstOrder = sortedOrders[0];
+      const firstDeliveryDate = new Date(firstOrder.delivery_date);
+      
+      // Set statement_month to the first day of the month from the first delivery
+      const statementMonth = new Date(
+        firstDeliveryDate.getFullYear(), 
+        firstDeliveryDate.getMonth(), 
+        1
+      );
       
       // Calculate total amount
-      const totalAmount = orders.reduce((sum, order) => sum + parseFloat(order.total_amount.toString()), 0);
+      const totalAmount = orders.reduce((sum, order) => 
+        sum + parseFloat(order.total_amount.toString()), 0
+      );
 
-      console.log(`Creating statement for client ${firstOrder.client_auth_id}, month ${statementMonth.toISOString()}, total: ${totalAmount}`);
+      console.log(`Processing statement for client ${firstOrder.client_auth_id}`);
+      console.log(`First delivery date: ${firstDeliveryDate.toISOString()}`);
+      console.log(`Statement month: ${statementMonth.toISOString()}`);
+      console.log(`Total amount: ${totalAmount}`);
+
+      // Format statement_month as YYYY-MM-DD for the first day of the month
+      const statementMonthStr = statementMonth.toISOString().split('T')[0];
 
       // Check if statement already exists for this client-month
-      const { data: existingStatement } = await supabase
+      const { data: existingStatement, error: checkError } = await supabase
         .from('client_statement')
-        .select('statement_id')
+        .select('statement_id, total_amount')
         .eq('client_auth_id', firstOrder.client_auth_id)
-        .eq('statement_month', statementMonth.toISOString().split('T')[0])
-        .single();
+        .eq('statement_month', statementMonthStr)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Error checking existing statement:', checkError);
+        continue;
+      }
 
       let statementId: string;
 
@@ -186,14 +207,34 @@ const generateStatementsForOrders = async () => {
         statementId = existingStatement.statement_id;
         console.log(`Using existing statement: ${statementId}`);
         
-        // Update the total amount
-        const { error: updateError } = await supabase
-          .from('client_statement')
-          .update({ total_amount: totalAmount })
+        // Recalculate total by getting all orders for this statement
+        const { data: allOrders, error: allOrdersError } = await supabase
+          .from('client_order')
+          .select('total_amount')
           .eq('statement_id', statementId);
+
+        if (!allOrdersError && allOrders) {
+          const currentTotal = allOrders.reduce((sum, order) => 
+            sum + parseFloat(order.total_amount.toString()), 0
+          );
           
-        if (updateError) {
-          console.error('Error updating statement total:', updateError);
+          // Add the new orders' total
+          const newTotal = currentTotal + totalAmount;
+          
+          // Update the total amount
+          const { error: updateError } = await supabase
+            .from('client_statement')
+            .update({ 
+              total_amount: newTotal,
+              date_generated: new Date().toISOString()
+            })
+            .eq('statement_id', statementId);
+            
+          if (updateError) {
+            console.error('Error updating statement total:', updateError);
+          } else {
+            console.log(`Updated statement total to: ${newTotal}`);
+          }
         }
       } else {
         // Create new statement
@@ -201,7 +242,7 @@ const generateStatementsForOrders = async () => {
           .from('client_statement')
           .insert({
             client_auth_id: firstOrder.client_auth_id,
-            statement_month: statementMonth.toISOString().split('T')[0],
+            statement_month: statementMonthStr,
             total_amount: totalAmount,
             date_generated: new Date().toISOString()
           })
@@ -214,7 +255,7 @@ const generateStatementsForOrders = async () => {
         }
 
         statementId = newStatement.statement_id;
-        console.log(`Created new statement: ${statementId}`);
+        console.log(`Created new statement: ${statementId} for month: ${statementMonthStr}`);
       }
 
       // Update all orders in this group with the statement_id
@@ -236,6 +277,103 @@ const generateStatementsForOrders = async () => {
     console.error('Error generating statements:', error);
   }
 };
+
+
+// Add this new function to handle statement updates when orders are deleted
+const updateStatementAfterOrderDeletion = async (statementId: string) => {
+  try {
+    // Get all remaining orders for this statement
+    const { data: remainingOrders, error: ordersError } = await supabase
+      .from('client_order')
+      .select('total_amount')
+      .eq('statement_id', statementId);
+
+    if (ordersError) throw ordersError;
+
+    // If no orders remain, delete the statement
+    if (!remainingOrders || remainingOrders.length === 0) {
+      const { error: deleteError } = await supabase
+        .from('client_statement')
+        .delete()
+        .eq('statement_id', statementId);
+      
+      if (deleteError) throw deleteError;
+      console.log(`Statement ${statementId} deleted - no remaining orders`);
+      return;
+    }
+
+    // Otherwise, recalculate the total
+    const newTotal = remainingOrders.reduce((sum, order) => 
+      sum + parseFloat(order.total_amount.toString()), 0
+    );
+
+    const { error: updateError } = await supabase
+      .from('client_statement')
+      .update({ 
+        total_amount: newTotal,
+        date_generated: new Date().toISOString()
+      })
+      .eq('statement_id', statementId);
+
+    if (updateError) throw updateError;
+    console.log(`Statement ${statementId} updated - new total: ${newTotal}`);
+  } catch (error) {
+    console.error('Error updating statement after deletion:', error);
+  }
+};
+
+// Add this useEffect to set up real-time subscription for order changes
+useEffect(() => {
+  const channel = supabase
+    .channel('client_order_changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'client_order'
+      },
+      async (payload) => {
+        console.log('Order change detected:', payload);
+        
+        if (payload.eventType === 'DELETE') {
+          // Handle deletion
+          const deletedOrder = payload.old as { statement_id?: string };
+          if (deletedOrder.statement_id) {
+            await updateStatementAfterOrderDeletion(deletedOrder.statement_id);
+            await fetchStatements();
+          }
+        } else if (payload.eventType === 'UPDATE') {
+          // Handle update (e.g., statement_id changed)
+          const updatedOrder = payload.new as { statement_id?: string };
+          const oldOrder = payload.old as { statement_id?: string };
+          
+          // If statement_id was removed
+          if (oldOrder.statement_id && !updatedOrder.statement_id) {
+            await updateStatementAfterOrderDeletion(oldOrder.statement_id);
+          }
+          
+          // If statement_id was changed
+          if (oldOrder.statement_id && updatedOrder.statement_id && 
+              oldOrder.statement_id !== updatedOrder.statement_id) {
+            await updateStatementAfterOrderDeletion(oldOrder.statement_id);
+            await updateStatementAfterOrderDeletion(updatedOrder.statement_id);
+          }
+          
+          await fetchStatements();
+        } else if (payload.eventType === 'INSERT') {
+          // Handle new orders
+          await generateStatementsForOrders();
+          await fetchStatements();
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, []);
 
   const handleSaveHeaderOption = async () => {
   try {
@@ -531,11 +669,12 @@ const handlePrintStatement = async () => {
     let yPos = tableY + 13;
     doc.setTextColor(0, 0, 0);
 
+    // In handlePrintStatement - Invoice rows section
     statementInvoices.forEach((invoice) => {
-      const invoiceDate = new Date(invoice.order_date).toLocaleDateString('en-GB');
-      doc.text(invoiceDate, 22, yPos);
+      const deliveryDate = new Date(invoice.delivery_date).toLocaleDateString('en-GB');
+      doc.text(deliveryDate, 22, yPos);
       
-      const description = `Invoice No. ${invoice.invoice_id}: Due ${invoiceDate}`;
+      const description = `Invoice No. ${invoice.invoice_id}: Due ${deliveryDate}`;
       const descLines = doc.splitTextToSize(description, 90);
       doc.text(descLines, 50, yPos);
       
@@ -674,11 +813,12 @@ const handleDownloadStatement = async () => {
     let yPos = tableY + 13;
     doc.setTextColor(0, 0, 0);
 
+    // In handlePrintStatement - Invoice rows section
     statementInvoices.forEach((invoice) => {
-      const invoiceDate = new Date(invoice.order_date).toLocaleDateString('en-GB');
-      doc.text(invoiceDate, 22, yPos);
+      const deliveryDate = new Date(invoice.delivery_date).toLocaleDateString('en-GB');
+      doc.text(deliveryDate, 22, yPos);
       
-      const description = `Invoice No. ${invoice.invoice_id}: Due ${invoiceDate}`;
+      const description = `Invoice No. ${invoice.invoice_id}: Due ${deliveryDate}`;
       const descLines = doc.splitTextToSize(description, 90);
       doc.text(descLines, 50, yPos);
       
@@ -689,7 +829,7 @@ const handleDownloadStatement = async () => {
       
       yPos += Math.max(descLines.length * 4, 6);
     });
-    
+        
     const footerY = 270;
     doc.setFontSize(9);
 
@@ -754,7 +894,8 @@ const handleDownloadStatement = async () => {
 };
 
 
-  const fetchStatements = async () => {
+ // Modified fetchStatements to properly display the month
+const fetchStatements = async () => {
   try {
     setLoading(true);
     
@@ -814,7 +955,7 @@ const handleDownloadStatement = async () => {
         }>;
       }
 
-      const transformedStatements = data.map((stmt: RawStatement) => {
+      const transformedStatements = await Promise.all(data.map(async (stmt: RawStatement) => {
         let clientData = {
           client_businessName: 'N/A',
           client_email: 'N/A',
@@ -833,24 +974,46 @@ const handleDownloadStatement = async () => {
           }
         }
 
+        // Get the first order's delivery_date for this statement to determine the actual month
+        const { data: firstOrder } = await supabase
+          .from('client_order')
+          .select('delivery_date')
+          .eq('statement_id', stmt.statement_id)
+          .order('delivery_date', { ascending: true })
+          .limit(1)
+          .single();
+
+        // Use the delivery_date month if available, otherwise fall back to statement_month
+        let displayMonth: string;
+        if (firstOrder && firstOrder.delivery_date) {
+          const deliveryDate = new Date(firstOrder.delivery_date);
+          displayMonth = deliveryDate.toLocaleDateString('en-US', { 
+            month: 'long', 
+            year: 'numeric' 
+          });
+        } else {
+          // Fallback to statement_month from database
+          displayMonth = new Date(stmt.statement_month).toLocaleDateString('en-US', { 
+            month: 'long', 
+            year: 'numeric' 
+          });
+        }
+
         return {
           statement_id: stmt.statement_id,
           client_auth_id: stmt.client_auth_id,
           company_name: clientData.client_businessName,
           date_generated: stmt.date_generated,
-          statement_month: new Date(stmt.statement_month).toLocaleDateString('en-US', { 
-            month: 'long', 
-            year: 'numeric' 
-          }),
+          statement_month: displayMonth,
           total_amount: typeof stmt.total_amount === 'string' ? parseFloat(stmt.total_amount) : stmt.total_amount,
           invoice_count: 0,
           client_email: clientData.client_email,
           client_person_incharge: clientData.client_person_incharge,
           client_business_contact: clientData.client_business_contact,
           business_address: `${clientData.ad_streetName}, ${clientData.ad_country}, ${clientData.ad_postal}`,
-          aging_category: stmt.aging_category || '1-30_days' // Add this line
+          aging_category: stmt.aging_category || '1-30_days'
         };
-      });
+      }));
 
       // Fetch invoice counts for each statement
       for (const stmt of transformedStatements) {
@@ -886,7 +1049,7 @@ const handleDownloadStatement = async () => {
     
     const { data, error: supabaseError } = await supabase
       .from('client_order')
-      .select('invoice_id, order_date, total_amount, status')
+      .select('invoice_id, order_date, delivery_date, total_amount, status')
       .eq('statement_id', statementId)
       .order('order_date', { ascending: true });
 
@@ -1013,8 +1176,29 @@ const handleDownloadStatement = async () => {
                   <Filter size={20} />
                   <span>Filter</span>
                 </button>
+                <div className="flex items-center gap-4">
+                {/* Generate Statement Button */}
+                <button
+                onClick={async () => {
+                  setLoading(true);
+                  await generateStatementsForOrders();
+                  await fetchStatements();
+                  setLoading(false);
+                  setSuccessMessage('Statements generated successfully!');
+                  setShowSuccessModal(true);
+                }}
+                disabled={loading}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: '#FF5722' }}
+              >
+                <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+                <span>{loading ? 'Generating...' : 'Generate Statement'}</span>
+              </button>
+                </div>
               </div>
             </div>
+
+            
 
             <div style={{ overflowX: 'auto', width: '100%' }}>
               <table style={{ width: '100%' }}>
