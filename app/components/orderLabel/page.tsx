@@ -221,7 +221,7 @@ const handlePrintLabels = async () => {
 
         doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'normal');
         const storageText = 'Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
-        const storageLines = doc.splitTextToSize(storageText, 30);
+        const storageLines = doc.splitTextToSize(storageText, 28);
         let storageY = storageFixedY;
         storageLines.forEach(line => {
           doc.text(line, marginLeft, storageY);
