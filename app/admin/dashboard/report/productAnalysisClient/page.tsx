@@ -162,6 +162,7 @@ export default function ReportClientPage() {
     const { data: orders, error: ordersError } = await supabase
       .from('client_order')
       .select('delivery_date')
+      .not('status', 'eq', 'Cancelled')
       .order('delivery_date', { ascending: true });
 
     if (ordersError) throw ordersError;
@@ -233,10 +234,13 @@ export default function ReportClientPage() {
           client_user!client_order_client_auth_id_fkey(client_businessName)
         `)
         .eq('delivery_date', deliveryDate)
+        .not('status', 'eq', 'Cancelled') 
         .order('delivery_date', { ascending: true });
 
       if (ordersError) throw ordersError;
-      if (!orders || orders.length === 0) continue;
+      if (!orders || orders.length === 0) {
+        continue;
+      }
 
       const orderIds = orders.map((o: Order) => o.id);
       const { data: orderItems, error: itemsError } = await supabase
@@ -392,11 +396,18 @@ export default function ReportClientPage() {
   }
 };
 
-  const handlePreview = async (report: Report) => {
-    setPreviewData(report.report_data);
-    setPreviewDate(report.year.toString());
-    setShowPreview(true);
-  };
+const handlePreview = async (report: Report) => {
+  // Verify the report data is still valid
+  if (!report.report_data || Object.keys(report.report_data).length === 0) {
+    alert('This report has no data. Please regenerate reports.');
+    return;
+  }
+  
+  setPreviewData(report.report_data);
+  setPreviewDate(report.year.toString());
+  setShowPreview(true);
+};
+
 const handleDownload = async (report: Report) => {
   if (!report.report_data || Object.keys(report.report_data).length === 0) {
     alert('No data available for this year');

@@ -107,7 +107,7 @@ export default function DeliveryReportPage() {
       throw error;
     }
 
-    // Group reports by year
+    // Group reports by year and filter out empty dates
     const yearlyReports: { [year: string]: Report } = {};
     
     (reportsData as ReportDataFromDB[] || []).forEach((report) => {
@@ -124,16 +124,21 @@ export default function DeliveryReportPage() {
         };
       }
       
-      // Merge all delivery dates from this report into the year's report_data
+      // **FIX: Only merge delivery dates that have valid orders**
       Object.keys(report.report_data).forEach((dateKey) => {
-        yearlyReports[year].report_data[dateKey] = report.report_data[dateKey];
+        const dateData = report.report_data[dateKey];
+        if (dateData && dateData.orders && dateData.orders.length > 0) {
+          yearlyReports[year].report_data[dateKey] = dateData;
+        }
       });
     });
 
-    // Convert to array and sort by year descending
-    const transformedReports = Object.values(yearlyReports).sort((a, b) => 
-      new Date(b.delivery_date).getFullYear() - new Date(a.delivery_date).getFullYear()
-    );
+    // **FIX: Filter out years with no valid delivery dates**
+    const transformedReports = Object.values(yearlyReports)
+      .filter(report => Object.keys(report.report_data).length > 0)
+      .sort((a, b) => 
+        new Date(b.delivery_date).getFullYear() - new Date(a.delivery_date).getFullYear()
+      );
 
     setReports(transformedReports);
   } catch (err) {
@@ -171,12 +176,12 @@ const generateAndSaveReport = async (deliveryDate: string) => {
     }
     
     // Filter out orders with invalid or missing invoice_id OR missing client_user data
-    const validOrders = (orders || []).filter(order => 
-      order.invoice_id && 
-      order.invoice_id.trim() !== '' &&
-      order.client_user && // Ensure client_user exists (not deleted)
-      (Array.isArray(order.client_user) ? order.client_user.length > 0 : true) // Handle array case
-    );
+    const validOrders = (orders || []).filter(order => {
+      const hasValidInvoice = order.invoice_id && order.invoice_id.trim() !== '';
+      const hasValidClient = order.client_user && 
+        (Array.isArray(order.client_user) ? order.client_user.length > 0 : true);
+      return hasValidInvoice && hasValidClient;
+    });
 
     // Get the year for this delivery date
     const year = new Date(deliveryDate).getFullYear();
@@ -192,6 +197,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       ? existingYearReports[0] 
       : null;
 
+    // **FIX: If no valid orders, remove this date from report**
     if (!validOrders || validOrders.length === 0) {
       console.log(`No valid orders found for delivery date: ${deliveryDate}`);
       
@@ -218,6 +224,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         }
       }
       
+      // **IMPORTANT: Return here to prevent adding empty data**
       return;
     }
 
@@ -270,6 +277,12 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         
         // Re-validate orders for existing dates still exist in database
         const invoiceIds = typedExistingData.orders.map(o => o.invoice);
+        
+        // **FIX: Skip validation if no invoice IDs**
+        if (invoiceIds.length === 0) {
+          continue;
+        }
+        
         const { data: stillExistingOrders } = await supabase
           .from('client_order')
           .select('invoice_id, client_user!client_order_client_auth_id_fkey(client_businessName)')
@@ -284,7 +297,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
           )
         );
         
-        // Only keep this date if it has valid orders
+        // **FIX: Only keep this date if it has valid orders**
         if (validExistingOrders.length > 0) {
           cleanedReportData[existingDate] = {
             delivery_date: typedExistingData.delivery_date,
@@ -375,15 +388,35 @@ const generateAndSaveReport = async (deliveryDate: string) => {
   }
 };
 
-  const handlePreview = async (report: Report) => {
-  setPreviewData(report.report_data);
-  setPreviewDate(Object.keys(report.report_data).sort()[0] || report.delivery_date);
+ const handlePreview = async (report: Report) => {
+  const validPreviewData: { [deliveryDate: string]: DeliveryDateData } = {};
+  
+  Object.keys(report.report_data).forEach((dateKey) => {
+    const dateData = report.report_data[dateKey];
+    if (dateData && dateData.orders && dateData.orders.length > 0) {
+      validPreviewData[dateKey] = dateData;
+    }
+  });
+  
+  if (Object.keys(validPreviewData).length === 0) {
+    alert('No valid delivery data available for preview');
+    return;
+  }
+  
+  setPreviewData(validPreviewData);
+  setPreviewDate(Object.keys(validPreviewData).sort()[0]);
   setShowPreview(true);
 };
 
 
   const handleDownload = async (report: Report) => {
-  if (!report.report_data || Object.keys(report.report_data).length === 0) {
+  // **FIX: Filter out empty dates first**
+  const validDates = Object.keys(report.report_data).filter(dateKey => {
+    const dateData = report.report_data[dateKey];
+    return dateData && dateData.orders && dateData.orders.length > 0;
+  });
+
+  if (validDates.length === 0) {
     alert('No data available for this year');
     return;
   }
@@ -391,14 +424,18 @@ const generateAndSaveReport = async (deliveryDate: string) => {
   const year = new Date(report.delivery_date).getFullYear();
   const workbook = new ExcelJS.Workbook();
 
-  // Get all delivery dates sorted
-  const deliveryDates = Object.keys(report.report_data).sort();
+  // Get all delivery dates sorted (already filtered)
+  const deliveryDates = validDates.sort();
 
   // Create a sheet for each delivery date in the year
   for (const sheetDate of deliveryDates) {
     const dateData = report.report_data[sheetDate];
     
-    if (!dateData || !dateData.orders || dateData.orders.length === 0) continue;
+    // Double-check (shouldn't be needed after filter, but safe)
+    if (!dateData || !dateData.orders || dateData.orders.length === 0) {
+      console.log(`Skipping ${sheetDate} - no orders`);
+      continue;
+    }
 
     // Format sheet name: "Jan 15" or "Dec 31"
     const sheetName = new Date(sheetDate).toLocaleDateString('en-US', { 

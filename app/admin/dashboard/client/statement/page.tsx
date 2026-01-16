@@ -127,13 +127,17 @@ export default function ClientStatementPage() {
   try {
     console.log('Checking for orders without statements...');
     
-    // Get all orders that don't have a statement_id
+    // Get all orders that don't have a statement_id and are not cancelled
     const { data: ordersWithoutStatement, error: ordersError } = await supabase
       .from('client_order')
-      .select('id, client_auth_id, delivery_date, total_amount, order_date')
-      .is('statement_id', null);
+      .select('id, client_auth_id, delivery_date, total_amount, order_date, status')
+      .is('statement_id', null)
+      .neq('status', 'Cancelled'); // Exclude cancelled orders
 
-    if (ordersError) throw ordersError;
+    if (ordersError) {
+      console.error('Error fetching orders:', ordersError);
+      throw ordersError;
+    }
 
     if (!ordersWithoutStatement || ordersWithoutStatement.length === 0) {
       console.log('No orders without statements found');
@@ -146,6 +150,11 @@ export default function ClientStatementPage() {
     const groupedOrders: { [key: string]: typeof ordersWithoutStatement } = {};
     
     ordersWithoutStatement.forEach(order => {
+      if (!order.delivery_date) {
+        console.warn(`Order ${order.id} has no delivery_date, skipping`);
+        return;
+      }
+      
       const deliveryDate = new Date(order.delivery_date);
       // Use the actual month and year from delivery_date
       const monthKey = `${order.client_auth_id}_${deliveryDate.getFullYear()}_${deliveryDate.getMonth()}`;
@@ -158,171 +167,161 @@ export default function ClientStatementPage() {
 
     console.log(`Grouped into ${Object.keys(groupedOrders).length} unique client-month combinations`);
 
-    for (const [, orders] of Object.entries(groupedOrders)) {
-      // Sort orders by delivery_date to get the first invoice of the month
-      const sortedOrders = orders.sort((a, b) => 
-        new Date(a.delivery_date).getTime() - new Date(b.delivery_date).getTime()
-      );
-      
-      const firstOrder = sortedOrders[0];
-      const firstDeliveryDate = new Date(firstOrder.delivery_date);
-      
-      // Set statement_month to the first day of the month from the first delivery
-      const statementMonth = new Date(
-        firstDeliveryDate.getFullYear(), 
-        firstDeliveryDate.getMonth(), 
-        1
-      );
-      
-      // Calculate total amount
-      const totalAmount = orders.reduce((sum, order) => 
-        sum + parseFloat(order.total_amount.toString()), 0
-      );
-
-      console.log(`Processing statement for client ${firstOrder.client_auth_id}`);
-      console.log(`First delivery date: ${firstDeliveryDate.toISOString()}`);
-      console.log(`Statement month: ${statementMonth.toISOString()}`);
-      console.log(`Total amount: ${totalAmount}`);
-
-      // Format statement_month as YYYY-MM-DD for the first day of the month
-      const statementMonthStr = statementMonth.toISOString().split('T')[0];
-
-      // Check if statement already exists for this client-month
-      const { data: existingStatement, error: checkError } = await supabase
-        .from('client_statement')
-        .select('statement_id, total_amount')
-        .eq('client_auth_id', firstOrder.client_auth_id)
-        .eq('statement_month', statementMonthStr)
-        .maybeSingle();
-
-      if (checkError) {
-        console.error('Error checking existing statement:', checkError);
-        continue;
-      }
-
-      let statementId: string;
-
-      if (existingStatement) {
-        // Use existing statement
-        statementId = existingStatement.statement_id;
-        console.log(`Using existing statement: ${statementId}`);
+    for (const [monthKey, orders] of Object.entries(groupedOrders)) {
+      try {
+        // Sort orders by delivery_date to get the first invoice of the month
+        const sortedOrders = orders.sort((a, b) => 
+          new Date(a.delivery_date).getTime() - new Date(b.delivery_date).getTime()
+        );
         
-        // Recalculate total by getting all orders for this statement
-        const { data: allOrders, error: allOrdersError } = await supabase
-          .from('client_order')
-          .select('total_amount')
-          .eq('statement_id', statementId);
+        const firstOrder = sortedOrders[0];
+        const firstDeliveryDate = new Date(firstOrder.delivery_date);
+        
+        // Set statement_month to the first day of the month from the first delivery
+        const statementMonth = new Date(
+          firstDeliveryDate.getFullYear(), 
+          firstDeliveryDate.getMonth(), 
+          1
+        );
+        
+        // Calculate total amount
+        const totalAmount = orders.reduce((sum, order) => 
+          sum + parseFloat(order.total_amount.toString()), 0
+        );
 
-        if (!allOrdersError && allOrders) {
-          const currentTotal = allOrders.reduce((sum, order) => 
-            sum + parseFloat(order.total_amount.toString()), 0
-          );
-          
-          // Add the new orders' total
-          const newTotal = currentTotal + totalAmount;
-          
-          // Update the total amount
-          const { error: updateError } = await supabase
-            .from('client_statement')
-            .update({ 
-              total_amount: newTotal,
-              date_generated: new Date().toISOString()
-            })
-            .eq('statement_id', statementId);
-            
-          if (updateError) {
-            console.error('Error updating statement total:', updateError);
-          } else {
-            console.log(`Updated statement total to: ${newTotal}`);
-          }
-        }
-      } else {
-        // Create new statement
-        const { data: newStatement, error: statementError } = await supabase
+        console.log(`Processing statement for client ${firstOrder.client_auth_id}`);
+        console.log(`First delivery date: ${firstDeliveryDate.toISOString()}`);
+        console.log(`Statement month: ${statementMonth.toISOString()}`);
+        console.log(`Total amount: ${totalAmount}`);
+        console.log(`Number of orders: ${orders.length}`);
+
+        // Format statement_month as YYYY-MM-DD for the first day of the month
+        const statementMonthStr = statementMonth.toISOString().split('T')[0];
+
+        // Check if statement already exists for this client-month
+        const { data: existingStatement, error: checkError } = await supabase
           .from('client_statement')
-          .insert({
-            client_auth_id: firstOrder.client_auth_id,
-            statement_month: statementMonthStr,
-            total_amount: totalAmount,
-            date_generated: new Date().toISOString()
-          })
-          .select('statement_id')
-          .single();
+          .select('statement_id, total_amount')
+          .eq('client_auth_id', firstOrder.client_auth_id)
+          .eq('statement_month', statementMonthStr)
+          .maybeSingle();
 
-        if (statementError) {
-          console.error('Error creating statement:', statementError);
+        if (checkError) {
+          console.error('Error checking existing statement:', checkError);
           continue;
         }
 
-        statementId = newStatement.statement_id;
-        console.log(`Created new statement: ${statementId} for month: ${statementMonthStr}`);
-      }
+        let statementId: string;
 
-      // Update all orders in this group with the statement_id
-      const orderIds = orders.map(o => o.id);
-      const { error: updateOrdersError } = await supabase
-        .from('client_order')
-        .update({ statement_id: statementId })
-        .in('id', orderIds);
+        if (existingStatement) {
+          // Use existing statement
+          statementId = existingStatement.statement_id;
+          console.log(`Using existing statement: ${statementId}`);
+          
+          // Recalculate total by getting all orders for this statement
+          const { data: allOrders, error: allOrdersError } = await supabase
+            .from('client_order')
+            .select('total_amount')
+            .eq('statement_id', statementId)
+            .neq('status', 'Cancelled'); // Exclude cancelled orders
 
-      if (updateOrdersError) {
-        console.error('Error updating orders with statement_id:', updateOrdersError);
-      } else {
-        console.log(`Updated ${orderIds.length} orders with statement_id ${statementId}`);
+          if (!allOrdersError && allOrders) {
+            const currentTotal = allOrders.reduce((sum, order) => 
+              sum + parseFloat(order.total_amount.toString()), 0
+            );
+            
+            // Add the new orders' total
+            const newTotal = currentTotal + totalAmount;
+            
+            // Update the total amount
+            const { error: updateError } = await supabase
+              .from('client_statement')
+              .update({ 
+                total_amount: newTotal,
+                date_generated: new Date().toISOString()
+              })
+              .eq('statement_id', statementId);
+              
+            if (updateError) {
+              console.error('Error updating statement total:', updateError);
+              continue;
+            } else {
+              console.log(`Updated statement total to: ${newTotal}`);
+            }
+          }
+        } else {
+          // Verify client exists before creating statement
+          const { data: clientExists, error: clientError } = await supabase
+            .from('client_user')
+            .select('client_auth_id')
+            .eq('client_auth_id', firstOrder.client_auth_id)
+            .single();
+
+          if (clientError || !clientExists) {
+            console.error(`Client ${firstOrder.client_auth_id} does not exist, skipping statement creation`);
+            continue;
+          }
+
+          // Create new statement
+          const { data: newStatement, error: statementError } = await supabase
+            .from('client_statement')
+            .insert({
+              client_auth_id: firstOrder.client_auth_id,
+              statement_month: statementMonthStr,
+              total_amount: totalAmount,
+              date_generated: new Date().toISOString(),
+              aging_category: '1-30_days' // Set default aging category
+            })
+            .select('statement_id')
+            .single();
+
+          if (statementError) {
+            console.error('Error creating statement:', {
+              error: statementError,
+              details: {
+                client_auth_id: firstOrder.client_auth_id,
+                statement_month: statementMonthStr,
+                total_amount: totalAmount
+              }
+            });
+            continue;
+          }
+
+          if (!newStatement) {
+            console.error('Statement created but no data returned');
+            continue;
+          }
+
+          statementId = newStatement.statement_id;
+          console.log(`Created new statement: ${statementId} for month: ${statementMonthStr}`);
+        }
+
+        // Update all orders in this group with the statement_id
+        const orderIds = orders.map(o => o.id);
+        const { error: updateOrdersError } = await supabase
+          .from('client_order')
+          .update({ statement_id: statementId })
+          .in('id', orderIds);
+
+        if (updateOrdersError) {
+          console.error('Error updating orders with statement_id:', updateOrdersError);
+        } else {
+          console.log(`Updated ${orderIds.length} orders with statement_id ${statementId}`);
+        }
+      } catch (groupError) {
+        console.error(`Error processing group ${monthKey}:`, groupError);
+        continue; // Continue with next group even if one fails
       }
     }
 
     console.log('Statement generation complete');
   } catch (error) {
     console.error('Error generating statements:', error);
+    throw error; // Re-throw to be caught by caller
   }
 };
 
-
-// Add this new function to handle statement updates when orders are deleted
-const updateStatementAfterOrderDeletion = async (statementId: string) => {
-  try {
-    // Get all remaining orders for this statement
-    const { data: remainingOrders, error: ordersError } = await supabase
-      .from('client_order')
-      .select('total_amount')
-      .eq('statement_id', statementId);
-
-    if (ordersError) throw ordersError;
-
-    // If no orders remain, delete the statement
-    if (!remainingOrders || remainingOrders.length === 0) {
-      const { error: deleteError } = await supabase
-        .from('client_statement')
-        .delete()
-        .eq('statement_id', statementId);
-      
-      if (deleteError) throw deleteError;
-      console.log(`Statement ${statementId} deleted - no remaining orders`);
-      return;
-    }
-
-    // Otherwise, recalculate the total
-    const newTotal = remainingOrders.reduce((sum, order) => 
-      sum + parseFloat(order.total_amount.toString()), 0
-    );
-
-    const { error: updateError } = await supabase
-      .from('client_statement')
-      .update({ 
-        total_amount: newTotal,
-        date_generated: new Date().toISOString()
-      })
-      .eq('statement_id', statementId);
-
-    if (updateError) throw updateError;
-    console.log(`Statement ${statementId} updated - new total: ${newTotal}`);
-  } catch (error) {
-    console.error('Error updating statement after deletion:', error);
-  }
-};
-
-// Add this useEffect to set up real-time subscription for order changes
+// Simplified real-time subscription - just refresh the data
 useEffect(() => {
   const channel = supabase
     .channel('client_order_changes')
@@ -336,34 +335,10 @@ useEffect(() => {
       async (payload) => {
         console.log('Order change detected:', payload);
         
-        if (payload.eventType === 'DELETE') {
-          // Handle deletion
-          const deletedOrder = payload.old as { statement_id?: string };
-          if (deletedOrder.statement_id) {
-            await updateStatementAfterOrderDeletion(deletedOrder.statement_id);
-            await fetchStatements();
-          }
-        } else if (payload.eventType === 'UPDATE') {
-          // Handle update (e.g., statement_id changed)
-          const updatedOrder = payload.new as { statement_id?: string };
-          const oldOrder = payload.old as { statement_id?: string };
-          
-          // If statement_id was removed
-          if (oldOrder.statement_id && !updatedOrder.statement_id) {
-            await updateStatementAfterOrderDeletion(oldOrder.statement_id);
-          }
-          
-          // If statement_id was changed
-          if (oldOrder.statement_id && updatedOrder.statement_id && 
-              oldOrder.statement_id !== updatedOrder.statement_id) {
-            await updateStatementAfterOrderDeletion(oldOrder.statement_id);
-            await updateStatementAfterOrderDeletion(updatedOrder.statement_id);
-          }
-          
-          await fetchStatements();
-        } else if (payload.eventType === 'INSERT') {
-          // Handle new orders
-          await generateStatementsForOrders();
+        // For any change (INSERT, UPDATE, DELETE), refresh statements
+        if (payload.eventType === 'DELETE' || 
+            payload.eventType === 'UPDATE' || 
+            payload.eventType === 'INSERT') {
           await fetchStatements();
         }
       }
