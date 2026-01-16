@@ -59,56 +59,68 @@ const handlePrintLabels = async () => {
       format: [90, 50]
     });
 
-    // Load Arial Narrow font from public folder
+    // Try to load fonts, but continue with fallback if they fail
+    let fontsLoaded = false;
     try {
-      // Arial Narrow
-      const arialNarrowResponse = await fetch('/assets/ARIALN.ttf');
-      const arialNarrowArrayBuffer = await arialNarrowResponse.arrayBuffer();
-      const arialNarrowBase64 = btoa(
-        new Uint8Array(arialNarrowArrayBuffer)
-          .reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
+      // Use absolute URL paths for production
+      const fontBaseUrl = window.location.origin;
       
-      // Arial Narrow Bold
-      const arialNarrowBoldResponse = await fetch('/assets/ARIALNB.ttf');
-      const arialNarrowBoldArrayBuffer = await arialNarrowBoldResponse.arrayBuffer();
-      const arialNarrowBoldBase64 = btoa(
-        new Uint8Array(arialNarrowBoldArrayBuffer)
-          .reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
-      
-      // Arial Normal
-      const arialResponse = await fetch('/assets/ARIAL.ttf');
-      const arialArrayBuffer = await arialResponse.arrayBuffer();
-      const arialBase64 = btoa(
-        new Uint8Array(arialArrayBuffer)
-          .reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
-      
-      // Arial Bold
-      const arialBoldResponse = await fetch('/assets/ARIALBD.ttf');
-      const arialBoldArrayBuffer = await arialBoldResponse.arrayBuffer();
-      const arialBoldBase64 = btoa(
-        new Uint8Array(arialBoldArrayBuffer)
-          .reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
-      
-      // Add all fonts to VFS
-      doc.addFileToVFS('ARIALN.ttf', arialNarrowBase64);
-      doc.addFileToVFS('ARIALNB.ttf', arialNarrowBoldBase64);
-      doc.addFileToVFS('ARIAL.ttf', arialBase64);
-      doc.addFileToVFS('ARIALBD.ttf', arialBoldBase64);
-      
-      // Register fonts
-      doc.addFont('ARIALN.ttf', 'ArialNarrow', 'normal');
-      doc.addFont('ARIALNB.ttf', 'ArialNarrow', 'bold');
-      doc.addFont('ARIAL.ttf', 'Arial', 'normal');
-      doc.addFont('ARIALBD.ttf', 'Arial', 'bold');
-      
-      doc.setFont('ArialNarrow', 'normal'); // Set as default font
+      const [arialNarrowResponse, arialNarrowBoldResponse, arialResponse, arialBoldResponse] = await Promise.all([
+        fetch(`${fontBaseUrl}/assets/ARIALN.ttf`),
+        fetch(`${fontBaseUrl}/assets/ARIALNB.ttf`),
+        fetch(`${fontBaseUrl}/assets/ARIAL.ttf`),
+        fetch(`${fontBaseUrl}/assets/ARIALBD.ttf`)
+      ]);
+
+      // Check if all fetches were successful
+      if (arialNarrowResponse.ok && arialNarrowBoldResponse.ok && arialResponse.ok && arialBoldResponse.ok) {
+        const [arialNarrowArrayBuffer, arialNarrowBoldArrayBuffer, arialArrayBuffer, arialBoldArrayBuffer] = await Promise.all([
+          arialNarrowResponse.arrayBuffer(),
+          arialNarrowBoldResponse.arrayBuffer(),
+          arialResponse.arrayBuffer(),
+          arialBoldResponse.arrayBuffer()
+        ]);
+
+        const arialNarrowBase64 = btoa(
+          new Uint8Array(arialNarrowArrayBuffer)
+            .reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+        
+        const arialNarrowBoldBase64 = btoa(
+          new Uint8Array(arialNarrowBoldArrayBuffer)
+            .reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+        
+        const arialBase64 = btoa(
+          new Uint8Array(arialArrayBuffer)
+            .reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+        
+        const arialBoldBase64 = btoa(
+          new Uint8Array(arialBoldArrayBuffer)
+            .reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+        
+        doc.addFileToVFS('ARIALN.ttf', arialNarrowBase64);
+        doc.addFileToVFS('ARIALNB.ttf', arialNarrowBoldBase64);
+        doc.addFileToVFS('ARIAL.ttf', arialBase64);
+        doc.addFileToVFS('ARIALBD.ttf', arialBoldBase64);
+        
+        doc.addFont('ARIALN.ttf', 'ArialNarrow', 'normal');
+        doc.addFont('ARIALNB.ttf', 'ArialNarrow', 'bold');
+        doc.addFont('ARIAL.ttf', 'Arial', 'normal');
+        doc.addFont('ARIALBD.ttf', 'Arial', 'bold');
+        
+        doc.setFont('ArialNarrow', 'normal');
+        fontsLoaded = true;
+      }
     } catch (fontError) {
-      console.warn('Failed to load Arial fonts, using helvetica:', fontError);
-      doc.setFont('helvetica', 'normal'); // Fallback font
+      console.warn('Failed to load custom fonts, using helvetica fallback:', fontError);
+    }
+
+    // Set fallback font if custom fonts failed to load
+    if (!fontsLoaded) {
+      doc.setFont('helvetica', 'normal');
     }
 
     let isFirstPage = true;
@@ -133,7 +145,12 @@ const handlePrintLabels = async () => {
           batchNumber: ''
         };
 
-        doc.setFont('ArialNarrow', 'normal');
+        // Use loaded font or fallback
+        if (fontsLoaded) {
+          doc.setFont('ArialNarrow', 'normal');
+        } else {
+          doc.setFont('helvetica', 'normal');
+        }
         doc.setFontSize(10);
         doc.setTextColor(0, 0, 0);
 
@@ -146,13 +163,13 @@ const handlePrintLabels = async () => {
 
         // Company Name
         doc.setFontSize(11);
-        doc.setFont('ArialNarrow', 'normal');
+        doc.setFont(fontsLoaded ? 'ArialNarrow' : 'helvetica', 'normal');
         doc.text(data.companyName, marginLeft, leftY);
         leftY += 5;
 
         // Product Name (Bold)
         doc.setFontSize(8);
-        doc.setFont('ArialNarrow', 'bold');
+        doc.setFont(fontsLoaded ? 'ArialNarrow' : 'helvetica', 'bold');
         const productLines = doc.splitTextToSize(data.productName, 43);
         productLines.slice(0, 3).forEach(line => {
           doc.text(line, marginLeft, leftY);
@@ -162,7 +179,7 @@ const handlePrintLabels = async () => {
 
         // INGREDIENTS section
         doc.setFontSize(4.5);
-        doc.setFont('Arial', 'bold');
+        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'bold');
         doc.text('INGREDIENTS:', marginLeft, leftY);
         leftY += 1;
         
@@ -173,7 +190,7 @@ const handlePrintLabels = async () => {
         leftY += 3;
 
         // Ingredients text (normal)
-        doc.setFont('Arial', 'normal');
+        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'normal');
         doc.setFontSize(4.5);
         const ingredientsLines = doc.splitTextToSize(data.ingredients, 38);
         ingredientsLines.slice(0, 3).forEach(line => {
@@ -181,33 +198,28 @@ const handlePrintLabels = async () => {
           leftY += 2;
         });
 
-        const storageFixedY = 43; // Fixed position for storage text (near bottom)
+        const storageFixedY = 43;
 
         doc.setFontSize(4.5);
-        doc.setFont('Arial', 'bold');
+        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'bold');
 
-        // Calculate allergen lines first
         const allergenLines = doc.splitTextToSize(data.allergen, 32);
-        const allergenTextHeight = allergenLines.length * 2; // 2mm per line
+        const allergenTextHeight = allergenLines.length * 2;
 
-        // Calculate ALLERGENS label position (work backwards from storage)
-        const allergenContentEndY = storageFixedY - 1; // 1mm gap before storage
+        const allergenContentEndY = storageFixedY - 1;
         const allergenContentStartY = allergenContentEndY - allergenTextHeight;
         const allergensLabelY = allergenContentStartY - 2.5;
 
-        // Draw "ALLERGENS:" label
         doc.text('ALLERGENS:', marginLeft, allergensLabelY);
 
-        // Draw allergen content (normal)
-        doc.setFont('Arial', 'normal');
+        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'normal');
         let allergenY = allergenContentStartY;
         allergenLines.forEach(line => {
           doc.text(line, marginLeft, allergenY);
           allergenY += 2;
         });
 
-        // Storage instructions - fixed at bottom
-        doc.setFont('Arial', 'normal');
+        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'normal');
         const storageText = 'Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
         const storageLines = doc.splitTextToSize(storageText, 32);
         let storageY = storageFixedY;
@@ -216,7 +228,7 @@ const handlePrintLabels = async () => {
           storageY += 2;
         });
 
-        // Halal Logo - positioned to match image
+        // Halal Logo
         if (halalBase64) {
           const logoSize = 13;
           const logoX = marginLeft + 28.5;
@@ -228,15 +240,13 @@ const handlePrintLabels = async () => {
         let rightY = marginTop + 4.5;
         const rightX = rightSectionX;
 
-        // Best Before label
         doc.setFontSize(5);
-        doc.setFont('Arial', 'normal');
+        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'normal');
         doc.text('Best Before (dd/mm/yyyy)', rightX, rightY);
         rightY += 4;
 
-      // Best Before Value (white on black)
         doc.setFontSize(8);
-        doc.setFont('ArialNarrow', 'bold');
+        doc.setFont(fontsLoaded ? 'ArialNarrow' : 'helvetica', 'bold');
         const bestBeforeText = (data.bestBefore || '').trim();
         const bestBeforeWidth = doc.getTextWidth(bestBeforeText);
         const fontSize = 8;
@@ -255,15 +265,13 @@ const handlePrintLabels = async () => {
         doc.setTextColor(0, 0, 0);
         rightY += 6;
 
-        // Batch Number label
         doc.setFontSize(5);
-        doc.setFont('Arial', 'normal');
+        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'normal');
         doc.text('Batch Number', rightX, rightY);
         rightY += 4;
 
-        // Batch Number value (white on black)
         doc.setFontSize(8);
-        doc.setFont('ArialNarrow', 'bold');
+        doc.setFont(fontsLoaded ? 'ArialNarrow' : 'helvetica', 'bold');
         const batchNumberText = (data.batchNumber || '').trim();
         const batchWidth = doc.getTextWidth(batchNumberText);
 
@@ -280,9 +288,9 @@ const handlePrintLabels = async () => {
         doc.text(batchNumberText, rightX, rightY);
         doc.setTextColor(0, 0, 0);
 
-        // Manufacturer Info - positioned at bottom
+        // Manufacturer Info
         doc.setFontSize(5);
-        doc.setFont('Arial', 'normal');
+        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'normal');
         const mfgY = 36;
         const lineSpacing = 2.2;
         
@@ -308,7 +316,7 @@ const handlePrintLabels = async () => {
     setIsGenerating(false);
   } catch (error) {
     console.error('Error generating PDF for print:', error);
-    alert('Failed to open print preview. Please try again.');
+    alert('Failed to open print preview. Error: ' + error.message);
     setIsGenerating(false);
   }
 };
