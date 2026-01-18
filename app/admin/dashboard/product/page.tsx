@@ -106,6 +106,9 @@ export default function ProductPage() {
   }>>([]);
   const [selectedClients, setSelectedClients] = useState<Set<string>>(new Set());
   const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [duplicateSourceProduct, setDuplicateSourceProduct] = useState<Product | null>(null);
+  const [activeDropdown, setActiveDropdown] = useState<number | null>(null);
 
   const [formData, setFormData] = useState({
     product_id: "",
@@ -123,6 +126,56 @@ export default function ProductPage() {
     description: "",
     cost: "",
   });
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.actions-dropdown')) {
+        setActiveDropdown(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleDuplicate = async (product: Product) => {
+  setIsDuplicating(true);
+  setDuplicateSourceProduct(product);
+  
+  // Generate new product ID for the duplicate
+  const newProductId = await generateProductId();
+  
+  // Pre-fill form with duplicate data
+  setFormData({
+    product_id: newProductId,
+    product_name: `${product.product_name} (Copy)`,
+    product_type: product.product_type,
+    gelato_type: product.product_gelato_type,
+    weight_kg: product.product_weight.toString(),
+    milk_based_kg: product.product_milkbased?.toString() || "",
+    sugar_syrup_based_kg: product.product_sugarbased?.toString() || "",
+    shelf_life: product.product_shelflife,
+    price_sgd: product.product_price.toString(),
+    allergen: product.product_allergen || "",
+    ingredient: product.product_ingredient || "",
+    billing_name: product.product_billingName || "",
+    description: product.product_description || "",
+    cost: product.product_cost?.toString() || "",
+  });
+  
+  // Copy the product image preview if exists
+  if (product.product_image) {
+    setPhotoPreview(
+      `https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${product.product_image}`
+    );
+  }
+  
+  await fetchClients();
+  setIsModalOpen(true);
+  setActiveDropdown(null);
+};
+
 
   useEffect(() => {
     const loadOptions = async () => {
@@ -867,6 +920,38 @@ export default function ProductPage() {
 
       let photoPath = null;
 
+      if (isDuplicating && duplicateSourceProduct?.product_image && !productPhoto) {
+        try {
+          // Download the original image
+          const { data: originalImageData } = await supabase.storage
+            .from('gwc_files')
+            .download(duplicateSourceProduct.product_image);
+          
+          if (originalImageData) {
+            // Generate new filename for the duplicate
+            const fileExt = duplicateSourceProduct.product_image.split('.').pop()?.toLowerCase() || 'jpg';
+            const timestamp = Date.now();
+            const randomStr = Math.random().toString(36).substring(7);
+            const fileName = `product_photo/${productId}_${timestamp}_${randomStr}.${fileExt}`;
+            
+            // Upload as new file
+            const { error: uploadError } = await supabase.storage
+              .from('gwc_files')
+              .upload(fileName, originalImageData, {
+                cacheControl: '3600',
+                upsert: false,
+              });
+            
+            if (!uploadError) {
+              photoPath = fileName;
+            }
+          }
+        } catch (error) {
+          console.error('Error duplicating image:', error);
+          // Continue without image if duplication fails
+        }
+      }
+
       // Upload product photo if exists
       if (productPhoto) {
         const fileExt =
@@ -1016,6 +1101,8 @@ export default function ProductPage() {
     setIsEditMode(false);
     setSelectedProduct(null);
     setProductPhoto(null);
+    setIsDuplicating(false); 
+    setDuplicateSourceProduct(null);
     setPhotoPreview('');
     setMessage({ type: '', text: '' });
     setSelectedClients(new Set());
@@ -1529,6 +1616,12 @@ export default function ProductPage() {
                     >
                       COST (S$)
                     </th>
+                    <th
+                      className="text-left py-1 px-4 font-bold text-sm w-1"
+                      style={{ color: "#5C2E1F", width: "2px", minWidth: "2px", maxWidth: "2px", whiteSpace: "nowrap", }}
+                    >
+                 
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1624,6 +1717,58 @@ export default function ProductPage() {
                         <td className="py-3 px-4 text-sm">
                           {product.product_cost || '-'}
                         </td>
+                        <td 
+                          className="py-1 px-1 text-sm relative"  style={{ width: "2px", minWidth: "2px", maxWidth: "2px", whiteSpace: "nowrap", }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="actions-dropdown">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveDropdown(activeDropdown === product.id ? null : product.id);
+                              }}
+                              className="p-1 hover:bg-gray-100 rounded transition-colors"
+                            >
+                              <svg 
+                                width="16" 
+                                height="16" 
+                                viewBox="0 0 24 24" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                strokeWidth="2"
+                              >
+                                <circle cx="12" cy="12" r="1" />
+                                <circle cx="12" cy="5" r="1" />
+                                <circle cx="12" cy="19" r="1" />
+                              </svg>
+                            </button>
+                            
+                            {activeDropdown === product.id && (
+                              <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-300 rounded-lg shadow-lg z-50">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDuplicate(product);
+                                  }}
+                                  className="w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm"
+                                >
+                                  <svg 
+                                    width="16" 
+                                    height="16" 
+                                    viewBox="0 0 24 24" 
+                                    fill="none" 
+                                    stroke="currentColor" 
+                                    strokeWidth="2"
+                                  >
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                  </svg>
+                                  Duplicate
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1674,9 +1819,9 @@ export default function ProductPage() {
           <div className="bg-white rounded-lg w-full max-w-3xl mx-4 max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold" style={{ color: "#5C2E1F" }}>
-                  {isEditMode ? "Edit Product" : "Add New Product"}
-                </h2>
+                  <h2 className="text-2xl font-bold" style={{ color: "#5C2E1F" }}>
+                    {isEditMode ? "Edit Product" : isDuplicating ? "Duplicate Product" : "Add New Product"}
+                  </h2>
                 <button
                   onClick={closeModal}
                   disabled={loading}
