@@ -1187,7 +1187,7 @@ const handleViewInvoice = async (order) => {
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-3xl font-bold" style={{ color: '#5C2E1F' }}>
-                Orders
+                Client Orders
               </h1>
               
               <div className="flex items-center gap-4">

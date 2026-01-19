@@ -172,42 +172,30 @@ export default function BasketPage() {
   };
 
   const isWithinOrderingHours = (): boolean => {
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
-    
-    // Block orders on Sunday
-    if (currentDay === 0) {
-      return false;
-    }
-    
-    // Orders allowed from 12 AM (0) to 6 PM (18), but not at 6 PM
-    return currentHour >= 0 && currentHour < 18;
-  };
+  const now = new Date();
+  const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+  
+  // Block orders on Sunday only
+  if (currentDay === 0) {
+    return false;
+  }
+  
+  // Orders allowed all day Monday-Saturday
+  return true;
+};
 
-  // Replace the getNextAvailableOrderTime function with this:
-  const getNextAvailableOrderTime = (): string => {
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentDay = now.getDay();
-    
-    if (currentDay === 0) {
-      // Sunday - next available is Monday 12 AM
-      return "Monday at 12:00 AM";
-    }
-    
-    if (currentHour >= 18) {
-      // After 6 PM, next available is 12 AM tomorrow (unless tomorrow is Sunday)
-      const tomorrow = new Date(now);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      if (tomorrow.getDay() === 0) {
-        return "Monday at 12:00 AM";
-      }
-      return "12:00 AM tomorrow";
-    }
-    
-    return "12:00 AM";
-  };
+const getNextAvailableOrderTime = (): string => {
+  const now = new Date();
+  const currentDay = now.getDay();
+  
+  if (currentDay === 0) {
+    // Sunday - next available is Monday 12 AM
+    return "Monday at 12:00 AM";
+  }
+  
+  // This won't be reached during Mon-Sat, but kept for consistency
+  return "12:00 AM";
+};
 
   const updateQuantity = async (id: number, quantity: number) => {
     try {
@@ -517,13 +505,9 @@ export default function BasketPage() {
                   {(() => {
                     const now = new Date();
                     const currentDay = now.getDay();
-                    const currentHour = now.getHours();
                     
                     if (currentDay === 0) {
                       return 'Orders Closed (Sunday)';
-                    }
-                    if (currentHour >= 18) {
-                      return 'Orders Closed (Resumes at 12:00 AM)';
                     }
                     return 'Place Order';
                   })()}

@@ -60,7 +60,10 @@ export default function Sidepanel() {
       id: 'orders',
       label: 'Orders',
       icon: ShoppingCart,
-      path: '/admin/dashboard/order'
+      submenu: [
+        { id: 'order', label: 'Client Order', path: '/admin/dashboard/order' },
+        { id: 'online-order', label: 'Online Order', path: '/admin/dashboard/order/onlineOrder' },
+      ]
     },
     {
       id: 'report',
