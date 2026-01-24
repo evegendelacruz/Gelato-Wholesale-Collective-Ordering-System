@@ -251,6 +251,14 @@ const handleRowExpand = async (order: Order) => {
 
       if (error) throw error;
 
+      // Calculate total amount from order items using product_price
+      const totalAmount = (data || []).reduce((sum, item) => sum + (item.product_price * item.quantity), 0);
+
+      // Update the order's total_amount in state
+      setOrders(prev => prev.map(o => 
+        o.id === order.id ? { ...o, total_amount: totalAmount } : o
+      ));
+
       setRowOrderItems(prev => ({
         ...prev,
         [order.id]: data || []
@@ -316,65 +324,93 @@ const handleViewInvoice = async (order: Order) => {
     }, []);
 
     useEffect(() => {
-    const fetchOrders = async () => {
-        try {
-        setLoading(true);
-        
-        const { data, error: supabaseError } = await supabase
-            .from('customer_order')
-            .select('*')
-            .order('order_date', { ascending: false });
-
-        if (supabaseError) {
-            throw new Error(`${supabaseError.message} (Code: ${supabaseError.code})`);
-        }
-
-        if (!data) {
-            setOrders([]);
-        } else {
-            setOrders(data);
-        }
-        
-        setError(null);
-        } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'An error occurred while fetching orders';
-        setError(errorMessage);
-        console.error('Error fetching orders:', err);
-        setOrders([]);
-        } finally {
-        setLoading(false);
-        }
-    };
-
-    fetchOrders();
-    }, []);
-
-    const refreshOrders = async () => {
+  const fetchOrders = async () => {
     try {
-        setLoading(true);
-        
-        const { data, error: supabaseError } = await supabase
+      setLoading(true);
+      
+      const { data, error: supabaseError } = await supabase
         .from('customer_order')
         .select('*')
         .order('order_date', { ascending: false });
 
-        if (supabaseError) {
+      if (supabaseError) {
         throw new Error(`${supabaseError.message} (Code: ${supabaseError.code})`);
-        }
+      }
 
-        if (data) {
-        setOrders(data);
-        }
+      if (!data) {
+        setOrders([]);
+      } else {
+        // Fetch all order items to calculate totals using product_price
+        const ordersWithTotals = await Promise.all(
+          data.map(async (order) => {
+            const { data: items } = await supabase
+              .from('customer_order_item')
+              .select('*')
+              .eq('order_id', order.id);
+
+            const totalAmount = (items || []).reduce((sum, item) => sum + (item.product_price * item.quantity), 0);
+            
+            return { ...order, total_amount: totalAmount };
+          })
+        );
         
-        setError(null);
+        setOrders(ordersWithTotals);
+      }
+      
+      setError(null);
     } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'An error occurred while fetching orders';
-        setError(errorMessage);
-        console.error('Error fetching orders:', err);
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred while fetching orders';
+      setError(errorMessage);
+      console.error('Error fetching orders:', err);
+      setOrders([]);
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
-    };
+  };
+
+  fetchOrders();
+}, []);
+
+  const refreshOrders = async () => {
+  try {
+    setLoading(true);
+    
+    const { data, error: supabaseError } = await supabase
+      .from('customer_order')
+      .select('*')
+      .order('order_date', { ascending: false });
+
+    if (supabaseError) {
+      throw new Error(`${supabaseError.message} (Code: ${supabaseError.code})`);
+    }
+
+    if (data) {
+      // Fetch all order items to calculate totals using product_price
+      const ordersWithTotals = await Promise.all(
+        data.map(async (order) => {
+          const { data: items } = await supabase
+            .from('customer_order_item')
+            .select('*')
+            .eq('order_id', order.id);
+
+          const totalAmount = (items || []).reduce((sum, item) => sum + (item.product_price * item.quantity), 0);
+          
+          return { ...order, total_amount: totalAmount };
+        })
+      );
+      
+      setOrders(ordersWithTotals);
+    }
+    
+    setError(null);
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'An error occurred while fetching orders';
+    setError(errorMessage);
+    console.error('Error fetching orders:', err);
+  } finally {
+    setLoading(false);
+  }
+};
 
 
   const filteredOrders = orders.filter(order => {
@@ -539,7 +575,8 @@ const handleViewInvoice = async (order: Order) => {
 }) => {
   if (!isOpen || !order) return null;
 
-  const getSubtotal = () => orderItems.reduce((sum, item) => sum + (item.product_cost * item.quantity), 0);
+  // Inside InvoiceModal component
+  const getSubtotal = () => orderItems.reduce((sum, item) => sum + (item.product_price * item.quantity), 0);
   const getGST = () => getSubtotal() * 0.09;
   const getTotal = () => getSubtotal() + getGST();
   const subtotal = getSubtotal();
@@ -898,7 +935,7 @@ const handleViewInvoice = async (order: Order) => {
                   <div className="text-gray-700">{item.product_name}</div>
                   <div className="text-center">{item.quantity}</div>
                   <div className="text-right">{formatCurrency(item.product_price)}</div>
-                  <div className="text-right font-medium">{formatCurrency(item.product_cost * item.quantity)}</div>
+                  <div className="text-right font-medium">{formatCurrency(item.product_price * item.quantity)}</div>
                 </div>
               ))}
             </div>
@@ -1277,7 +1314,7 @@ const handleViewInvoice = async (order: Order) => {
                               <td className="py-2 px-2 text-xs text-center">{item.quantity}</td>
                               <td className="py-2 px-2 text-xs text-right">{item.calculated_weight}</td>
                               <td className="py-2 px-2 text-xs text-right">{item.product_price?.toFixed(2) || '0.00'}</td>
-                              <td className="py-2 px-2 text-xs text-right font-medium">{formatCurrency(item.product_cost * item.quantity)}</td>
+                              <td className="py-2 px-2 text-xs text-right font-medium">{formatCurrency(item.product_price * item.quantity)}</td>
                               <td className="py-2 px-2"></td>
                               <td className="py-2 px-2"></td>
                               <td className="py-2 px-2"></td>
