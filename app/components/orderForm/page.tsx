@@ -214,8 +214,18 @@ export default function OrderForm({
                       }}
                       minDate={new Date(getMinDeliveryDate())}
                       filterDate={(date) => {
-                        // Disable Sundays (0 = Sunday)
-                        return date.getDay() !== 0;
+                        const today = new Date();
+                        const isTodaySaturday = today.getDay() === 6;
+                        const isDateMonday = date.getDay() === 1;
+                        const isDateSunday = date.getDay() === 0;
+                        
+                        // Disable Sundays always
+                        if (isDateSunday) return false;
+                        
+                        // Disable Monday if today is Saturday
+                        if (isTodaySaturday && isDateMonday) return false;
+                        
+                        return true;
                       }}
                       dateFormat="dd/MM/yyyy"
                       placeholderText="Select delivery date"
