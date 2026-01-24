@@ -32,66 +32,102 @@ export default function Calendar() {
   }, [currentDate]);
 
   const fetchOrders = async () => {
-    try {
-      setLoading(true);
-      
-      // Fetch orders with client information
-      const { data: ordersData, error: ordersError } = await supabase
-        .from('client_order')
-        .select(`
-          id,
-          order_id,
-          client_auth_id,
-          delivery_date,
-          client_user!client_order_client_auth_id_fkey(client_businessName)
-        `)
-        .order('delivery_date', { ascending: true });
+  try {
+    setLoading(true);
+    
+    // Fetch orders from client_order with client information
+    const { data: clientOrdersData, error: clientOrdersError } = await supabase
+      .from('client_order')
+      .select(`
+        id,
+        order_id,
+        client_auth_id,
+        delivery_date,
+        client_user!client_order_client_auth_id_fkey(client_businessName)
+      `)
+      .order('delivery_date', { ascending: true });
 
-      if (ordersError) throw ordersError;
+    if (clientOrdersError) throw clientOrdersError;
 
-      // For each order, fetch its items to calculate total quantity
-      const ordersWithQuantities = await Promise.all(
-        (ordersData || []).map(async (order: {
-          id: string;
-          order_id: string;
-          client_auth_id: string;
-          delivery_date: string;
-          client_user: { client_businessName: string } | { client_businessName: string }[] | null;
-        }) => {
-          const { data: items } = await supabase
-            .from('client_order_item')
-            .select('quantity')
-            .eq('order_id', order.id);
+    // Fetch orders from customer_order
+    const { data: customerOrdersData, error: customerOrdersError } = await supabase
+      .from('customer_order')
+      .select('id, order_id, customer_name, delivery_date')
+      .order('delivery_date', { ascending: true });
 
-          const totalQuantity = (items || []).reduce((sum: number, item: { quantity?: number }) => sum + (item.quantity || 0), 0);
+    if (customerOrdersError) throw customerOrdersError;
 
-          let companyName = 'N/A';
-          if (order.client_user) {
-            if (Array.isArray(order.client_user)) {
-              companyName = order.client_user[0]?.client_businessName || 'N/A';
-            } else {
-              companyName = order.client_user.client_businessName || 'N/A';
-            }
+    // Process client orders with quantities
+    const clientOrdersWithQuantities = await Promise.all(
+      (clientOrdersData || []).map(async (order: {
+        id: string;
+        order_id: string;
+        client_auth_id: string;
+        delivery_date: string;
+        client_user: { client_businessName: string } | { client_businessName: string }[] | null;
+      }) => {
+        const { data: items } = await supabase
+          .from('client_order_item')
+          .select('quantity')
+          .eq('order_id', order.id);
+
+        const totalQuantity = (items || []).reduce((sum: number, item: { quantity?: number }) => sum + (item.quantity || 0), 0);
+
+        let companyName = 'N/A';
+        if (order.client_user) {
+          if (Array.isArray(order.client_user)) {
+            companyName = order.client_user[0]?.client_businessName || 'N/A';
+          } else {
+            companyName = order.client_user.client_businessName || 'N/A';
           }
+        }
 
-          return {
-            id: order.id,
-            order_id: order.order_id,
-            companyName,
-            date: new Date(order.delivery_date),
-            totalQuantity
-          };
-        })
-      );
+        return {
+          id: `client_${order.id}`, // Prefix to identify client orders
+          order_id: order.order_id,
+          companyName,
+          date: new Date(order.delivery_date),
+          totalQuantity
+        };
+      })
+    );
 
-      setOrders(ordersWithQuantities);
-    } catch (err) {
-      console.error('Error fetching orders:', err);
-      setOrders([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Process customer orders with quantities
+    const customerOrdersWithQuantities = await Promise.all(
+      (customerOrdersData || []).map(async (order: {
+        id: number;
+        order_id: string;
+        customer_name: string;
+        delivery_date: string;
+      }) => {
+        const { data: items } = await supabase
+          .from('customer_order_item')
+          .select('quantity')
+          .eq('order_id', order.id);
+
+        const totalQuantity = (items || []).reduce((sum: number, item: { quantity?: number }) => sum + (item.quantity || 0), 0);
+
+        return {
+          id: `customer_${order.id}`, // Prefix to identify customer orders
+          order_id: order.order_id,
+          companyName: order.customer_name || 'N/A',
+          date: new Date(order.delivery_date),
+          totalQuantity
+        };
+      })
+    );
+
+    // Combine both arrays
+    const allOrders = [...clientOrdersWithQuantities, ...customerOrdersWithQuantities];
+    
+    setOrders(allOrders);
+  } catch (err) {
+    console.error('Error fetching orders:', err);
+    setOrders([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleDateClick = (date: Date, ordersForDate: OrderForDate[]) => {
   if (ordersForDate.length > 0) {
@@ -101,11 +137,25 @@ export default function Calendar() {
     const day = String(date.getDate()).padStart(2, '0');
     const dateStr = `${year}-${month}-${day}`;
     
-    // Store the date in sessionStorage before navigating
-    sessionStorage.setItem('filterDeliveryDate', dateStr);
+    // Check if there are both client orders and customer orders for this date
+    const hasClientOrders = ordersForDate.some(order => order.id.startsWith('client_'));
+    const hasCustomerOrders = ordersForDate.some(order => order.id.startsWith('customer_'));
     
-    // Navigate to order page without URL parameter
-    router.push('dashboard/order');
+    // If there are both types, you could show a modal to choose, or default to one
+    // For now, we'll check which type exists and navigate accordingly
+    if (hasClientOrders && !hasCustomerOrders) {
+      // Store the date in sessionStorage before navigating to client orders
+      sessionStorage.setItem('filterDeliveryDate', dateStr);
+      router.push('dashboard/order');
+    } else if (hasCustomerOrders && !hasClientOrders) {
+      // Store the date in sessionStorage before navigating to online orders
+      sessionStorage.setItem('filterDeliveryDate', dateStr);
+      router.push('dashboard/order/onlineOrder');
+    } else {
+      // If both exist, default to client orders (you can change this logic)
+      sessionStorage.setItem('filterDeliveryDate', dateStr);
+      router.push('dashboard/order');
+    }
   }
 };
 
