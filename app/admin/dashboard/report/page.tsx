@@ -15,6 +15,22 @@ interface ReportDataItem {
   weight: number;
 }
 
+interface CustomerOrderItem {
+  id: number;
+  order_id: number;
+  product_id: number;
+  product_name: string;
+  product_type: string;
+  quantity: number;
+  gelato_type: string;  
+  calculated_weight: string;
+  product_weight: number;  
+  product_milkbase: number; 
+  product_sugarbase: number;  
+  product_price: number;
+  product_cost: number;
+}
+
 interface ConsolidatedItem {
   productName: string;
   type: string;
@@ -159,14 +175,27 @@ export default function ReportPage() {
   try {
     setGenerating(true);
 
-    const { data: orders, error: ordersError } = await supabase
+    // Fetch all unique delivery dates from BOTH tables
+    const { data: clientOrders, error: clientOrdersError } = await supabase
       .from('client_order')
       .select('delivery_date')
       .order('delivery_date', { ascending: true });
 
-    if (ordersError) throw ordersError;
+    const { data: customerOrders, error: customerOrdersError } = await supabase
+      .from('customer_order')
+      .select('delivery_date')
+      .order('delivery_date', { ascending: true });
 
-    const uniqueDates = [...new Set(orders?.map((o: { delivery_date: string }) => o.delivery_date).filter(date => date != null) || [])];
+    if (clientOrdersError) throw clientOrdersError;
+    if (customerOrdersError) throw customerOrdersError;
+
+    // Combine and get unique dates from both sources
+    const allDates = [
+      ...(clientOrders?.map((o: { delivery_date: string }) => o.delivery_date).filter(date => date != null) || []),
+      ...(customerOrders?.map((o: { delivery_date: string }) => o.delivery_date).filter(date => date != null) || [])
+    ];
+    
+    const uniqueDates = [...new Set(allDates)];
     
     // Group dates by year
     const datesByYear: { [year: number]: string[] } = {};
@@ -192,6 +221,7 @@ export default function ReportPage() {
     setGenerating(false);
   }
 };
+
 
   const generateAndSaveYearReport = async (year: number, deliveryDates: string[]) => {
   try {
@@ -224,7 +254,14 @@ export default function ReportPage() {
       }
       const consolidatedMap = monthlyConsolidatedMaps.get(monthKey)!;
 
-      const { data: orders, error: ordersError } = await supabase
+      let milkProduction = 0;
+      let sugarSyrupProduction = 0;
+      let totalItems = 0;
+      const items: ReportDataItem[] = [];
+      let totalOrders = 0;
+
+      // ========== FETCH AND PROCESS CLIENT ORDERS ==========
+      const { data: clientOrders, error: clientOrdersError } = await supabase
         .from('client_order')
         .select(`
           id,
@@ -235,90 +272,172 @@ export default function ReportPage() {
         .eq('delivery_date', deliveryDate)
         .order('delivery_date', { ascending: true });
 
-      if (ordersError) throw ordersError;
-      if (!orders || orders.length === 0) continue;
+      if (clientOrdersError) throw clientOrdersError;
 
-      const orderIds = orders.map((o: Order) => o.id);
-      const { data: orderItems, error: itemsError } = await supabase
-        .from('client_order_item')
-        .select('*')
-        .in('order_id', orderIds);
+      if (clientOrders && clientOrders.length > 0) {
+        totalOrders += clientOrders.length;
+        const clientOrderIds = clientOrders.map((o: Order) => o.id);
+        
+        const { data: clientOrderItems, error: clientItemsError } = await supabase
+          .from('client_order_item')
+          .select('*')
+          .in('order_id', clientOrderIds);
 
-      if (itemsError) throw itemsError;
+        if (clientItemsError) throw clientItemsError;
 
-      const productIds = [...new Set(orderItems?.map((item: OrderItem) => item.product_id) || [])];
-      const { data: products, error: productsError } = await supabase
-        .from('product_list')
-        .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased, product_cost, product_price')
-        .in('id', productIds);
-
-      if (productsError) throw productsError;
-
-      const productTypeMap = new Map(products?.map(p => [p.id, p.product_type]) || []);
-      const productWeightMap = new Map(products?.map(p => [p.id, p.product_weight]) || []);
-      const productGelatoTypeMap = new Map(products?.map(p => [p.id, p.product_gelato_type]) || []);
-      const productMilkBasedMap = new Map(products?.map(p => [p.id, p.product_milkbased]) || []);
-      const productSugarBasedMap = new Map(products?.map(p => [p.id, p.product_sugarbased]) || []);
-      const productCostMap = new Map(products?.map(p => [p.id, p.product_cost]) || []);
-      const productPriceMap = new Map(products?.map(p => [p.id, p.product_price]) || []);
-
-      let milkProduction = 0;
-      let sugarSyrupProduction = 0;
-      let totalItems = 0;
-      const items: ReportDataItem[] = [];
-
-      orders.forEach((order: Order) => {
-        const companyName = Array.isArray(order.client_user) 
-          ? order.client_user[0]?.client_businessName || 'N/A'
-          : order.client_user?.client_businessName || 'N/A';
-
-        const orderItemsList = orderItems?.filter((item: OrderItem) => item.order_id === order.id) || [];
-
-        orderItemsList.forEach((item: OrderItem) => {
-          const productWeight = productWeightMap.get(item.product_id) || 0;
-          const calculatedWeightNum = productWeight * item.quantity;
-          const productType = productTypeMap.get(item.product_id) || item.product_type || 'N/A';
-          const productGelatoType = productGelatoTypeMap.get(item.product_id) || 'Dairy';
-          const productCost = productCostMap.get(item.product_id) || 0;
-          const productPrice = productPriceMap.get(item.product_id) || 0;
+        if (clientOrderItems && clientOrderItems.length > 0) {
+          const productIds = [...new Set(clientOrderItems.map((item: OrderItem) => item.product_id))];
           
-          totalItems += item.quantity;
-          
-          if (productGelatoType === 'Dairy') {
-            const milkBased = productMilkBasedMap.get(item.product_id) || 0;
-            milkProduction += milkBased * item.quantity;
-          } else if (productGelatoType === 'Sorbet') {
-            const sugarBased = productSugarBasedMap.get(item.product_id) || 0;
-            sugarSyrupProduction += sugarBased * item.quantity;
-          }
+          const { data: products, error: productsError } = await supabase
+            .from('product_list')
+            .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased, product_cost, product_price')
+            .in('id', productIds);
 
-          items.push({
-            deliveryDate: order.delivery_date,
-            customerName: companyName,
-            productName: item.product_name,
-            type: productType,
-            quantity: item.quantity,
-            gelatoType: productGelatoType,
-            weight: parseFloat(calculatedWeightNum.toFixed(1))
-          });
+          if (productsError) throw productsError;
 
-          // Aggregate for monthly consolidated view
-          const key = `${item.product_name}|${productType}`;
-          if (consolidatedMap.has(key)) {
-            const existing = consolidatedMap.get(key)!;
-            existing.quantity += item.quantity;
-          } else {
-            consolidatedMap.set(key, {
-              productName: item.product_name,
-              type: productType,
-              quantity: item.quantity,
-              cost: productCost,
-              price: productPrice
+          const productTypeMap = new Map(products?.map(p => [p.id, p.product_type]) || []);
+          const productWeightMap = new Map(products?.map(p => [p.id, p.product_weight]) || []);
+          const productGelatoTypeMap = new Map(products?.map(p => [p.id, p.product_gelato_type]) || []);
+          const productMilkBasedMap = new Map(products?.map(p => [p.id, p.product_milkbased]) || []);
+          const productSugarBasedMap = new Map(products?.map(p => [p.id, p.product_sugarbased]) || []);
+          const productCostMap = new Map(products?.map(p => [p.id, p.product_cost]) || []);
+          const productPriceMap = new Map(products?.map(p => [p.id, p.product_price]) || []);
+
+          clientOrders.forEach((order: Order) => {
+            const companyName = Array.isArray(order.client_user) 
+              ? order.client_user[0]?.client_businessName || 'N/A'
+              : order.client_user?.client_businessName || 'N/A';
+
+            const orderItemsList = clientOrderItems.filter((item: OrderItem) => item.order_id === order.id);
+
+            orderItemsList.forEach((item: OrderItem) => {
+              const productWeight = productWeightMap.get(item.product_id) || 0;
+              const calculatedWeightNum = productWeight * item.quantity;
+              const productType = productTypeMap.get(item.product_id) || item.product_type || 'N/A';
+              const productGelatoType = productGelatoTypeMap.get(item.product_id) || 'Dairy';
+              const productCost = productCostMap.get(item.product_id) || 0;
+              const productPrice = productPriceMap.get(item.product_id) || 0;
+              
+              totalItems += item.quantity;
+              
+              if (productGelatoType === 'Dairy') {
+                const milkBased = productMilkBasedMap.get(item.product_id) || 0;
+                milkProduction += milkBased * item.quantity;
+              } else if (productGelatoType === 'Sorbet') {
+                const sugarBased = productSugarBasedMap.get(item.product_id) || 0;
+                sugarSyrupProduction += sugarBased * item.quantity;
+              }
+
+              items.push({
+                deliveryDate: order.delivery_date,
+                customerName: companyName,
+                productName: item.product_name,
+                type: productType,
+                quantity: item.quantity,
+                gelatoType: productGelatoType,
+                weight: parseFloat(calculatedWeightNum.toFixed(1))
+              });
+
+              // Aggregate for monthly consolidated view
+              const key = `${item.product_name}|${productType}`;
+              if (consolidatedMap.has(key)) {
+                const existing = consolidatedMap.get(key)!;
+                existing.quantity += item.quantity;
+              } else {
+                consolidatedMap.set(key, {
+                  productName: item.product_name,
+                  type: productType,
+                  quantity: item.quantity,
+                  cost: productCost,
+                  price: productPrice
+                });
+              }
             });
-          }
-        });
-      });
+          });
+        }
+      }
+      // ========== FETCH AND PROCESS CUSTOMER ORDERS ==========
+      const { data: customerOrders, error: customerOrdersError } = await supabase
+        .from('customer_order')
+        .select('id, delivery_date, customer_name')
+        .eq('delivery_date', deliveryDate);
 
+      if (customerOrdersError) {
+        console.error('Customer orders error:', customerOrdersError);
+        throw customerOrdersError;
+      }
+
+      if (customerOrders && customerOrders.length > 0) {
+        totalOrders += customerOrders.length;
+        
+        const customerOrderIds = customerOrders.map((o: { id: number }) => o.id);
+        
+        const { data: customerOrderItems, error: customerItemsError } = await supabase
+          .from('customer_order_item')
+          .select('*')
+          .in('order_id', customerOrderIds);
+
+        if (customerItemsError) {
+          console.error('Customer order items error:', customerItemsError);
+          throw customerItemsError;
+        }
+
+        if (customerOrderItems && customerOrderItems.length > 0) {
+          // Process each customer order
+          customerOrders.forEach((order: { id: number; delivery_date: string; customer_name: string }) => {
+            const orderItemsList = customerOrderItems.filter(
+              (item: CustomerOrderItem) => item.order_id === order.id
+            );
+
+            orderItemsList.forEach((item: CustomerOrderItem) => {
+              // Use data directly from customer_order_item table
+              const productWeight = item.product_weight || 0;
+              const calculatedWeightNum = productWeight * item.quantity;
+              const productType = item.product_type || 'N/A';
+              const productGelatoType = item.gelato_type || 'Dairy';
+              const productCost = item.product_cost || 0;
+              const productPrice = item.product_price || 0;
+              
+              totalItems += item.quantity;
+              
+              // Calculate production based on gelato type
+              if (productGelatoType === 'Dairy') {
+                const milkBased = item.product_milkbase || 0;
+                milkProduction += milkBased * item.quantity;
+              } else if (productGelatoType === 'Sorbet') {
+                const sugarBased = item.product_sugarbase || 0;
+                sugarSyrupProduction += sugarBased * item.quantity;
+              }
+
+              items.push({
+                deliveryDate: order.delivery_date,
+                customerName: order.customer_name,
+                productName: item.product_name,
+                type: productType,
+                quantity: item.quantity,
+                gelatoType: productGelatoType,
+                weight: parseFloat(calculatedWeightNum.toFixed(1))
+              });
+
+              // Aggregate for monthly consolidated view
+              const key = `${item.product_name}|${productType}`;
+              if (consolidatedMap.has(key)) {
+                const existing = consolidatedMap.get(key)!;
+                existing.quantity += item.quantity;
+              } else {
+                consolidatedMap.set(key, {
+                  productName: item.product_name,
+                  type: productType,
+                  quantity: item.quantity,
+                  cost: productCost,
+                  price: productPrice
+                });
+              }
+            });
+          });
+        }
+      }
+      // Sort all items together
       items.sort((a, b) => a.productName.localeCompare(b.productName));
 
       const typeTotals = new Map<string, number>();
@@ -329,7 +448,7 @@ export default function ReportPage() {
 
       yearReportData[deliveryDate] = {
         delivery_date: deliveryDate,
-        total_orders: orders.length,
+        total_orders: totalOrders,
         total_items: totalItems,
         milk_production_kg: Math.round(milkProduction),
         sugar_syrup_production_kg: Math.round(sugarSyrupProduction),
@@ -338,24 +457,24 @@ export default function ReportPage() {
       };
     }
 
-    // Create monthly consolidated sheets
+    // Create monthly consolidated sheets (rest of code remains the same)
     monthlyConsolidatedMaps.forEach((consolidatedMap, monthKey) => {
       const consolidatedItems: ConsolidatedItem[] = Array.from(consolidatedMap.values()).map(item => {
-      const totalCost = item.cost * item.quantity;
-      const totalSales = item.price * item.quantity;
-      const grossMargin = totalSales > 0 ? (totalCost / totalSales) * 100 : 0;
+        const totalCost = item.cost * item.quantity;
+        const totalSales = item.price * item.quantity;
+        const grossMargin = totalSales > 0 ? (totalCost / totalSales) * 100 : 0;
 
-      return {
-        productName: item.productName,
-        type: item.type,
-        quantity: item.quantity,
-        costPerTab: item.cost,
-        pricePerTab: item.price,
-        totalCost: totalCost,
-        totalSales: totalSales,
-        grossMargin: grossMargin
-      };
-    });
+        return {
+          productName: item.productName,
+          type: item.type,
+          quantity: item.quantity,
+          costPerTab: item.cost,
+          pricePerTab: item.price,
+          totalCost: totalCost,
+          totalSales: totalSales,
+          grossMargin: grossMargin
+        };
+      });
 
       consolidatedItems.sort((a, b) => a.productName.localeCompare(b.productName));
 
@@ -385,6 +504,7 @@ export default function ReportPage() {
 
   } catch (err) {
     console.error(`Error generating report for ${year}:`, err);
+    throw err;
   }
 };
 
