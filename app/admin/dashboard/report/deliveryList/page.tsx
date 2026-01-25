@@ -14,6 +14,7 @@ interface DeliveryDateData {
     company: string;
     address: string;
     invoice: string;
+    order_type?: 'client' | 'customer';
   }>;
 }
 
@@ -27,19 +28,6 @@ interface Report {
     [deliveryDate: string]: DeliveryDateData;
   };
 }
-
-interface ClientUser {
-  client_businessName: string;
-  client_delivery_address: string;
-  ad_streetName: string;
-  ad_country: string;
-  ad_postal: string;
-}
-
-interface DeliveryDateOrder {
-  delivery_date: string;
-}
-
 interface ReportDataFromDB {
   id: string;
   summary_id: string;
@@ -151,8 +139,8 @@ export default function DeliveryReportPage() {
 
 const generateAndSaveReport = async (deliveryDate: string) => {
   try {
-    // Fetch ONLY existing (non-deleted) orders for this delivery date
-    const { data: orders, error: ordersError } = await supabase
+    // Fetch client orders (existing code)
+    const { data: clientOrders, error: clientOrdersError } = await supabase
       .from('client_order')
       .select(`
         id,
@@ -170,17 +158,34 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       .eq('delivery_date', deliveryDate)
       .order('client_auth_id', { ascending: true });
 
-    if (ordersError) {
-      console.error('Supabase error:', ordersError);
-      throw ordersError;
+    if (clientOrdersError) {
+      console.error('Supabase error:', clientOrdersError);
+      throw clientOrdersError;
+    }
+
+    // **NEW: Fetch customer orders**
+    const { data: customerOrders, error: customerOrdersError } = await supabase
+      .from('customer_order')
+      .select('id, delivery_date, invoice_id, customer_name, delivery_address')
+      .eq('delivery_date', deliveryDate)
+      .order('customer_name', { ascending: true });
+
+    if (customerOrdersError) {
+      console.error('Supabase error:', customerOrdersError);
+      throw customerOrdersError;
     }
     
-    // Filter out orders with invalid or missing invoice_id OR missing client_user data
-    const validOrders = (orders || []).filter(order => {
+    // Filter valid client orders
+    const validClientOrders = (clientOrders || []).filter(order => {
       const hasValidInvoice = order.invoice_id && order.invoice_id.trim() !== '';
       const hasValidClient = order.client_user && 
         (Array.isArray(order.client_user) ? order.client_user.length > 0 : true);
       return hasValidInvoice && hasValidClient;
+    });
+
+    // **NEW: Filter valid customer orders**
+    const validCustomerOrders = (customerOrders || []).filter(order => {
+      return order.invoice_id && order.invoice_id.trim() !== '';
     });
 
     // Get the year for this delivery date
@@ -197,23 +202,20 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       ? existingYearReports[0] 
       : null;
 
-    // **FIX: If no valid orders, remove this date from report**
-    if (!validOrders || validOrders.length === 0) {
+    // **MODIFIED: If no valid orders from BOTH sources, remove this date**
+    if (validClientOrders.length === 0 && validCustomerOrders.length === 0) {
       console.log(`No valid orders found for delivery date: ${deliveryDate}`);
       
       if (existingYearReport) {
-        // Remove this delivery_date from report_data
         const updatedReportData = { ...existingYearReport.report_data };
         delete updatedReportData[deliveryDate];
         
-        // If report_data is now empty, delete the entire report
         if (Object.keys(updatedReportData).length === 0) {
           await supabase
             .from('delivery_reports')
             .delete()
             .eq('id', existingYearReport.id);
         } else {
-          // Otherwise, update with the modified report_data
           await supabase
             .from('delivery_reports')
             .update({
@@ -224,17 +226,14 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         }
       }
       
-      // **IMPORTANT: Return here to prevent adding empty data**
       return;
     }
 
-    // Transform orders into the format needed for the report
-    const ordersList = validOrders.map((order) => {
-      const clientData: ClientUser | undefined = Array.isArray(order.client_user) 
+    const clientOrdersList = validClientOrders.map((order) => {
+      const clientData = Array.isArray(order.client_user) 
         ? order.client_user[0]
         : order.client_user;
       
-      // Combine address fields
       const addressParts = [
         clientData?.ad_streetName,
         clientData?.ad_country,
@@ -248,22 +247,35 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       return {
         company: clientData?.client_businessName || 'N/A',
         address: combinedAddress,
-        invoice: order.invoice_id
+        invoice: order.invoice_id,
+        order_type: 'client' as const // **FIX: Use 'as const' for literal type**
       };
     });
 
-    const newDateData = {
+    // **NEW: Transform customer orders with proper typing**
+    const customerOrdersList = validCustomerOrders.map((order) => {
+      return {
+        company: order.customer_name || 'N/A',
+        address: order.delivery_address || 'N/A',
+        invoice: order.invoice_id,
+        order_type: 'customer' as const // **FIX: Use 'as const' for literal type**
+      };
+    });
+
+    // **NEW: Combine both order lists**
+    const allOrders = [...clientOrdersList, ...customerOrdersList];
+
+    const newDateData: DeliveryDateData = { // **FIX: Add explicit type annotation**
       delivery_date: deliveryDate,
-      total_orders: validOrders.length,
-      orders: ordersList
+      total_orders: allOrders.length,
+      orders: allOrders
     };
 
+    // Rest of the function remains the same...
     if (existingYearReport) {
-      // Before updating, clean up any stale data by re-validating all dates in report_data
       const cleanedReportData: { [deliveryDate: string]: DeliveryDateData } = {};
       
       for (const [existingDate, existingData] of Object.entries(existingYearReport.report_data)) {
-        // Type guard to ensure existingData is DeliveryDateData
         if (!existingData || typeof existingData !== 'object' || !('orders' in existingData)) {
           continue;
         }
@@ -271,33 +283,38 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         const typedExistingData = existingData as DeliveryDateData;
         
         if (existingDate === deliveryDate) {
-          // This date will be replaced with fresh data
           continue;
         }
         
-        // Re-validate orders for existing dates still exist in database
         const invoiceIds = typedExistingData.orders.map(o => o.invoice);
         
-        // **FIX: Skip validation if no invoice IDs**
         if (invoiceIds.length === 0) {
           continue;
         }
         
-        const { data: stillExistingOrders } = await supabase
+        // **MODIFIED: Check both client_order and customer_order**
+        const { data: stillExistingClientOrders } = await supabase
           .from('client_order')
           .select('invoice_id, client_user!client_order_client_auth_id_fkey(client_businessName)')
           .in('invoice_id', invoiceIds)
           .eq('delivery_date', existingDate);
+
+        const { data: stillExistingCustomerOrders } = await supabase
+          .from('customer_order')
+          .select('invoice_id, customer_name')
+          .in('invoice_id', invoiceIds)
+          .eq('delivery_date', existingDate);
         
-        // Only keep orders that still exist with valid client data
-        const validExistingOrders = typedExistingData.orders.filter(order => 
-          stillExistingOrders?.some(dbOrder => 
-            dbOrder.invoice_id === order.invoice && 
-            dbOrder.client_user
-          )
-        );
+        const validExistingOrders = typedExistingData.orders.filter(order => {
+          const existsInClientOrders = stillExistingClientOrders?.some(dbOrder => 
+            dbOrder.invoice_id === order.invoice && dbOrder.client_user
+          );
+          const existsInCustomerOrders = stillExistingCustomerOrders?.some(dbOrder => 
+            dbOrder.invoice_id === order.invoice
+          );
+          return existsInClientOrders || existsInCustomerOrders;
+        });
         
-        // **FIX: Only keep this date if it has valid orders**
         if (validExistingOrders.length > 0) {
           cleanedReportData[existingDate] = {
             delivery_date: typedExistingData.delivery_date,
@@ -307,7 +324,6 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         }
       }
       
-      // Add the new/updated date data
       cleanedReportData[deliveryDate] = newDateData;
 
       const result = await supabase
@@ -323,7 +339,6 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         throw new Error(`Database error: ${result.error.message || 'Unknown error'}`);
       }
     } else {
-      // Create new year report
       const reportData = {
         [deliveryDate]: newDateData
       };
@@ -345,7 +360,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       }
     }
 
-    console.log(`Successfully generated report for ${deliveryDate} with ${validOrders.length} valid orders`);
+    console.log(`Successfully generated report for ${deliveryDate} with ${allOrders.length} valid orders (${validClientOrders.length} client + ${validCustomerOrders.length} customer)`);
 
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -358,14 +373,27 @@ const generateAndSaveReport = async (deliveryDate: string) => {
   try {
     setGenerating(true);
 
-    const { data: orders, error: ordersError } = await supabase
+    // **MODIFIED: Fetch delivery dates from both tables**
+    const { data: clientOrderDates, error: clientError } = await supabase
       .from('client_order')
       .select('delivery_date')
       .order('delivery_date', { ascending: true });
 
-    if (ordersError) throw ordersError;
+    const { data: customerOrderDates, error: customerError } = await supabase
+      .from('customer_order')
+      .select('delivery_date')
+      .order('delivery_date', { ascending: true });
 
-    const uniqueDates = [...new Set((orders as DeliveryDateOrder[] || []).map((o) => o.delivery_date).filter(date => date != null))];
+    if (clientError) throw clientError;
+    if (customerError) throw customerError;
+
+    // **NEW: Combine and get unique dates from both sources**
+    const allDates = [
+      ...(clientOrderDates || []).map(o => o.delivery_date),
+      ...(customerOrderDates || []).map(o => o.delivery_date)
+    ];
+    
+    const uniqueDates = [...new Set(allDates.filter(date => date != null))];
 
     console.log('Generating reports for dates:', uniqueDates);
 
@@ -373,10 +401,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       await generateAndSaveReport(deliveryDate);
     }
 
-    // Wait a moment for database to fully update
     await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Force refresh from database
     await fetchReports();
     
     setShowSuccessModal(true);
