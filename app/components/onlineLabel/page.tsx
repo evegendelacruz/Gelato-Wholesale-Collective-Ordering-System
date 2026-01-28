@@ -165,7 +165,7 @@ const handlePrintLabels = async () => {
         doc.setFontSize(11);
         doc.setFont(fontsLoaded ? 'ArialNarrow' : 'helvetica', 'normal');
         doc.text(data.companyName, marginLeft, leftY);
-        leftY += 5;
+        leftY += 12;
 
         // Product Name (Bold)
         doc.setFontSize(8);
@@ -177,27 +177,6 @@ const handlePrintLabels = async () => {
         });
         leftY += 0;
 
-        // INGREDIENTS section
-        doc.setFontSize(4.5);
-        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'bold');
-        doc.text('INGREDIENTS:', marginLeft, leftY);
-        leftY += 1;
-        
-        // Underline for INGREDIENTS
-        doc.getTextWidth('INGREDIENTS:');
-        doc.setLineWidth(0.2);
-        doc.line(marginLeft, leftY + 0.5, marginLeft + 40, leftY + 0.5);
-        leftY += 3;
-
-        // Ingredients text (normal)
-        doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'normal');
-        doc.setFontSize(4.5);
-        const ingredientsLines = doc.splitTextToSize(data.ingredients, 38);
-        ingredientsLines.slice(0, 3).forEach(line => {
-          doc.text(line, marginLeft, leftY);
-          leftY += 2;
-        });
-
         const storageFixedY = 43;
 
         doc.setFontSize(4.5);
@@ -208,9 +187,6 @@ const handlePrintLabels = async () => {
 
         const allergenContentEndY = storageFixedY - 1;
         const allergenContentStartY = allergenContentEndY - allergenTextHeight;
-        const allergensLabelY = allergenContentStartY - 2.5;
-
-        doc.text('ALLERGENS:', marginLeft, allergensLabelY);
 
         doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'normal');
         let allergenY = allergenContentStartY;
@@ -341,7 +317,6 @@ const handlePrintLabels = async () => {
           <div class="left-section">
             <div class="company-name">${data.companyName}</div>
             <div class="product-name">${data.productName}</div>
-            <div class="ingredients-text">${data.ingredients}</div>
             <div class="allergen-text">${data.allergen}</div>
             <div class="storage-info">
               ${storageInfo}
@@ -431,38 +406,18 @@ const handlePrintLabels = async () => {
           font-family: 'Arial Narrow', Arial, sans-serif;
           font-size: 12px;
           line-height: 1.2;
-          margin-bottom: 1mm;
+          margin-bottom: 6mm;
+          font-weight: bold;
         }
         
         .product-name {
           font-family: 'Arial Narrow', Arial, sans-serif;
           font-size: 10px;
-          font-weight: bold;
           line-height: 1.3;
           margin-bottom: 1mm;
           max-height: 16mm;
           overflow: hidden;
           word-wrap: break-word;
-        }
-        
-        .ingredients-text {
-          font-family: Arial, sans-serif;
-          font-size: 6px;
-          line-height: 1.2;
-          margin-bottom: 6mm;
-          max-height: 18mm;
-          max-width: 43mm;
-          overflow: hidden;
-          word-wrap: break-word;
-        }
-
-        .ingredients-text::before {
-          content: 'INGREDIENTS:';
-          display: block;
-          font-weight: bold;
-          margin-bottom: 1mm;
-          padding-bottom: 0.5mm;
-          border-bottom: 1.5px solid black;
         }
 
       .allergen-text {
@@ -478,13 +433,6 @@ const handlePrintLabels = async () => {
         overflow: hidden;
         word-wrap: break-word;
         max-width: 30mm;
-      }
-
-      .allergen-text::before {
-        content: 'ALLERGENS:';
-        display: block;
-        font-weight: bold;
-        margin-bottom: 1mm;
       }
 
       .storage-info {
@@ -593,8 +541,6 @@ const handlePrintLabels = async () => {
       id: index,
       companyName: clientData?.client_businessName || 'Company Name',
       productName: item.product_name || 'Product Name',
-      // Use saved label data if available, otherwise use product defaults
-      ingredients: item.label_ingredients || item.ingredients || 'Ingredients not available',
       allergen: item.label_allergens || item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
       // Use saved best_before if available, otherwise calculate
       bestBefore: item.best_before 
@@ -661,7 +607,6 @@ useEffect(() => {
 
       const companyName = data.companyName;
       const productName = data.productName;
-      const ingredients = data.ingredients;
       const allergenInfo = data.allergen;
       ctx.fillStyle = '#000000';
       ctx.textAlign = 'left';
@@ -679,7 +624,6 @@ useEffect(() => {
       // Font sizes at 300 DPI - matching your image exactly
       const companyFontSize = Math.round(12 * (dpi/96)); // Larger for Company Name
       const productFontSize = Math.round(10 * (dpi/96)); // Bold product name
-      const ingredientsFontSize = Math.round(6 * (dpi/96)); // Ingredients
       const storageFontSize = Math.round(6 * (dpi/96)); // Storage info
       const rightSectionFontSize = Math.round(7 * (dpi/96)); // Right section labels
       const manufacturerFontSize = Math.round(7 * (dpi/96)); // Manufacturer info
@@ -716,7 +660,7 @@ useEffect(() => {
       // Company Name - Arial Nova Condensed (fallback to Arial Narrow/Arial)
       ctx.font = `${companyFontSize}px Arial Narrow, Arial`;
       ctx.fillText(companyName, marginLeft, leftY);
-      leftY += Math.round(5 * mmToPx);
+      leftY += Math.round(12 * mmToPx);
 
       // Product Name - Arial Nova Condensed Bold (fallback to Arial Narrow/Arial)
       const productLines = wrapText(productName, adjustedMaxWidth, productFontSize, 'Arial Narrow, Arial', true);
@@ -728,71 +672,44 @@ useEffect(() => {
       leftY += Math.round(2.2 * mmToPx);
     
 
-      // Draw "INGREDIENTS:" label with underline
-      leftY -= Math.round(2 * mmToPx); // Add this line to move INGREDIENTS higher
-      ctx.font = `bold ${ingredientsFontSize}px Arial`;
-      ctx.fillText('INGREDIENTS:', marginLeft, leftY);
-      const ingredientsLabelWidth = ctx.measureText('INGREDIENTS:').width;
-      leftY += Math.round(3 * mmToPx);
-
-      // Draw underline
-      ctx.fillRect(marginLeft, leftY - Math.round(0.7 * mmToPx), ingredientsLabelWidth + Math.round(27 * mmToPx), Math.round(0.2 * mmToPx));
-      leftY += Math.round(1 * mmToPx);
-
-      // Draw ingredients text (normal weight)
-      const ingredientsMaxWidth = leftMaxWidth + Math.round(1 * mmToPx);
-      const ingredientsLines = wrapText(ingredients, ingredientsMaxWidth, ingredientsFontSize, 'Arial');
-      ctx.font = `${ingredientsFontSize}px Arial`; // Normal weight
-      const maxIngredientsLines = 3;
-      for (let i = 0; i < Math.min(ingredientsLines.length, maxIngredientsLines); i++) {
-        ctx.fillText(ingredientsLines[i], marginLeft, leftY);
-        leftY += Math.round(2 * mmToPx);
-      }
-
-      leftY += Math.round(1 * mmToPx);
-
       // ALLERGENS Section - Positioned at bottom with dynamic upward adjustment
-ctx.font = `${storageFontSize}px Arial`;
-const storageMaxWidth = leftMaxWidth + Math.round(3 * mmToPx);
-const storageMaxWidthReduced = storageMaxWidth - Math.round(8 * mmToPx);
+      ctx.font = `${storageFontSize}px Arial`;
+      const storageMaxWidth = leftMaxWidth + Math.round(3 * mmToPx);
+      const storageMaxWidthReduced = storageMaxWidth - Math.round(8 * mmToPx);
 
-// Calculate storage instructions lines first (these stay at the bottom)
-const storageText = 'Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
-const storageLines = wrapText(storageText, storageMaxWidthReduced, storageFontSize, 'Arial');
+      // Calculate storage instructions lines first (these stay at the bottom)
+      const storageText = 'Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.';
+      const storageLines = wrapText(storageText, storageMaxWidthReduced, storageFontSize, 'Arial');
 
 
-// Calculate allergen lines
-ctx.font = `normal ${storageFontSize}px Arial`;
-const allergenLines = wrapText(allergenInfo, storageMaxWidthReduced, storageFontSize, 'Arial');
-const allergenHeight = allergenLines.length * Math.round(2.3 * mmToPx); // Changed from 0.5 to 2.3 to match line spacing
+      // Calculate allergen lines
+      ctx.font = `normal ${storageFontSize}px Arial`;
+      const allergenLines = wrapText(allergenInfo, storageMaxWidthReduced, storageFontSize, 'Arial');
+      const allergenHeight = allergenLines.length * Math.round(2.3 * mmToPx); // Changed from 0.5 to 2.3 to match line spacing
 
-// Calculate total height needed for allergens section
-const allergenLabelHeight = Math.round(3 * mmToPx); // Space after "ALLERGENS:" label
-const gapBetweenSections = Math.round(1 * mmToPx); // Gap between allergens and storage
+      // Calculate total height needed for allergens section
+      const allergenLabelHeight = Math.round(3 * mmToPx); // Space after "ALLERGENS:" label
+      const gapBetweenSections = Math.round(1 * mmToPx); // Gap between allergens and storage
 
-// Draw storage instructions at fixed position from bottom
-const storageY = height - marginBottom - Math.round(3.5 * mmToPx);
-storageLines.forEach((line, idx) => {
-  if (idx < 3) {
-    ctx.fillText(line, marginLeft, storageY + (idx * Math.round(2.3 * mmToPx)));
-  }
-});
+      // Draw storage instructions at fixed position from bottom
+      const storageY = height - marginBottom - Math.round(3.5 * mmToPx);
+      storageLines.forEach((line, idx) => {
+        if (idx < 3) {
+          ctx.fillText(line, marginLeft, storageY + (idx * Math.round(2.3 * mmToPx)));
+        }
+      });
 
-// Calculate starting Y position that moves up based on content
-// Position allergens above storage with proper spacing
-const allergenStartY = storageY - gapBetweenSections - allergenHeight - allergenLabelHeight;
+      // Calculate starting Y position that moves up based on content
+      // Position allergens above storage with proper spacing
+      const allergenStartY = storageY - gapBetweenSections - allergenHeight - allergenLabelHeight;
 
-// Draw "ALLERGENS:" label (bold)
-ctx.font = `bold ${storageFontSize}px Arial`;
-ctx.fillText('ALLERGENS:', marginLeft, allergenStartY);
-
-// Draw allergen text
-ctx.font = `normal ${storageFontSize}px Arial`;
-const allergenY = allergenStartY + allergenLabelHeight;
-allergenLines.forEach((line, idx) => {
-  ctx.fillText(line, marginLeft, allergenY + (idx * Math.round(2.3 * mmToPx)));
-});
-      
+      // Draw allergen text
+      ctx.font = `normal ${storageFontSize}px Arial`;
+      const allergenY = allergenStartY + allergenLabelHeight;
+      allergenLines.forEach((line, idx) => {
+        ctx.fillText(line, marginLeft, allergenY + (idx * Math.round(2.3 * mmToPx)));
+      });
+            
       const finalizeCanvas = (halalImage = null) => {
         // RIGHT SECTION
         ctx.fillStyle = '#000000';
@@ -1110,21 +1027,6 @@ allergenLines.forEach((line, idx) => {
                           />
                         </div>
                         
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Ingredients
-                          </label>
-                          <textarea
-                            value={data.ingredients}
-                            onChange={(e) => {
-                              const newData = [...editableData];
-                              newData[index].ingredients = e.target.value;
-                              setEditableData(newData);
-                            }}
-                            rows={3}
-                            className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
                         
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1249,7 +1151,6 @@ allergenLines.forEach((line, idx) => {
                     
                     const updateData = {
                         product_name: data.productName || null,
-                        label_ingredients: data.ingredients || null,
                         label_allergens: data.allergen || null,
                         best_before: convertToPostgresDate(data.bestBefore),
                         batch_number: batchNumberValue
