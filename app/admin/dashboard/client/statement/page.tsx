@@ -1543,6 +1543,144 @@ const fetchStatements = async () => {
                   </div>
                 </div>
 
+                {/* A4 Paper Preview */}
+                <div className="flex-1 overflow-auto px-6 py-6" style={{ backgroundColor: '#e5e7eb' }}>
+                  <div
+                    className="mx-auto bg-white shadow-lg"
+                    style={{
+                      width: '210mm',
+                      minHeight: '297mm',
+                      padding: '20mm',
+                      position: 'relative',
+                      fontFamily: 'Helvetica, Arial, sans-serif',
+                    }}
+                  >
+                    {/* PDF Header */}
+                    {(() => {
+                      const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
+                      if (!selectedHeader) return null;
+                      return (
+                        <div style={{ fontSize: '10pt', lineHeight: '1.6' }}>
+                          {selectedHeader.line1 && (
+                            <div style={{ fontWeight: 'bold' }}>{selectedHeader.line1}</div>
+                          )}
+                          {selectedHeader.line2 && <div>{selectedHeader.line2}</div>}
+                          {selectedHeader.line3 && <div>{selectedHeader.line3}</div>}
+                          {selectedHeader.line4 && <div>{selectedHeader.line4}</div>}
+                          {selectedHeader.line5 && <div>{selectedHeader.line5}</div>}
+                          {selectedHeader.line6 && <div>{selectedHeader.line6}</div>}
+                          {selectedHeader.line7 && <div>{selectedHeader.line7}</div>}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Title */}
+                    <div style={{ fontSize: '16pt', color: '#0D909A', marginTop: '16px', marginBottom: '12px' }}>
+                      Statement
+                    </div>
+
+                    {/* TO + Statement Details Row */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10pt', marginBottom: '8px' }}>
+                      {/* TO Section */}
+                      <div style={{ maxWidth: '55%' }}>
+                        <div style={{ fontWeight: 'bold' }}>TO</div>
+                        <div>{selectedStatement.company_name}</div>
+                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {selectedStatement.business_address}
+                        </div>
+                      </div>
+
+                      {/* Statement Details */}
+                      <div style={{ textAlign: 'left', minWidth: '200px' }}>
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
+                          <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>STATEMENT NO.</span>
+                          <span>{selectedStatement.statement_id}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
+                          <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>DATE</span>
+                          <span>{new Date(selectedStatement.date_generated).toLocaleDateString('en-GB')}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
+                          <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>TOTAL DUE</span>
+                          <span>S${selectedStatement.total_amount.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>ENCLOSED</span>
+                          <span></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Invoice Table */}
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9pt', marginTop: '8px' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#B8E6E7' }}>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal' }}>DATE</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal' }}>DESCRIPTION</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', color: '#0D909A', fontWeight: 'normal' }}>AMOUNT</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', color: '#0D909A', fontWeight: 'normal' }}>OPEN AMOUNT</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {statementInvoices.map((invoice, idx) => {
+                          const deliveryDate = new Date(invoice.delivery_date).toLocaleDateString('en-GB');
+                          return (
+                            <tr key={idx} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                              <td style={{ padding: '5px 8px' }}>{deliveryDate}</td>
+                              <td style={{ padding: '5px 8px' }}>Invoice No. {invoice.invoice_id}: Due {deliveryDate}</td>
+                              <td style={{ padding: '5px 8px', textAlign: 'right' }}>{invoice.total_amount.toFixed(2)}</td>
+                              <td style={{ padding: '5px 8px', textAlign: 'right' }}>{invoice.total_amount.toFixed(2)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+
+                    {/* Aging Summary Footer */}
+                    {(() => {
+                      const agingAmounts = getAgingAmounts();
+                      return (
+                        <div style={{ position: 'absolute', bottom: '20mm', left: '20mm', right: '20mm' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9pt' }}>
+                            <thead>
+                              <tr style={{ backgroundColor: '#B8E6E7' }}>
+                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                  <div>Current</div><div>Due</div>
+                                </th>
+                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                  <div>1-30 Days</div><div>Past Due</div>
+                                </th>
+                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                  <div>31-60 Days</div><div>Past Due</div>
+                                </th>
+                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                  <div>61-90 Days</div><div>Past Due</div>
+                                </th>
+                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                  <div>90+ Days</div><div>Past Due</div>
+                                </th>
+                                <th style={{ padding: '4px 6px', textAlign: 'right', color: '#0D909A', fontWeight: 'bold', lineHeight: '1.2' }}>
+                                  <div>Amount</div><div>Due</div>
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td style={{ padding: '6px 6px' }}>{agingAmounts.current.toFixed(2)}</td>
+                                <td style={{ padding: '6px 6px' }}>{agingAmounts['1-30'].toFixed(2)}</td>
+                                <td style={{ padding: '6px 6px' }}>{agingAmounts['31-60'].toFixed(2)}</td>
+                                <td style={{ padding: '6px 6px' }}>{agingAmounts['61-90'].toFixed(2)}</td>
+                                <td style={{ padding: '6px 6px' }}>{agingAmounts['90plus'].toFixed(2)}</td>
+                                <td style={{ padding: '6px 6px', textAlign: 'right', fontWeight: 'bold' }}>S${selectedStatement.total_amount.toFixed(2)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
                 {/* Aging Category Selection */}
                 <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                   <div className="flex items-center gap-3 flex-wrap">
@@ -1615,6 +1753,7 @@ const fetchStatements = async () => {
                     </div>
                   </div>
                 </div>
+
                 {/* Footer Actions */}
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg shadow-lg">
                   <button

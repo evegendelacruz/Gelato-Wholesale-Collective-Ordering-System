@@ -1304,7 +1304,7 @@ export default function OnlineOrderPage() {
                 {orderItems.map((item, index) => (
                   <div
                     key={index}
-                    className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px] border-b"
+                    className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px]"
                   >
                     <div>{item.product_type || item.product_name}</div>
                     <div className="text-gray-700">{item.product_name}</div>

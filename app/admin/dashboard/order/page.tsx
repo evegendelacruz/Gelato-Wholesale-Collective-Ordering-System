@@ -26,7 +26,6 @@ interface Order {
   company_name: string;
 }
 
-// Add this type for Supabase response
 interface SupabaseOrderResponse {
   id: number;
   order_id: string;
@@ -43,8 +42,6 @@ interface SupabaseOrderResponse {
   updated_at: string;
   client_user?: { client_businessName?: string } | Array<{ client_businessName?: string }>;
 }
-
-
 
 export default function OrderPage() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,6 +83,42 @@ export default function OrderPage() {
   const [headerToDelete, setHeaderToDelete] = useState(null);
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [headerToEdit, setHeaderToEdit] = useState(null);
+  const [footerOptions, setFooterOptions] = useState<
+      Array<{
+        id: number;
+        option_name: string;
+        line1: string;
+        line2: string;
+        line3: string;
+        line4: string;
+        line5: string;
+        is_default: boolean;
+      }>
+    >([]);
+  const [selectedFooterId, setSelectedFooterId] = useState<number | null>(null);
+  const [showFooterEditor, setShowFooterEditor] = useState(false);
+  const [editingFooterId, setEditingFooterId] = useState<number | null>(null);
+  const [footerFormData, setFooterFormData] = useState({
+    option_name: "",
+    line1: "",
+    line2: "",
+    line3: "",
+    line4: "",
+    line5: "",
+  });
+  const [showFooterDeleteConfirmModal, setShowFooterDeleteConfirmModal] = useState(false);
+  const [footerToDelete, setFooterToDelete] = useState<number | null>(null);
+  const [showFooterEditConfirmModal, setShowFooterEditConfirmModal] = useState(false);
+  const [footerToEdit, setFooterToEdit] = useState<{
+    id: number;
+    option_name: string;
+    line1: string;
+    line2: string;
+    line3: string;
+    line4: string;
+    line5: string;
+    is_default: boolean;
+  } | null>(null);
   const [headerFormData, setHeaderFormData] = useState({
   option_name: '',
   line1: '',
@@ -127,6 +160,29 @@ useEffect(() => {
   };
 
   fetchHeaderOptions();
+}, []);
+
+useEffect(() => {
+  const fetchFooterOptions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("footer_options")
+        .select("*")
+        .order("is_default", { ascending: false });
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        setFooterOptions(data);
+        const defaultFooter = data.find((f) => f.is_default) || data[0];
+        setSelectedFooterId(defaultFooter.id);
+      }
+    } catch (error) {
+      console.error("Error fetching footer options:", error);
+    }
+  };
+
+  fetchFooterOptions();
 }, []);
 
 // Add this new useEffect to check for date filter from calendar
@@ -286,6 +342,110 @@ useEffect(() => {
     }
   };
 
+  const handleSaveFooterOption = async () => {
+    try {
+      if (!footerFormData.option_name.trim()) {
+        setWarningMessage("Please enter an option name");
+        setShowWarningModal(true);
+        return;
+      }
+
+      if (editingFooterId) {
+        const { error } = await supabase
+          .from("footer_options")
+          .update({
+            option_name: footerFormData.option_name,
+            line1: footerFormData.line1,
+            line2: footerFormData.line2,
+            line3: footerFormData.line3,
+            line4: footerFormData.line4,
+            line5: footerFormData.line5,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", editingFooterId);
+
+        if (error) throw error;
+
+        const { data: updatedData } = await supabase
+          .from("footer_options")
+          .select("*")
+          .order("is_default", { ascending: false });
+
+        if (updatedData) {
+          setFooterOptions(updatedData);
+        }
+
+        setSuccessMessage("Footer option updated successfully!");
+      } else {
+        const { data, error } = await supabase
+          .from("footer_options")
+          .insert([
+            {
+              option_name: footerFormData.option_name,
+              line1: footerFormData.line1,
+              line2: footerFormData.line2,
+              line3: footerFormData.line3,
+              line4: footerFormData.line4,
+              line5: footerFormData.line5,
+              is_default: false,
+            },
+          ])
+          .select();
+
+        if (error) throw error;
+
+        const { data: updatedData } = await supabase
+          .from("footer_options")
+          .select("*")
+          .order("is_default", { ascending: false });
+
+        if (updatedData) {
+          setFooterOptions(updatedData);
+          if (data && data[0]) {
+            setSelectedFooterId(data[0].id);
+          }
+        }
+
+        setSuccessMessage("Footer option created successfully!");
+      }
+
+      setShowSuccessModal(true);
+      setShowFooterEditor(false);
+      setEditingFooterId(null);
+      setFooterFormData({
+        option_name: "",
+        line1: "",
+        line2: "",
+        line3: "",
+        line4: "",
+        line5: "",
+      });
+    } catch (error) {
+      console.error("Error saving footer option:", error);
+      setWarningMessage("Failed to save footer option");
+      setShowWarningModal(true);
+    }
+  };
+
+  const handleEditFooterOption = (footer: {
+    id: number;
+    option_name: string;
+    line1: string;
+    line2: string;
+    line3: string;
+    line4: string;
+    line5: string;
+    is_default: boolean;
+  }) => {
+    setFooterToEdit(footer);
+    setShowFooterEditConfirmModal(true);
+  };
+
+  const handleDeleteFooterOption = async (footerId: number) => {
+    setFooterToDelete(footerId);
+    setShowFooterDeleteConfirmModal(true);
+  };
+
   const handleSaveHeaderOption = async () => {
   try {
     if (!headerFormData.option_name.trim()) {
@@ -425,6 +585,30 @@ const renderHeaderInPDF = (doc, selectedHeader) => {
     if (line) {
       doc.text(line, 20, yPos);
       yPos += lineHeight;
+    }
+  });
+};
+
+const renderFooterInPDF = (doc, selectedFooter) => {
+  if (!selectedFooter) return;
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  let footerY = 275;
+  const lineHeight = 4;
+
+  const lines = [
+    selectedFooter.line1,
+    selectedFooter.line2,
+    selectedFooter.line3,
+    selectedFooter.line4,
+    selectedFooter.line5,
+  ];
+
+  lines.forEach((line) => {
+    if (line) {
+      doc.text(line, 105, footerY, { align: "center" });
+      footerY += lineHeight;
     }
   });
 };
@@ -864,13 +1048,9 @@ const handlePrintInvoice = async () => {
     // Footer
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    const footerY = 275;
-    doc.text('The team at Momolato deeply appreciates your kind support.', 105, footerY, { align: 'center' });
-    doc.text('Payment instructions:', 105, footerY + 4, { align: 'center' });
-    doc.text('PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)', 105, footerY + 8, { align: 'center' });
-    doc.text('OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd', 105, footerY + 12, { align: 'center' });
-
-    // Enable auto-print
+    const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
+    renderFooterInPDF(doc, selectedFooter);
+        // Enable auto-print
     doc.autoPrint();
     
     // Generate blob and open in new window
@@ -1068,11 +1248,8 @@ const handleDownloadPDF = async () => {
     // Footer
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    const footerY = 275;
-    doc.text('The team at Momolato deeply appreciates your kind support.', 105, footerY, { align: 'center' });
-    doc.text('Payment instructions:', 105, footerY + 4, { align: 'center' });
-    doc.text('PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)', 105, footerY + 8, { align: 'center' });
-    doc.text('OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd', 105, footerY + 12, { align: 'center' });
+    const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
+    renderFooterInPDF(doc, selectedFooter);
 
     // Save PDF
     const fileName = `Invoice_${selectedOrder.invoice_id}_${formatDate(selectedOrder.delivery_date).replace(/\//g, '-')}.pdf`;
@@ -1966,16 +2143,68 @@ const handleViewInvoice = async (order) => {
                 <div className="flex-1 overflow-auto p-6 bg-gray-100">
                   <div className="bg-white shadow-lg rounded-lg">
                     <ClientInvoice 
-                      order={{...selectedOrder, items: orderItems}}
-                      clientData={clientData}
-                      formatDate={formatDate}
-                      getSubtotal={() => getSubtotal(orderItems)}
-                      getGST={() => getGST(orderItems)}
-                      selectedHeader={headerOptions.find(h => h.id === selectedHeaderId)}
-                    />
+                        order={{...selectedOrder, items: orderItems}}
+                        clientData={clientData}
+                        formatDate={formatDate}
+                        getSubtotal={() => getSubtotal(orderItems)}
+                        getGST={() => getGST(orderItems)}
+                        selectedHeader={headerOptions.find(h => h.id === selectedHeaderId)}
+                        selectedFooter={footerOptions.find(f => f.id === selectedFooterId)}
+                      />
                   </div>
                 </div>
-
+                
+                {/* Footer Options Selection */}
+                <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <label className="text-sm font-medium" style={{ color: '#5C2E1F' }}>
+                      Invoice Footer:
+                    </label>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {footerOptions.map((footer) => (
+                        <label key={footer.id} className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-gray-200 hover:border-orange-300 transition-colors">
+                          <input
+                            type="radio"
+                            name="footerOption"
+                            value={footer.id}
+                            checked={selectedFooterId === footer.id}
+                            onChange={() => setSelectedFooterId(footer.id)}
+                            className="cursor-pointer accent-orange-500"
+                          />
+                          <span className="text-sm font-medium">{footer.option_name}</span>
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleEditFooterOption(footer);
+                            }}
+                            className="text-blue-600 hover:text-blue-800 text-xs ml-1 underline"
+                            title="Edit this footer"
+                          >
+                            Edit
+                          </button>
+                        </label>
+                      ))}
+                      <button
+                        onClick={() => {
+                          setEditingFooterId(null);
+                          setFooterFormData({
+                            option_name: '',
+                            line1: '',
+                            line2: '',
+                            line3: '',
+                            line4: '',
+                            line5: '',
+                          });
+                          setShowFooterEditor(true);
+                        }}
+                        className="text-sm px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 transition-colors font-medium"
+                        style={{ color: '#5C2E1F' }}
+                      >
+                        + New Footer
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 {/* Footer Actions */}
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg shadow-lg">
                   <button
@@ -2461,6 +2690,7 @@ const handleViewInvoice = async (order) => {
               </div>
             </div>
           )}
+          
           {/* Edit Confirmation Modal */}
           {showEditConfirmModal && headerToEdit && (
             <div 
@@ -2510,6 +2740,313 @@ const handleViewInvoice = async (order) => {
                         setShowHeaderEditor(true);
                         setShowEditConfirmModal(false);
                         setHeaderToEdit(null);
+                      }}
+                      className="flex-1 px-4 py-2 rounded font-medium text-white hover:opacity-90 transition-opacity"
+                      style={{ backgroundColor: '#FF5722' }}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Footer Editor Modal */}
+          {showFooterEditor && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+              onClick={() => {
+                setShowFooterEditor(false);
+                setEditingFooterId(null);
+                setFooterFormData({
+                  option_name: '',
+                  line1: '',
+                  line2: '',
+                  line3: '',
+                  line4: '',
+                  line5: '',
+                });
+              }}
+            >
+              <div 
+                className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+                  <h3 className="text-xl font-bold" style={{ color: '#5C2E1F' }}>
+                    {editingFooterId ? 'Edit Footer Option' : 'Create Footer Option'}
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    {editingFooterId && (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleDeleteFooterOption(editingFooterId);
+                        }}
+                        className="text-red-600 hover:text-red-800 text-sm px-3 py-1 border border-red-300 rounded hover:bg-red-50"
+                        title="Delete this footer"
+                      >
+                        Delete
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setShowFooterEditor(false);
+                        setEditingFooterId(null);
+                        setFooterFormData({
+                          option_name: '',
+                          line1: '',
+                          line2: '',
+                          line3: '',
+                          line4: '',
+                          line5: '',
+                        });
+                      }}
+                      className="text-gray-500 hover:text-gray-700 text-2xl"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                      Option Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={footerFormData.option_name}
+                      onChange={(e) => setFooterFormData({ ...footerFormData, option_name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="e.g., Standard Payment Info"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                      Line 1
+                    </label>
+                    <input
+                      type="text"
+                      value={footerFormData.line1}
+                      onChange={(e) => setFooterFormData({ ...footerFormData, line1: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="The team at Momolato deeply appreciates your kind support."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                      Line 2
+                    </label>
+                    <input
+                      type="text"
+                      value={footerFormData.line2}
+                      onChange={(e) => setFooterFormData({ ...footerFormData, line2: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Payment instructions:"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                      Line 3
+                    </label>
+                    <input
+                      type="text"
+                      value={footerFormData.line3}
+                      onChange={(e) => setFooterFormData({ ...footerFormData, line3: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="PayNow : UEN201319550R..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                      Line 4
+                    </label>
+                    <input
+                      type="text"
+                      value={footerFormData.line4}
+                      onChange={(e) => setFooterFormData({ ...footerFormData, line4: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="OCBC BANK | SWIFT: OCBCSGSG..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                      Line 5
+                    </label>
+                    <input
+                      type="text"
+                      value={footerFormData.line5}
+                      onChange={(e) => setFooterFormData({ ...footerFormData, line5: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Additional line"
+                    />
+                  </div>
+                </div>
+
+                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3">
+                  <button
+                    onClick={handleSaveFooterOption}
+                    className="flex-1 px-4 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    {editingFooterId ? 'Update' : 'Create'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowFooterEditor(false);
+                      setEditingFooterId(null);
+                      setFooterFormData({
+                        option_name: '',
+                        line1: '',
+                        line2: '',
+                        line3: '',
+                        line4: '',
+                        line5: '',
+                      });
+                    }}
+                    className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                    style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Footer Delete Confirmation Modal */}
+          {showFooterDeleteConfirmModal && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
+              <div 
+                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
+                    <X size={24} className="text-red-600" />
+                  </div>
+                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                    Confirm Deletion
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-6">
+                    Are you sure you want to delete this footer option? This action cannot be undone.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setShowFooterDeleteConfirmModal(false);
+                        setFooterToDelete(null);
+                      }}
+                      className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                      style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (footerToDelete) {
+                          try {
+                            const { error } = await supabase
+                              .from('footer_options')
+                              .delete()
+                              .eq('id', footerToDelete);
+
+                            if (error) throw error;
+
+                            const { data: updatedData } = await supabase
+                              .from('footer_options')
+                              .select('*')
+                              .order('is_default', { ascending: false });
+                            
+                            if (updatedData) {
+                              setFooterOptions(updatedData);
+                              if (selectedFooterId === footerToDelete && updatedData.length > 0) {
+                                setSelectedFooterId(updatedData[0].id);
+                              }
+                            }
+
+                            setShowFooterDeleteConfirmModal(false);
+                            setFooterToDelete(null);
+                            setShowFooterEditor(false);
+                            setSuccessMessage('Footer option deleted successfully!');
+                            setShowSuccessModal(true);
+                          } catch (error) {
+                            console.error('Error deleting footer option:', error);
+                            setShowFooterDeleteConfirmModal(false);
+                            setFooterToDelete(null);
+                            setWarningMessage('Failed to delete footer option');
+                            setShowWarningModal(true);
+                          }
+                        }
+                      }}
+                      className="flex-1 px-4 py-2 rounded font-medium text-white hover:opacity-90 transition-opacity"
+                      style={{ backgroundColor: '#DC2626' }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Footer Edit Confirmation Modal */}
+          {showFooterEditConfirmModal && footerToEdit && (
+            <div 
+              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
+              <div 
+                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
+                    <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
+                    Edit Footer Option
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-6">
+                    Do you want to edit `&quot;`{footerToEdit.option_name}`&quot;`?
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setShowFooterEditConfirmModal(false);
+                        setFooterToEdit(null);
+                      }}
+                      className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                      style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingFooterId(footerToEdit.id);
+                        setFooterFormData({
+                          option_name: footerToEdit.option_name,
+                          line1: footerToEdit.line1 || '',
+                          line2: footerToEdit.line2 || '',
+                          line3: footerToEdit.line3 || '',
+                          line4: footerToEdit.line4 || '',
+                          line5: footerToEdit.line5 || '',
+                        });
+                        setShowFooterEditor(true);
+                        setShowFooterEditConfirmModal(false);
+                        setFooterToEdit(null);
                       }}
                       className="flex-1 px-4 py-2 rounded font-medium text-white hover:opacity-90 transition-opacity"
                       style={{ backgroundColor: '#FF5722' }}

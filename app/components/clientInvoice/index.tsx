@@ -52,6 +52,16 @@ interface ClientInvoiceProps {
     line7: string;
     is_default: boolean;
   } | null;
+  selectedFooter?: {
+    id: number;
+    option_name: string;
+    line1: string;
+    line2: string;
+    line3: string;
+    line4: string;
+    line5: string;
+    is_default: boolean;
+  } | null;
 }
 
 export default function ClientInvoice({
@@ -60,7 +70,8 @@ export default function ClientInvoice({
   formatDate,
   getSubtotal,
   getGST,
-  selectedHeader
+  selectedHeader,
+  selectedFooter
 }: ClientInvoiceProps) {
   const subtotal = getSubtotal(order);
   const gst = getGST(order);
@@ -430,14 +441,25 @@ export default function ClientInvoice({
 
           {/* Footer - Fixed at bottom of page */}
           <div className="footer-section">
-            <p className="footer-thank-you">The team at Momolato deeply appreciates your kind support.</p>
-            <p>Payment instructions:</p>
-            <p>
-              PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)
-            </p>
-            <p>
-              OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd
-            </p>
+            {selectedFooter?.line1 && <p className="footer-thank-you">{selectedFooter.line1}</p>}
+            {selectedFooter?.line2 && <p>{selectedFooter.line2}</p>}
+            {selectedFooter?.line3 && <p>{selectedFooter.line3}</p>}
+            {selectedFooter?.line4 && <p>{selectedFooter.line4}</p>}
+            {selectedFooter?.line5 && <p>{selectedFooter.line5}</p>}
+            
+            {/* Fallback to default if no footer selected */}
+            {!selectedFooter && (
+              <>
+                <p className="footer-thank-you">The team at Momolato deeply appreciates your kind support.</p>
+                <p>Payment instructions:</p>
+                <p>
+                  PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)
+                </p>
+                <p>
+                  OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd
+                </p>
+              </>
+            )}
           </div>
         </div>
       </div>
