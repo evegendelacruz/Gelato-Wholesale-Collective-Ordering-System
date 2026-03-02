@@ -1,0 +1,196 @@
+╔═══════════════════════════════════════════════════════════════════╗
+║           BARTENDER LABEL PRINTING - QUICK SETUP GUIDE            ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+🎯 GOAL: Print labels on Toshiba B-415 sticker printer using BarTender
+
+📋 REQUIREMENTS:
+   ✓ BarTender 2021+ installed
+   ✓ Toshiba B-415 printer driver installed
+   ✓ Label stock: 90mm x 50mm
+
+═══════════════════════════════════════════════════════════════════
+
+🚀 FIRST TIME SETUP (Do this once)
+
+1. OPEN THE TEMPLATE
+   • Locate: Sample.btw (in public/assets/)
+   • Double-click to open in BarTender
+
+2. CONFIGURE PRINTER
+   • File → Page Setup
+   • Printer: Toshiba B-415
+   • Paper Size: 90mm x 50mm (landscape)
+   • Click OK
+
+3. SET UP DATABASE CONNECTION
+   • File → Database Connection Setup
+   • Click "Add Database Connection"
+   • Select "Text File" or "CSV File"
+   • Browse and select: SAMPLE_TEST_DATA.csv (in this folder)
+   • Settings:
+     ✓ First row contains field names
+     ✓ Delimiter: Comma
+     ✓ Text qualifier: Double quote
+   • Click Next → Finish
+
+4. MAP THE FIELDS TO TEXT OBJECTS
+
+   For each text box on your label, right-click → Properties → Data Source:
+
+   ┌─────────────────────────────────────────────────────┐
+   │ CSV Column      │ Maps to Label Element            │
+   ├─────────────────────────────────────────────────────┤
+   │ CompanyName     → Client's business name            │
+   │ ProductName     → Product description               │
+   │ Allergens       → Allergen warnings                 │
+   │ BestBefore      → Expiry date (DD/MM/YYYY)          │
+   │ BatchNumber     → Production batch code             │
+   │ Ingredients     → Ingredient list (optional)        │
+   └─────────────────────────────────────────────────────┘
+
+   ⚠️ IMPORTANT: Field names are CASE-SENSITIVE!
+
+5. TEST PRINT
+   • File → Print Preview
+   • Check that all data appears correctly
+   • If OK: File → Print
+   • Set Copies = 1 (quantity is already in the CSV)
+   • Click Print
+
+═══════════════════════════════════════════════════════════════════
+
+📦 DAILY WORKFLOW (After setup)
+
+TWO OPTIONS:
+
+┌───────────────────────────────────────────────────────────────┐
+│ OPTION 1: Full Package (Occasional Use)                      │
+├───────────────────────────────────────────────────────────────┤
+│ 1. Click "Print Labels (BTW)" in web app                     │
+│ 2. Download ZIP file (contains template + data + guide)      │
+│ 3. Extract ZIP                                                │
+│ 4. Open LabelTemplate.btw                                     │
+│ 5. Connect CSV (first time) or update path                   │
+│ 6. Print (Copies = 1)                                         │
+└───────────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────┐
+│ OPTION 2: CSV Only (Daily Use - FASTEST) ⚡                   │
+├───────────────────────────────────────────────────────────────┤
+│ 1. Keep BarTender open with Sample.btw loaded                │
+│ 2. Click "CSV Only" in web app                               │
+│ 3. Save CSV to same location as before                       │
+│ 4. In BarTender: Database → Refresh Connection               │
+│ 5. Print immediately (Copies = 1)                            │
+└───────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════
+
+⚠️ COMMON MISTAKES TO AVOID
+
+❌ Setting Copies > 1 in print dialog
+   → CSV already contains correct quantity
+   → Always use Copies = 1
+
+❌ Field names don't match exactly
+   → Use exact names: CompanyName, ProductName, etc.
+   → Check capitalization
+
+❌ CSV file is open in Excel while trying to print
+   → Close Excel before printing from BarTender
+
+❌ Wrong printer selected
+   → Always select: Toshiba B-415
+
+❌ Wrong paper size
+   → Must be: 90mm x 50mm landscape
+
+═══════════════════════════════════════════════════════════════════
+
+🔧 TROUBLESHOOTING
+
+PROBLEM: "Cannot connect to database"
+SOLUTION:
+• Make sure CSV file exists and isn't open in another program
+• Check file path is correct
+• Try moving CSV to simpler path (e.g., C:\Labels\)
+
+PROBLEM: "Data fields are empty"
+SOLUTION:
+• Right-click text object → Properties → Data Source
+• Verify field name matches CSV column exactly
+• Refresh database connection
+
+PROBLEM: "Wrong number of labels printing"
+SOLUTION:
+• The CSV already has one row per label
+• Set Print Copies = 1
+• Each CSV row = one label
+
+PROBLEM: "Labels are wrong size"
+SOLUTION:
+• File → Page Setup → Stock Size: 90mm x 50mm
+• Orientation: Landscape
+• Save the template
+
+═══════════════════════════════════════════════════════════════════
+
+📐 LABEL DESIGN SPECIFICATIONS
+
+Label Size:     90mm (W) × 50mm (H) - Landscape
+Resolution:     300 DPI
+Printer:        Toshiba B-415
+
+Layout Zones:
+┌───────────────────────────────────────────────────┐
+│  LEFT (0-56mm)         │  RIGHT (56-90mm)         │
+├───────────────────────────────────────────────────┤
+│  • Company Name (12pt) │  • Best Before (7pt)     │
+│  • Product (10pt bold) │  • Date (10pt bold)      │
+│  • Ingredients (6pt)   │  • Batch # (7pt)         │
+│  • Allergens (6pt)     │  • Batch (10pt bold)     │
+│  • Storage (6pt)       │  • Manufacturer (7pt)    │
+│  • Halal logo (13mm)   │                          │
+└───────────────────────────────────────────────────┘
+
+Fonts Required:
+• Arial Narrow (ARIALN.TTF, ARIALNB.TTF)
+• Arial (ARIAL.TTF, ARIALBD.TTF)
+→ Install from /public/assets/ folder
+
+═══════════════════════════════════════════════════════════════════
+
+📞 NEED HELP?
+
+1. Check BARTENDER_SETUP_GUIDE.md (full documentation)
+2. Test with SAMPLE_TEST_DATA.csv (included in this folder)
+3. Verify Sample.btw is in /public/assets/
+4. Make sure fonts are installed on your computer
+
+═══════════════════════════════════════════════════════════════════
+
+✅ QUICK CHECKLIST BEFORE PRINTING
+
+□ BarTender is open with Sample.btw loaded
+□ CSV file is downloaded and not open in Excel
+□ Database connection is active (green icon)
+□ Print preview shows all data correctly
+□ Printer selected: Toshiba B-415
+□ Paper size: 90mm x 50mm landscape
+□ Copies set to: 1
+□ Labels loaded in printer
+
+═══════════════════════════════════════════════════════════════════
+
+💡 PRO TIPS
+
+• Save your configured Sample.btw as a template
+• Keep a backup copy in a safe location
+• Test with sample data before production printing
+• Use "CSV Only" option for fastest daily workflow
+• Create a dedicated folder for label CSVs (e.g., C:\LabelData\)
+
+═══════════════════════════════════════════════════════════════════
+
+Version: 1.0 | Label Size: 90×50mm | Printer: Toshiba B-415

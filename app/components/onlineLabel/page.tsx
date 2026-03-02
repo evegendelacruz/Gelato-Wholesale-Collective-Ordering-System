@@ -1,7 +1,10 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import supabase from '@/lib/client';
-import {Check} from 'lucide-react';
+import {Check, Printer} from 'lucide-react';
+import { generateAutoPrintPDF } from '@/lib/bartenderAutoPrint';
+import { printLabelsWithBarTender, checkBarTenderStatus, LabelData } from '@/lib/bartenderAPI';
+
 
 const OnlineLabelGenerator = ({ orderItems, clientData, onUpdate }) => {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -288,11 +291,123 @@ const handlePrintLabels = async () => {
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
     window.open(blobUrl, '_blank');
-    
+
     setIsGenerating(false);
   } catch (error) {
     console.error('Error generating PDF for print:', error);
     alert('Failed to open print preview. Error: ' + error.message);
+    setIsGenerating(false);
+  }
+};
+
+const handleBartenderPrintAll = async () => {
+  try {
+    setIsGenerating(true);
+
+    // Count total labels
+    const totalLabels = orderItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
+
+    // Generate auto-print PDF (opens and triggers print automatically)
+    await generateAutoPrintPDF(
+      orderItems,
+      editableData,
+      clientData,
+      calculateBestBefore,
+      getHalalImageBase64,
+      false // OnlineLabel: no ingredients section
+    );
+
+    setIsGenerating(false);
+    setSuccessMessage(
+      `Print dialog opened!\n\n` +
+      `Total labels: ${totalLabels}\n\n` +
+      `In the print dialog:\n` +
+      `• Printer: Toshiba B-415\n` +
+      `• Paper: 90mm × 50mm\n` +
+      `• Click Print\n\n` +
+      `All ${totalLabels} labels will print!`
+    );
+    setShowSuccessModal(true);
+  } catch (error) {
+    console.error('Error generating auto-print PDF:', error);
+    alert('Failed to generate labels. Error: ' + (error as Error).message);
+    setIsGenerating(false);
+  }
+};
+
+const handleBarTenderSDKPrint = async () => {
+  try {
+    setIsGenerating(true);
+
+    // Check if service is online
+    const status = await checkBarTenderStatus();
+    if (status.status !== 'ok') {
+      alert('BarTender Print Service is offline.\n\nPlease start the service:\n1. Open bartender-print-service folder\n2. Double-click START_SERVICE.bat\n3. Try printing again');
+      setIsGenerating(false);
+      return;
+    }
+
+    // Prepare label data
+    const labels: LabelData[] = [];
+
+    for (let i = 0; i < orderItems.length; i++) {
+      const item = orderItems[i];
+      const quantity = item.quantity || 1;
+
+      const data = editableData[i] || {
+        companyName: clientData?.client_businessName || 'Company Name',
+        productName: item.product_name || 'Product Name',
+        allergen: item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+        bestBefore: calculateBestBefore(item.order_date || new Date()),
+        batchNumber: ''
+      };
+
+      // Add label for each quantity
+      for (let q = 0; q < quantity; q++) {
+        labels.push({
+          companyName: data.companyName,
+          productName: data.productName,
+          allergen: data.allergen,
+          bestBefore: data.bestBefore,
+          batchNumber: data.batchNumber
+        });
+      }
+    }
+
+    console.log(`Sending ${labels.length} labels to BarTender...`);
+
+    // Get template path from environment or use default
+    const templatePath = process.env.NEXT_PUBLIC_BARTENDER_TEMPLATE_PATH ||
+                        'C:\\Users\\User\\Desktop\\momolato-ordering-system\\public\\assets\\Sample.btw';
+
+    const printerName = process.env.NEXT_PUBLIC_DEFAULT_PRINTER || 'Toshiba B-415';
+
+    // Send to BarTender service
+    const result = await printLabelsWithBarTender({
+      labels,
+      templatePath,
+      printerName,
+      copies: 1
+    });
+
+    setIsGenerating(false);
+
+    if (result.success) {
+      setSuccessMessage(
+        `✅ Print Successful!\n\n` +
+        `Printed: ${result.printed} labels\n` +
+        `Printer: ${printerName}\n\n` +
+        `All labels sent to Toshiba B-415!`
+      );
+      setShowSuccessModal(true);
+    } else {
+      alert(`Print failed: ${result.error}`);
+    }
+
+  } catch (error) {
+    console.error('BarTender SDK print error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    alert(`Failed to print labels:\n\n${errorMessage}\n\nMake sure BarTender Print Service is running.`);
     setIsGenerating(false);
   }
 };
@@ -930,23 +1045,48 @@ useEffect(() => {
         </div>
 
         <div className="px-6 py-4 border-t border-gray-200 flex gap-3 shrink-0">
-        <button 
+        <button
           onClick={() => setShowEditModal(true)}
           className="px-6 py-3 bg-blue-600 text-white rounded font-medium hover:bg-blue-700"
         >
           Edit Labels
         </button>
-        <button 
-          onClick={handlePrintLabels}
+
+        {/* BarTender SDK Print - TRUE Automatic Printing */}
+        <button
+          onClick={handleBarTenderSDKPrint}
           disabled={isGenerating}
-          className="flex-1 px-4 py-3  text-white rounded font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: '#FF5722' }}
+          className="flex-1 px-4 py-3 text-white rounded font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+          style={{ backgroundColor: '#10B981' }}
+          title="Print all labels automatically using BarTender SDK"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <Printer size={20} />
+          {isGenerating ? 'Printing...' : 'BarTender SDK Print'}
+        </button>
+        <button
+          onClick={handleBartenderPrintAll}
+          disabled={isGenerating}
+          className="px-4 py-3 border-2 border-gray-400 text-gray-700 rounded font-medium hover:bg-gray-100 disabled:opacity-50 flex items-center justify-center gap-2"
+          title="Open PDF with auto-print dialog"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="6 9 6 2 18 2 18 9"></polyline>
             <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
             <rect x="6" y="14" width="12" height="8"></rect>
           </svg>
-          {isGenerating ? 'Generating PDF...' : 'Print Labels PDF'}
+          {isGenerating ? 'Generating...' : 'Auto-Print PDF'}
+        </button>
+        <button
+          onClick={handlePrintLabels}
+          disabled={isGenerating}
+          className="px-4 py-3 border-2 border-gray-400 text-gray-700 rounded font-medium hover:bg-gray-100 disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 6 2 18 2 18 9"></polyline>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+            <rect x="6" y="14" width="12" height="8"></rect>
+          </svg>
+          {isGenerating ? 'Generating PDF...' : 'PDF'}
         </button>
         <button 
           onClick={handleDownloadImages} 

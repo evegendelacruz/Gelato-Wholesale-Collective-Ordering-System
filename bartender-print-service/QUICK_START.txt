@@ -1,0 +1,214 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                                                                           ║
+║              BarTender Print Service - QUICK START GUIDE                 ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+📋 PREREQUISITES (Check these first!)
+═══════════════════════════════════════════════════════════════════════════
+
+✅ Windows 10 or 11
+✅ BarTender Automation Edition installed
+✅ Node.js installed (v14 or later)
+✅ Toshiba B-415 printer installed and working
+
+
+🚀 INSTALLATION STEPS
+═══════════════════════════════════════════════════════════════════════════
+
+STEP 1: Install Node.js Dependencies
+────────────────────────────────────────────────────────────────────────────
+Open this folder in Command Prompt or PowerShell, then run:
+
+   npm install
+
+Wait for installation to complete (may take 1-2 minutes)
+
+
+STEP 2: Add BarTender SDK DLL
+────────────────────────────────────────────────────────────────────────────
+1. Create "refs" folder in this directory
+2. Copy BarTender.Print.dll from:
+   C:\Program Files\Seagull\BarTender 2021\SDK Assemblies\BarTender.Print.dll
+3. Paste into: bartender-print-service\refs\
+
+
+STEP 3: Configure Settings
+────────────────────────────────────────────────────────────────────────────
+1. Copy ".env.example" to ".env"
+2. Edit .env file and update these paths:
+
+   BARTENDER_PATH=C:\Program Files\Seagull\BarTender 2021
+   DEFAULT_PRINTER=Toshiba B-415
+   TEMPLATE_PATH=C:\Users\User\Desktop\momolato-ordering-system\public\assets
+
+   IMPORTANT: Use double backslashes (\\) in paths!
+
+
+STEP 4: Configure Web App
+────────────────────────────────────────────────────────────────────────────
+Edit .env.local in main project folder and add:
+
+   NEXT_PUBLIC_BARTENDER_API_URL=http://localhost:3001
+   NEXT_PUBLIC_BARTENDER_TEMPLATE_PATH=C:\\Users\\User\\Desktop\\momolato-ordering-system\\public\\assets\\Sample.btw
+   NEXT_PUBLIC_DEFAULT_PRINTER=Toshiba B-415
+
+
+STEP 5: Setup BarTender Template
+────────────────────────────────────────────────────────────────────────────
+1. Open Sample.btw in BarTender Designer
+2. For each text field, right-click → Properties
+3. Go to "Data Source" tab
+4. Set Type: "Named Data Source"
+5. Set Name to one of:
+   - CompanyName
+   - ProductName
+   - Ingredients
+   - Allergen
+   - BestBefore
+   - BatchNumber
+6. Save template
+
+
+🎯 STARTING THE SERVICE
+═══════════════════════════════════════════════════════════════════════════
+
+METHOD 1: Double-click START_SERVICE.bat
+────────────────────────────────────────────────────────────────────────────
+Easiest way! Just double-click START_SERVICE.bat
+
+
+METHOD 2: Command Line
+────────────────────────────────────────────────────────────────────────────
+   npm start
+
+
+You should see:
+   ╔═══════════════════════════════════════════════════════════╗
+   ║       BarTender Print Service - RUNNING                   ║
+   ╚═══════════════════════════════════════════════════════════╝
+
+   ✅ Service running on: http://localhost:3001
+   ✅ BarTender engine initialized and ready
+
+
+✅ TESTING
+═══════════════════════════════════════════════════════════════════════════
+
+TEST 1: Check Service Health
+────────────────────────────────────────────────────────────────────────────
+Open browser and visit: http://localhost:3001/health
+
+Should show:
+   {
+     "status": "ok",
+     "bartenderReady": true
+   }
+
+
+TEST 2: Print from Web App
+────────────────────────────────────────────────────────────────────────────
+1. Start your web app (npm run dev)
+2. Navigate to an order with labels
+3. Click "🖨️ BarTender SDK Print" button
+4. Labels should print automatically!
+
+
+🐛 TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════════
+
+ISSUE: "Cannot find module"
+────────────────────────────────────────────────────────────────────────────
+SOLUTION: Run "npm install" in bartender-print-service folder
+
+
+ISSUE: "Port 3001 already in use"
+────────────────────────────────────────────────────────────────────────────
+SOLUTION: Change PORT in .env to 3002, update web app .env.local too
+
+
+ISSUE: "BarTender engine failed to start"
+────────────────────────────────────────────────────────────────────────────
+SOLUTION:
+   1. Check BarTender Automation is installed
+   2. Run as Administrator
+   3. Check BarTender license is active
+   4. Try opening BarTender Designer manually first
+
+
+ISSUE: "Printer not found"
+────────────────────────────────────────────────────────────────────────────
+SOLUTION:
+   1. Check printer name in Windows Settings → Printers
+   2. Use EXACT printer name (case-sensitive)
+   3. Try printing test page from Windows first
+
+
+ISSUE: "Template not found"
+────────────────────────────────────────────────────────────────────────────
+SOLUTION:
+   1. Check TEMPLATE_PATH in .env
+   2. Use full absolute path
+   3. Use double backslashes (\\)
+   4. Verify file exists
+
+
+ISSUE: "Prints blank labels"
+────────────────────────────────────────────────────────────────────────────
+SOLUTION:
+   1. Open template in BarTender Designer
+   2. Check all fields have "Named Data Source" type
+   3. Verify field names match:
+      CompanyName, ProductName, Ingredients, Allergen, BestBefore, BatchNumber
+   4. Test print manually in BarTender first
+
+
+ISSUE: Web app shows "BarTender Print Service is offline"
+────────────────────────────────────────────────────────────────────────────
+SOLUTION:
+   1. Start the service (npm start or START_SERVICE.bat)
+   2. Check http://localhost:3001/health in browser
+   3. Check NEXT_PUBLIC_BARTENDER_API_URL in web app .env.local
+
+
+📚 DOCUMENTATION
+═══════════════════════════════════════════════════════════════════════════
+
+SETUP_GUIDE.md - Detailed installation instructions
+INTEGRATION_GUIDE.md - Web app integration code
+README.md - Overview and API reference
+
+
+💡 TIPS
+═══════════════════════════════════════════════════════════════════════════
+
+✅ Keep service window open while using web app
+✅ Check service console for print job status
+✅ Test printer with BarTender Designer first
+✅ Use double backslashes in all Windows paths
+✅ Verify BarTender license is active
+
+
+🎉 ALL DONE!
+═══════════════════════════════════════════════════════════════════════════
+
+Your automated label printing system is ready!
+
+1. Start service: Double-click START_SERVICE.bat
+2. Open web app: npm run dev
+3. Print labels: Click "🖨️ BarTender SDK Print"
+
+Enjoy one-click automated printing! 🖨️
+
+
+📞 NEED HELP?
+═══════════════════════════════════════════════════════════════════════════
+
+Check the detailed documentation:
+- SETUP_GUIDE.md
+- INTEGRATION_GUIDE.md
+- README.md
+
+BarTender SDK Documentation:
+https://support.seagullscientific.com/

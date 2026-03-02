@@ -1,0 +1,4 @@
+CompanyName,ProductName,Allergens,BestBefore,BatchNumber,Ingredients
+"Momolato Pte Ltd","Original Pork Gyoza","Our products are crafted in a facility that also processes dairy, gluten, and nuts.","15/09/2026","BATCH001","Pork, Cabbage, Garlic, Ginger, Soy Sauce, Sesame Oil, Wheat Flour"
+"ABC Restaurant","Chicken Shumai","Contains: Wheat, Soy, Sesame. May contain traces of eggs and shellfish.","20/09/2026","BATCH002","Chicken, Shrimp, Water Chestnuts, Green Onions, Soy Sauce, Cornstarch"
+"Test Client Co","Vegetable Spring Rolls","Contains: Wheat, Soy. Manufactured in a facility that processes peanuts.","25/09/2026","BATCH003","Cabbage, Carrots, Bean Sprouts, Mushrooms, Glass Noodles, Wheat Wrapper"
