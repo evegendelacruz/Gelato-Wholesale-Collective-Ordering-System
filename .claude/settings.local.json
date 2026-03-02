@@ -4,7 +4,11 @@
       "Bash(npx tsc:*)",
       "Bash(npm install:*)",
       "Bash(find:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "Bash(git reset:*)"
     ]
   }
 }
