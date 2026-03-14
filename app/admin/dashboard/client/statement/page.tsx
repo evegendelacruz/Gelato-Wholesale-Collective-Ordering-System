@@ -20,6 +20,27 @@ interface Statement {
   aging_category?: string;
 }
 
+interface HeaderOption {
+  id: number;
+  option_name: string;
+  line1?: string;
+  line2?: string;
+  line3?: string;
+  line4?: string;
+  line5?: string;
+  line6?: string;
+  line7?: string;
+  is_default?: boolean;
+}
+
+interface Invoice {
+  invoice_id: string;
+  order_date: string;
+  delivery_date: string;
+  total_amount: number;
+  status: string;
+}
+
 export default function ClientStatementPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -29,12 +50,12 @@ export default function ClientStatementPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [showStatementModal, setShowStatementModal] = useState(false);
-  const [selectedStatement, setSelectedStatement] = useState(null);
-  const [statementInvoices, setStatementInvoices] = useState([]);
-  const [headerOptions, setHeaderOptions] = useState([]);
-  const [selectedHeaderId, setSelectedHeaderId] = useState(null);
+  const [selectedStatement, setSelectedStatement] = useState<Statement | null>(null);
+  const [statementInvoices, setStatementInvoices] = useState<Invoice[]>([]);
+  const [headerOptions, setHeaderOptions] = useState<HeaderOption[]>([]);
+  const [selectedHeaderId, setSelectedHeaderId] = useState<number | null>(null);
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
-  const [editingHeaderId, setEditingHeaderId] = useState(null);
+  const [editingHeaderId, setEditingHeaderId] = useState<number | null>(null);
   const [agingCategory, setAgingCategory] = useState('1-30_days');
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -109,19 +130,15 @@ export default function ClientStatementPage() {
   }, []);
 
   useEffect(() => {
-    fetchStatements();
-  }, []);
+    const initializeStatements = async () => {
+      // First, generate statements for any orders without them
+      await generateStatementsForOrders();
+      // Then fetch all statements
+      await fetchStatements();
+    };
 
-  useEffect(() => {
-  const initializeStatements = async () => {
-    // First, generate statements for any orders without them
-    await generateStatementsForOrders();
-    // Then fetch all statements
-    await fetchStatements();
-  };
-  
-  initializeStatements();
-}, []);
+    initializeStatements();
+  }, []);
 
  const generateStatementsForOrders = async () => {
   try {
@@ -439,7 +456,7 @@ useEffect(() => {
   }
 };
 
-  const handleEditHeaderOption = (header) => {
+  const handleEditHeaderOption = (header: HeaderOption) => {
     setEditingHeaderId(header.id);
     setHeaderFormData({
       option_name: header.option_name,
@@ -454,7 +471,7 @@ useEffect(() => {
     setShowHeaderEditor(true);
   };
 
-  const handleDeleteHeaderOption = async (headerId) => {
+  const handleDeleteHeaderOption = async (headerId: number) => {
   if (!confirm('Are you sure you want to delete this header option?')) {
     return;
   }
@@ -486,7 +503,8 @@ useEffect(() => {
   }
 };
 
-const renderHeaderInPDF = (doc, selectedHeader) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const renderHeaderInPDF = (doc: any, selectedHeader: HeaderOption | undefined) => {
   if (!selectedHeader) return;
 
   doc.setFontSize(10);
@@ -517,7 +535,7 @@ const renderHeaderInPDF = (doc, selectedHeader) => {
   });
 };
 
-const handleViewStatement = async (statement) => {
+const handleViewStatement = async (statement: Statement) => {
   try {
     setLoading(true);
     const invoices = await fetchStatementInvoices(statement.statement_id);

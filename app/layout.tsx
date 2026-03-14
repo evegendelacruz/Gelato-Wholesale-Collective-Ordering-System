@@ -21,7 +21,7 @@ const robotoCondensed = Roboto_Condensed({
 });
 
 export const metadata: Metadata = {
-  title: "Momolato",
+  title: "Gelato Collective Wholesale",
   description: "Momolato Ordering System built with Next.js",
 };
 

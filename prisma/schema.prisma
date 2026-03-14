@@ -1,0 +1,317 @@
+// Momolato Ordering System - Prisma Schema
+// Database: PostgreSQL (Supabase)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================
+// USER MANAGEMENT TABLES
+// ============================================
+
+model AdminUser {
+  admin_auth_id  String   @id
+  admin_acc_id   String
+  admin_fullName String
+  admin_email    String   @unique
+  admin_role     String
+  admin_password String
+  created_at     DateTime @default(now())
+
+  @@map("admin_user")
+}
+
+model ClientUser {
+  client_id                String   @id @default(uuid())
+  client_auth_id           String   @unique
+  client_password          String
+  client_account_date      String?
+  client_businessName      String
+  client_operationName     String?
+  client_delivery_address  String?
+  client_business_contact  String?
+  client_business_activities String?
+  client_type_business     String?
+  client_person_incharge   String?
+  client_person_contact    String?
+  client_email             String   @unique
+  client_billing_address   String?
+  client_bankName          String?
+  client_bankNumber        String?
+  client_ACRA              String?
+  client_created_at        DateTime @default(now())
+  is_online                Boolean  @default(false)
+  ad_streetName            String?
+  ad_country               String?
+  ad_postal                String?
+  ad_billing_streetName    String?
+  ad_billing_country       String?
+  ad_billing_postal        String?
+
+  // Relations
+  clientProducts  ClientProduct[]
+  clientOrders    ClientOrder[]
+  clientBasket    ClientBasket[]
+  clientStatements ClientStatement[]
+
+  @@map("client_user")
+}
+
+// ============================================
+// PRODUCT MANAGEMENT TABLES
+// ============================================
+
+model ProductList {
+  id                  Int       @id @default(autoincrement())
+  product_id          String    @unique
+  product_name        String
+  product_type        String
+  product_gelato_type String?
+  product_weight      Float
+  product_milkbased   Float?
+  product_sugarbased  Float?
+  product_shelflife   String?
+  product_price       Float
+  product_allergen    String?
+  product_ingredient  String?
+  product_image       String?
+  product_created_at  DateTime  @default(now())
+  product_billingName String?
+  product_description String?
+  product_cost        Float?
+  product_modified_at DateTime?
+
+  // Relations
+  clientProducts     ClientProduct[]
+  clientOrderItems   ClientOrderItem[]
+  customerOrderItems CustomerOrderItem[]
+  clientBasketItems  ClientBasket[]
+
+  @@map("product_list")
+}
+
+model ClientProduct {
+  id             Int      @id @default(autoincrement())
+  client_auth_id String
+  product_id     Int
+  custom_price   Float
+  is_available   Boolean  @default(true)
+  is_published   Boolean  @default(false)
+  created_at     DateTime @default(now())
+
+  // Relations
+  client  ClientUser  @relation(fields: [client_auth_id], references: [client_auth_id], onDelete: Cascade)
+  product ProductList @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@unique([client_auth_id, product_id])
+  @@map("client_product")
+}
+
+model DropdownOptions {
+  id           Int    @id @default(autoincrement())
+  option_type  String
+  option_value String
+
+  @@map("dropdown_options")
+}
+
+model OrderDropdownOptions {
+  id           Int    @id @default(autoincrement())
+  option_type  String
+  option_value String
+
+  @@map("order_dropdown_options")
+}
+
+// ============================================
+// ORDER & TRANSACTION TABLES
+// ============================================
+
+model ClientBasket {
+  id             Int      @id @default(autoincrement())
+  client_auth_id String
+  product_id     Int
+  product_name   String
+  quantity       Int
+  unit_price     Float
+  notes          String?
+  subtotal       Float
+  created_at     DateTime @default(now())
+
+  // Relations
+  client  ClientUser  @relation(fields: [client_auth_id], references: [client_auth_id], onDelete: Cascade)
+  product ProductList @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@map("client_basket")
+}
+
+model ClientOrder {
+  id               Int       @id @default(autoincrement())
+  order_id         String    @unique
+  client_auth_id   String
+  order_date       String
+  delivery_date    String
+  delivery_address String?
+  total_amount     Float
+  status           String    @default("Pending")
+  notes            String?
+  invoice_id       String?
+  tracking_no      String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  company_name     String?
+  statement_id     String?
+  pdf_generated    Boolean   @default(false)
+  pdf_generated_at DateTime?
+
+  // Relations
+  client    ClientUser       @relation(fields: [client_auth_id], references: [client_auth_id], onDelete: Cascade)
+  statement ClientStatement? @relation(fields: [statement_id], references: [statement_id], onDelete: SetNull)
+  items     ClientOrderItem[]
+
+  @@index([client_auth_id])
+  @@index([delivery_date])
+  @@index([status])
+  @@index([statement_id])
+  @@map("client_order")
+}
+
+model ClientOrderItem {
+  id           Int    @id @default(autoincrement())
+  order_id     Int
+  product_id   Int
+  product_name String
+  quantity     Int
+  unit_price   Float
+  subtotal     Float
+
+  // Relations
+  order   ClientOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product ProductList @relation(fields: [product_id], references: [id], onDelete: Restrict)
+
+  @@index([order_id])
+  @@map("client_order_item")
+}
+
+model CustomerOrder {
+  id               Int      @id @default(autoincrement())
+  order_id         String   @unique
+  customer_name    String
+  order_date       String
+  delivery_date    String
+  delivery_address String?
+  status           String   @default("Pending")
+  notes            String?
+  tracking_no      String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+  total_amount     Float
+  invoice_id       String?
+
+  // Relations
+  items CustomerOrderItem[]
+
+  @@index([delivery_date])
+  @@index([status])
+  @@map("customer_order")
+}
+
+model CustomerOrderItem {
+  id                Int     @id @default(autoincrement())
+  order_id          Int
+  product_id        String
+  product_name      String
+  quantity          Int
+  calculated_weight String?
+  gelato_type       String?
+  product_type      String?
+  product_price     Float
+  product_cost      Float?
+  label_ingredients String?
+  label_allergens   String?
+  best_before       String?
+  batch_number      String?
+
+  // Relations
+  order   CustomerOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product ProductList?  @relation(fields: [product_id], references: [product_id], onDelete: Restrict)
+
+  @@index([order_id])
+  @@map("customer_order_item")
+}
+
+// ============================================
+// STATEMENT & REPORTING TABLES
+// ============================================
+
+model ClientStatement {
+  statement_id            String   @id
+  client_auth_id          String
+  company_name            String
+  date_generated          DateTime @default(now())
+  statement_month         String
+  total_amount            Float
+  invoice_count           Int
+  client_email            String?
+  client_person_incharge  String?
+  client_business_contact String?
+  business_address        String?
+
+  // Relations
+  client ClientUser    @relation(fields: [client_auth_id], references: [client_auth_id], onDelete: Cascade)
+  orders ClientOrder[]
+
+  @@index([client_auth_id])
+  @@index([statement_month])
+  @@map("client_statement")
+}
+
+model DeliveryReport {
+  id            String   @id @default(uuid())
+  summary_id    String
+  delivery_date String
+  created_by    String?
+  created_at    DateTime @default(now())
+  report_data   Json
+
+  @@index([delivery_date])
+  @@map("delivery_reports")
+}
+
+// ============================================
+// CONFIGURATION TABLES
+// ============================================
+
+model HeaderOption {
+  id          Int     @id @default(autoincrement())
+  option_name String
+  line1       String?
+  line2       String?
+  line3       String?
+  line4       String?
+  line5       String?
+  line6       String?
+  line7       String?
+  is_default  Boolean @default(false)
+
+  @@map("header_options")
+}
+
+model FooterOption {
+  id          Int     @id @default(autoincrement())
+  option_name String
+  line1       String?
+  line2       String?
+  line3       String?
+  line4       String?
+  line5       String?
+  is_default  Boolean @default(false)
+
+  @@map("footer_options")
+}

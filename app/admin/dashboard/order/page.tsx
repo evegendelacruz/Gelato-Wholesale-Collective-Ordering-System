@@ -6,8 +6,19 @@ import ClientInvoice from '@/app/components/clientInvoice';
 import ClientOrderModal from '@/app/components/clientOrderModal/page';
 import LabelGenerator from '@/app/components/orderLabel/page';
 import EditOrderModal from '@/app/components/editOrder/page';
-import { useState, useEffect, Fragment } from 'react';
-import { Search, Filter, Plus, X, Check, ChevronDown } from 'lucide-react';
+import { useState, useEffect, Fragment, useRef } from 'react';
+import { Search, Filter, Plus, X, Check, ChevronDown, Tag } from 'lucide-react';
+import {
+  downloadMultiStickerPDF,
+  downloadAllOrderStickersPDF,
+  generateMultiStickerPDF,
+  generateAllOrderStickersPDF,
+  generateNextBbdCode,
+  generateNextPbnCode,
+  generateProductBarcode,
+  type StickerData,
+  type OrderStickerItem,
+} from "@/lib/stickerGenerator";
 
 interface Order {
   id: number;
@@ -129,7 +140,48 @@ export default function OrderPage() {
   line6: '',
   line7: '',
 });
-  
+
+  // Sticker preview state
+  const [showStickerPreview, setShowStickerPreview] = useState(false);
+  const [stickerPreviewUrl, setStickerPreviewUrl] = useState<string>('');
+  const [stickerPreviewData, setStickerPreviewData] = useState<{
+    stickerData: StickerData;
+    quantity: number;
+    productName: string;
+    // For "all order stickers" - store actual items for proper download
+    allOrderItems?: OrderStickerItem[];
+    lastBbdCode?: string | null;
+    lastPbnCode?: string | null;
+  } | null>(null);
+
+  // Refs for dropdown positioning
+  const sortButtonRef = useRef<HTMLButtonElement>(null);
+  const filterButtonRef = useRef<HTMLButtonElement>(null);
+  const [sortDropdownPos, setSortDropdownPos] = useState({ top: 0, right: 0 });
+  const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, right: 0 });
+
+  // Refs for syncing horizontal scroll between header, scrollbar, and body
+  const headerScrollRef = useRef<HTMLDivElement>(null);
+  const scrollbarRef = useRef<HTMLDivElement>(null);
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
+
+  const syncScroll = (source: 'header' | 'scrollbar' | 'body') => {
+    const headerEl = headerScrollRef.current;
+    const scrollbarEl = scrollbarRef.current;
+    const bodyEl = bodyScrollRef.current;
+
+    if (!headerEl || !scrollbarEl || !bodyEl) return;
+
+    let scrollLeft = 0;
+    if (source === 'header') scrollLeft = headerEl.scrollLeft;
+    else if (source === 'scrollbar') scrollLeft = scrollbarEl.scrollLeft;
+    else if (source === 'body') scrollLeft = bodyEl.scrollLeft;
+
+    if (source !== 'header') headerEl.scrollLeft = scrollLeft;
+    if (source !== 'scrollbar') scrollbarEl.scrollLeft = scrollLeft;
+    if (source !== 'body') bodyEl.scrollLeft = scrollLeft;
+  };
+
   const toggleRowExpansion = (orderId) => {
   setExpandedRows(prev => ({
     ...prev,
@@ -802,44 +854,377 @@ const handleDelete = async () => {
       return;
     }
 
+    // Toggle immediately for better UX
+    toggleRowExpansion(order.id);
+
     // Fetch order items if not already fetched
     if (!rowOrderItems[order.id]) {
       try {
-        const { data: items } = await supabase
+        // Simple query first - no joins for faster response
+        const { data: items, error } = await supabase
           .from('client_order_item')
-          .select(`
-            *,
-            product_list!client_order_item_product_id_fkey(
-              product_type,
-              product_name,
-              product_weight
-            )
-          `)
+          .select('*')
           .eq('order_id', order.id);
 
-        // Map items to include product details at root level
-        const itemsWithType = items?.map(item => ({
+        if (error) throw error;
+
+        // Set items immediately with basic data
+        const basicItems = (items || []).map(item => ({
           ...item,
-          product_type: item.product_list?.product_type || 'N/A',
-          // Use product_name from product_list, fallback to stored product_name
-          display_product_name: item.product_list?.product_name || item.product_name,
-          // Calculate weight: product_weight * quantity
-          calculated_weight: item.calculated_weight || 
-            (item.product_list?.product_weight ? 
-              (Number(item.product_list.product_weight) * Number(item.quantity)).toFixed(2) : 
-              '-')
-        })) || [];
+          product_type: item.product_type || 'N/A',
+          display_product_name: item.product_name || 'Unknown Product',
+          calculated_weight: item.calculated_weight || '-',
+          sticker_bbd_code: null,
+          sticker_pbn_code: null,
+          sticker_barcode: null,
+          product_ingredient: item.product_ingredient || null
+        }));
 
         setRowOrderItems(prev => ({
           ...prev,
-          [order.id]: itemsWithType
+          [order.id]: basicItems
         }));
+
+        // Then fetch product details in background for sticker codes and ingredients
+        if (items && items.length > 0) {
+          // Fetch all products to enable flexible matching
+          const { data: products } = await supabase
+            .from('product_list')
+            .select('id, product_id, product_type, product_name, product_weight, product_ingredient, sticker_bbd_code, sticker_pbn_code, sticker_barcode');
+
+          if (products) {
+            const allProductsList = products;
+
+            // Create maps for flexible lookup
+            const productMapById = new Map(products.map(p => [p.id, p]));
+            const productMapByProductId = new Map(products.map(p => [p.product_id, p]));
+            const productMapByName = new Map(products.map(p => [p.product_name?.toLowerCase().trim(), p]));
+
+            // Helper function to normalize string for comparison
+            const normalizeForMatch = (str: string): string => {
+              return str.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+            };
+
+            // Helper function to get words from a string
+            const getWords = (str: string): string[] => {
+              return normalizeForMatch(str).split(' ').filter(w => w.length > 2);
+            };
+
+            const enrichedItems = items.map(item => {
+              // Try to find product by numeric id first, then string product_id, then by name
+              let productData = productMapById.get(item.product_id);
+              if (!productData && item.product_id) {
+                productData = productMapByProductId.get(item.product_id);
+              }
+              if (!productData && item.product_name) {
+                const normalizedName = item.product_name.toLowerCase().trim();
+                productData = productMapByName.get(normalizedName);
+
+                // Try normalized match (without special chars)
+                if (!productData) {
+                  const cleanName = normalizeForMatch(item.product_name);
+                  for (const [pName, p] of productMapByName.entries()) {
+                    if (pName && normalizeForMatch(pName) === cleanName) {
+                      productData = p;
+                      break;
+                    }
+                  }
+                }
+
+                // Try partial match if exact match fails
+                if (!productData) {
+                  for (const [pName, p] of productMapByName.entries()) {
+                    if (pName && (pName.includes(normalizedName) || normalizedName.includes(pName))) {
+                      productData = p;
+                      break;
+                    }
+                  }
+                }
+
+                // Try word-based matching
+                if (!productData) {
+                  const itemWords = getWords(item.product_name);
+                  if (itemWords.length > 0) {
+                    let bestMatch = null;
+                    let bestScore = 0;
+
+                    for (const product of allProductsList) {
+                      if (!product.product_name) continue;
+                      const productWords = getWords(product.product_name);
+                      const matchingWords = itemWords.filter(w => productWords.includes(w));
+                      const score = matchingWords.length / Math.max(itemWords.length, productWords.length);
+
+                      if (score > bestScore && score >= 0.5) {
+                        bestScore = score;
+                        bestMatch = product;
+                      }
+                    }
+
+                    productData = bestMatch;
+                  }
+                }
+              }
+
+              console.log('Row expand - Item:', item.product_name, '-> Product:', productData?.product_name, '| Ingredient:', productData?.product_ingredient?.substring(0, 30));
+
+              return {
+                ...item,
+                product_type: productData?.product_type || item.product_type || 'N/A',
+                display_product_name: productData?.product_name || item.product_name || 'Unknown Product',
+                calculated_weight: item.calculated_weight ||
+                  (productData?.product_weight ?
+                    (Number(productData.product_weight) * Number(item.quantity)).toFixed(2) :
+                    '-'),
+                sticker_bbd_code: productData?.sticker_bbd_code || null,
+                sticker_pbn_code: productData?.sticker_pbn_code || null,
+                sticker_barcode: productData?.sticker_barcode || null,
+                product_ingredient: productData?.product_ingredient || item.product_ingredient || null
+              };
+            });
+
+            setRowOrderItems(prev => ({
+              ...prev,
+              [order.id]: enrichedItems
+            }));
+          }
+        }
       } catch (error) {
         console.error('Error fetching order items:', error);
       }
     }
+  };
 
-    toggleRowExpansion(order.id);
+  // Generate stickers for a single order item (quantity x stickers)
+  // Uses product_id to fetch ingredients directly from product_list (same as Labels)
+  const handleGenerateStickers = async (item: {
+    display_product_name: string;
+    product_ingredient: string | null;
+    sticker_bbd_code: string | null;
+    sticker_pbn_code: string | null;
+    sticker_barcode: string | null;
+    quantity: number;
+    product_name?: string;
+    product_id?: number;
+  }) => {
+    const productName = item.display_product_name || item.product_name || 'Unknown Product';
+
+    let ingredients: string | null = null;
+    let barcode = item.sticker_barcode;
+
+    console.log('Single sticker - Product:', productName, 'product_id:', item.product_id);
+
+    // Fetch product directly by product_id
+    if (item.product_id) {
+      const { data: product } = await supabase
+        .from('product_list')
+        .select('product_ingredient')
+        .eq('id', item.product_id)
+        .single();
+
+      if (product) {
+        console.log('Single sticker - Found by ID:', product.product_ingredient?.substring(0, 50));
+        ingredients = product.product_ingredient;
+      }
+    }
+
+    // Fallback: use item's stored ingredient if available
+    if (!ingredients && item.product_ingredient) {
+      ingredients = item.product_ingredient;
+    }
+
+    // Final fallback
+    ingredients = ingredients || 'No ingredients listed';
+    console.log('Single sticker - Final ingredients:', ingredients.substring(0, 50));
+
+    // Use product-based barcode (consistent for same product)
+    barcode = barcode || generateProductBarcode(productName);
+
+    // Get last codes for generating unique BBD/PBN per sticker
+    let lastBbdCode: string | null = null;
+    let lastPbnCode: string | null = null;
+
+    try {
+      const { data: lastProduct } = await supabase
+        .from('product_list')
+        .select('sticker_bbd_code, sticker_pbn_code')
+        .not('sticker_bbd_code', 'is', null)
+        .order('id', { ascending: false })
+        .limit(1)
+        .single();
+
+      lastBbdCode = lastProduct?.sticker_bbd_code || null;
+      lastPbnCode = lastProduct?.sticker_pbn_code || null;
+    } catch {
+      // Start fresh if no existing codes
+    }
+
+    // Generate first sticker data for preview (others will have sequential codes)
+    const firstBbdCode = generateNextBbdCode(lastBbdCode);
+    const firstPbnCode = generateNextPbnCode(lastPbnCode);
+
+    const stickerData: StickerData = {
+      productName: productName,
+      ingredients: ingredients,
+      bbdCode: firstBbdCode,
+      pbnCode: firstPbnCode,
+      barcode: barcode
+    };
+
+    // Generate PDF with unique BBD/PBN for each sticker
+    const doc = generateMultiStickerPDF(stickerData, item.quantity);
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+
+    if (stickerPreviewUrl) {
+      URL.revokeObjectURL(stickerPreviewUrl);
+    }
+
+    setStickerPreviewUrl(pdfUrl);
+    setStickerPreviewData({
+      stickerData,
+      quantity: item.quantity,
+      productName
+    });
+    setShowStickerPreview(true);
+  };
+
+  // Generate ALL stickers for an entire order (all products × quantities)
+  // Uses the SAME approach as handleGenerateLabels - Supabase JOIN with product_list
+  const handleGenerateAllOrderStickers = async (orderId: number) => {
+    console.log('=== STICKER GENERATION DEBUG ===');
+    console.log('Order ID:', orderId);
+
+    // Use the EXACT same query as Labels - JOIN with product_list (only product_ingredient)
+    const { data: items, error: fetchError } = await supabase
+      .from('client_order_item')
+      .select(`
+        *,
+        product_list(
+          product_ingredient
+        )
+      `)
+      .eq('order_id', orderId);
+
+    console.log('Fetched items with JOIN:', items);
+
+    if (fetchError) {
+      console.error('Error fetching order items:', fetchError);
+      alert('Error fetching order items: ' + fetchError.message);
+      return;
+    }
+
+    if (!items || items.length === 0) {
+      alert('No items found for this order.');
+      return;
+    }
+
+    // Map items to sticker format - same logic as Labels
+    const stickerItems: OrderStickerItem[] = items.map(item => {
+      let productIngredients = 'No ingredients listed';
+
+      // Extract from joined product_list (same as Labels does)
+      if (item.product_list) {
+        if (Array.isArray(item.product_list)) {
+          productIngredients = item.product_list[0]?.product_ingredient || productIngredients;
+        } else {
+          productIngredients = (item.product_list as any).product_ingredient || productIngredients;
+        }
+      }
+
+      console.log('Item:', item.product_name, '| Ingredient from JOIN:', productIngredients?.substring(0, 50));
+
+      return {
+        productName: item.product_name || 'Unknown Product',
+        ingredients: productIngredients,
+        quantity: item.quantity,
+        existingBarcode: null
+      };
+    });
+
+    console.log('=== FINAL STICKER ITEMS ===');
+    console.log(stickerItems.map(s => ({ name: s.productName, ingredients: s.ingredients?.substring(0, 50), qty: s.quantity })));
+
+    // Get last codes for generating unique BBD/PBN
+    let lastBbdCode: string | null = null;
+    let lastPbnCode: string | null = null;
+
+    try {
+      const { data: lastProduct } = await supabase
+        .from('product_list')
+        .select('sticker_bbd_code, sticker_pbn_code')
+        .not('sticker_bbd_code', 'is', null)
+        .order('id', { ascending: false })
+        .limit(1)
+        .single();
+
+      lastBbdCode = lastProduct?.sticker_bbd_code || null;
+      lastPbnCode = lastProduct?.sticker_pbn_code || null;
+    } catch {
+      // Start fresh if no existing codes
+    }
+
+    // Calculate total sticker count
+    const totalStickers = stickerItems.reduce((sum, item) => sum + item.quantity, 0);
+
+    // Generate PDF with all stickers
+    const doc = generateAllOrderStickersPDF(stickerItems, lastBbdCode, lastPbnCode);
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+
+    if (stickerPreviewUrl) {
+      URL.revokeObjectURL(stickerPreviewUrl);
+    }
+
+    // Find the order to get order_id
+    const order = orders.find(o => o.id === orderId);
+    const orderIdStr = order?.order_id || `order-${orderId}`;
+
+    setStickerPreviewUrl(pdfUrl);
+    setStickerPreviewData({
+      stickerData: {
+        productName: `All Products - Order ${orderIdStr}`,
+        ingredients: `${stickerItems.length} product(s), ${totalStickers} sticker(s)`,
+        bbdCode: 'Multiple',
+        pbnCode: 'Multiple',
+        barcode: 'Multiple'
+      },
+      quantity: totalStickers,
+      productName: `Order ${orderIdStr}`,
+      // Store actual items for proper download
+      allOrderItems: stickerItems,
+      lastBbdCode: lastBbdCode,
+      lastPbnCode: lastPbnCode
+    });
+    setShowStickerPreview(true);
+  };
+
+  // Download sticker from preview
+  const handleDownloadSticker = () => {
+    if (!stickerPreviewData) return;
+    const filename = `stickers-${stickerPreviewData.productName.replace(/\s+/g, '-')}-x${stickerPreviewData.quantity}.pdf`;
+
+    // If we have actual order items (from "all order stickers"), use those for accurate download
+    if (stickerPreviewData.allOrderItems && stickerPreviewData.allOrderItems.length > 0) {
+      downloadAllOrderStickersPDF(
+        stickerPreviewData.allOrderItems,
+        filename,
+        stickerPreviewData.lastBbdCode || null,
+        stickerPreviewData.lastPbnCode || null
+      );
+    } else {
+      // Single item sticker - use the stickerData directly
+      downloadMultiStickerPDF(stickerPreviewData.stickerData, stickerPreviewData.quantity, filename);
+    }
+  };
+
+  // Close sticker preview
+  const closeStickerPreview = () => {
+    if (stickerPreviewUrl) {
+      URL.revokeObjectURL(stickerPreviewUrl);
+    }
+    setStickerPreviewUrl('');
+    setStickerPreviewData(null);
+    setShowStickerPreview(false);
   };
 
   const handleStatusUpdate = async (orderId, newStatus) => {
@@ -1358,11 +1743,11 @@ const handleViewInvoice = async (order) => {
   return (
     <div className="min-h-screen flex" style={{ fontFamily: '"Roboto Condensed", sans-serif' }}>
         <Sidepanel />
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header />
-        <main className="flex-1 p-6" style={{ backgroundColor: '#FCF0E3' }}>
+        <main className="flex-1 p-6 overflow-auto" style={{ backgroundColor: '#FCF0E3' }}>
           <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6 relative z-10">
               <h1 className="text-3xl font-bold" style={{ color: '#5C2E1F' }}>
                 Client Orders
               </h1>
@@ -1385,8 +1770,13 @@ const handleViewInvoice = async (order) => {
 
               {/* Sort By Dropdown */}
               <div className="relative">
-                <button 
+                <button
+                  ref={sortButtonRef}
                   onClick={() => {
+                    if (!showSortDropdown && sortButtonRef.current) {
+                      const rect = sortButtonRef.current.getBoundingClientRect();
+                      setSortDropdownPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+                    }
                     setShowSortDropdown(!showSortDropdown);
                     setShowFilterDropdown(false);
                   }}
@@ -1395,9 +1785,12 @@ const handleViewInvoice = async (order) => {
                   <ChevronDown size={20} />
                   <span>Sort</span>
                 </button>
-                
+
                 {showSortDropdown && (
-                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                  <div
+                    className="fixed w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-[100]"
+                    style={{ top: sortDropdownPos.top, right: sortDropdownPos.right }}
+                  >
                     <div className="py-1">
                       <button
                         onClick={() => {
@@ -1496,8 +1889,13 @@ const handleViewInvoice = async (order) => {
 
               {/* Filter Dropdown */}
               <div className="relative">
-                <button 
+                <button
+                  ref={filterButtonRef}
                   onClick={() => {
+                    if (!showFilterDropdown && filterButtonRef.current) {
+                      const rect = filterButtonRef.current.getBoundingClientRect();
+                      setFilterDropdownPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+                    }
                     setShowFilterDropdown(!showFilterDropdown);
                     setShowSortDropdown(false);
                   }}
@@ -1511,9 +1909,12 @@ const handleViewInvoice = async (order) => {
                     </span>
                   )}
                 </button>
-                
+
                 {showFilterDropdown && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                  <div
+                    className="fixed w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-[100]"
+                    style={{ top: filterDropdownPos.top, right: filterDropdownPos.right }}
+                  >
                     <div className="py-1">
                       <div className="px-4 py-2 text-xs font-bold text-gray-500 uppercase">Status</div>
                       <button
@@ -1611,55 +2012,87 @@ const handleViewInvoice = async (order) => {
               </div>
             )}
 
-            {/* Table */}
-            <div className="overflow-x-auto">
-            <table className="w-full table-auto">
-              <thead>
-                <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
-                  <th className="text-left py-3 px-2 w-10">
-                    <input 
-                      type="checkbox" 
-                      className="w-4 h-4 cursor-pointer"
-                      checked={selectedRows.size === currentOrders.length && currentOrders.length > 0}
-                      onChange={(e) => handleSelectAll(e.target.checked)}
-                    />
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    ORDER ID
-                  </th>
-                  <th className="text-left py-3 px-3 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    COMPANY NAME
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    ORDER DATE
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    DELIVERY DATE
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    DELIVERY ADDRESS
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    AMOUNT ($)
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    STATUS
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    TRACKING NO
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    INVOICE
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    LABEL
-                  </th>
-                  <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
-                    ACTIONS
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+            {/* Table Container */}
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              {/* Header Table */}
+              <div
+                ref={headerScrollRef}
+                className="overflow-x-auto overflow-y-hidden"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                onScroll={() => syncScroll('header')}
+              >
+                <table className="w-full table-auto min-w-[1400px]">
+                  <thead className="bg-white">
+                    <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
+                      <th className="text-left py-3 px-2 w-10">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 cursor-pointer"
+                          checked={selectedRows.size === currentOrders.length && currentOrders.length > 0}
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                        />
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        ORDER ID
+                      </th>
+                      <th className="text-left py-3 px-3 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        COMPANY NAME
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        ORDER DATE
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        DELIVERY DATE
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        DELIVERY ADDRESS
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        AMOUNT ($)
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        STATUS
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        TRACKING NO
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        INVOICE
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        LABEL
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap" style={{ color: '#5C2E1F' }}>
+                        ACTIONS
+                      </th>
+                    </tr>
+                  </thead>
+                </table>
+              </div>
+
+              {/* Horizontal Scrollbar - Under Header */}
+              <div
+                ref={scrollbarRef}
+                className="overflow-x-auto overflow-y-hidden"
+                style={{
+                  height: '14px',
+                  scrollbarWidth: 'auto',
+                  scrollbarColor: '#5C2E1F #f1f1f1'
+                }}
+                onScroll={() => syncScroll('scrollbar')}
+              >
+                <div style={{ width: '1400px', height: '1px' }}></div>
+              </div>
+
+              {/* Body Table */}
+              <div
+                ref={bodyScrollRef}
+                className="overflow-x-auto overflow-y-hidden"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                onScroll={() => syncScroll('body')}
+              >
+                <table className="w-full table-auto min-w-[1400px]">
+                  <tbody>
               {loading ? (
                 <tr>
                   <td colSpan={11} className="text-center py-8 text-gray-500">
@@ -1743,13 +2176,24 @@ const handleViewInvoice = async (order) => {
                           )}
                         </td>
                         <td className="py-3 px-2">
-                        <button
-                          onClick={() => handleGenerateLabels(order)}
-                          className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                          title="Generate Product Labels"
-                        >
-                          Labels
-                        </button>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => handleGenerateLabels(order)}
+                              className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                              title="Generate Product Labels"
+                            >
+                              Labels
+                            </button>
+                            <button
+                              onClick={() => handleGenerateAllOrderStickers(order.id)}
+                              className="px-2 py-1 text-xs text-white rounded hover:opacity-80"
+                              style={{ backgroundColor: '#10B981' }}
+                              title="Generate All Stickers for Order"
+                            >
+                              <Tag size={12} className="inline mr-1" />
+                              Stickers
+                            </button>
+                          </div>
                         </td>
                         <td className="py-3 px-2">
                           <button
@@ -1782,7 +2226,7 @@ const handleViewInvoice = async (order) => {
                           <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>WEIGHT (kg)</td>
                           <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>UNIT PRICE</td>
                           <td className="py-2 px-2 text-xs font-bold text-right" style={{ color: 'gray' }}>AMOUNT ($)</td>
-                          <td className="py-2 px-2"></td>
+                          <td className="py-2 px-2 text-xs font-bold text-center" style={{ color: 'gray' }}>STICKER</td>
                           <td className="py-2 px-2"></td>
                         </tr>
                       )}
@@ -1799,7 +2243,17 @@ const handleViewInvoice = async (order) => {
                             <td className="py-2 px-2 text-xs text-right">{item.calculated_weight}</td>
                             <td className="py-2 px-2 text-xs text-right">{item.unit_price.toFixed(2)}</td>
                             <td className="py-2 px-2 text-xs text-right font-medium">{formatCurrency(item.subtotal)}</td>
-                            <td className="py-2 px-2"></td>
+                            <td className="py-2 px-2 text-center">
+                              <button
+                                onClick={() => handleGenerateStickers(item)}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white rounded hover:opacity-80 transition-opacity"
+                                style={{ backgroundColor: '#10B981' }}
+                                title={`Generate ${item.quantity} sticker(s)`}
+                              >
+                                <Tag size={12} />
+                                <span>x{item.quantity}</span>
+                              </button>
+                            </td>
                             <td className="py-2 px-2"></td>
                           </tr>
                         ))
@@ -1832,9 +2286,10 @@ const handleViewInvoice = async (order) => {
                 </>
               )}
               
-              </tbody>
-            </table>
-          </div>
+                </tbody>
+                </table>
+              </div>
+            </div>
 
             {/* Pagination */}
             {!loading && !error && filteredOrders.length > 0 && (
@@ -3054,6 +3509,93 @@ const handleViewInvoice = async (order) => {
                       Edit
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Sticker Preview Modal */}
+          {showStickerPreview && stickerPreviewData && (
+            <div
+              className="fixed inset-0 flex items-center justify-center z-50"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+              onClick={closeStickerPreview}
+            >
+              <div
+                className="bg-white rounded-lg max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold" style={{ color: '#5C2E1F' }}>
+                    Sticker Preview
+                  </h2>
+                  <button
+                    onClick={closeStickerPreview}
+                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm">
+                  {stickerPreviewData.allOrderItems && stickerPreviewData.allOrderItems.length > 0 ? (
+                    <>
+                      <p className="font-semibold mb-2">Sticker Contents ({stickerPreviewData.quantity} sticker(s)):</p>
+                      <div className="max-h-32 overflow-y-auto">
+                        {stickerPreviewData.allOrderItems.map((item, idx) => (
+                          <div key={idx} className="mb-2 p-2 bg-white rounded border text-xs">
+                            <p><strong>Product:</strong> {item.productName} (x{item.quantity})</p>
+                            <p><strong>Ingredients:</strong> {item.ingredients.substring(0, 100)}{item.ingredients.length > 100 ? '...' : ''}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p><strong>Product:</strong> {stickerPreviewData.productName}</p>
+                      <p><strong>Quantity:</strong> {stickerPreviewData.quantity} sticker(s)</p>
+                      <p><strong>Ingredients:</strong> {stickerPreviewData.stickerData.ingredients}</p>
+                      <p><strong>BBD Code:</strong> {stickerPreviewData.stickerData.bbdCode}</p>
+                      <p><strong>PBN Code:</strong> {stickerPreviewData.stickerData.pbnCode}</p>
+                    </>
+                  )}
+                </div>
+
+                {/* PDF Preview */}
+                <div className="flex justify-center mb-4 p-4 bg-gray-100 rounded-lg">
+                  <embed
+                    src={`${stickerPreviewUrl}#view=FitH&zoom=page-fit`}
+                    type="application/pdf"
+                    className="border border-gray-300 rounded bg-white"
+                    style={{ width: '500px', height: '300px' }}
+                  />
+                </div>
+
+                <p className="text-xs text-gray-500 text-center mb-4">
+                  Sticker size: 3cm x 1.5cm | {stickerPreviewData.quantity} page(s)
+                </p>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleDownloadSticker}
+                    className="flex-1 px-4 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7,10 12,15 17,10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download PDF
+                  </button>
+                  <button
+                    onClick={closeStickerPreview}
+                    className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                    style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                  >
+                    Close
+                  </button>
                 </div>
               </div>
             </div>

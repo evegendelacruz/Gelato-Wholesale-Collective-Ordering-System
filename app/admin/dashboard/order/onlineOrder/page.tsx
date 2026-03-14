@@ -2,8 +2,19 @@
 import Sidepanel from "@/app/components/sidepanel/page";
 import Header from "@/app/components/header/page";
 import supabase from "@/lib/client";
-import { useState, useEffect, Fragment, useCallback } from "react";
-import { Search, Filter, Plus, X, Check, ChevronDown } from "lucide-react";
+import { useState, useEffect, Fragment, useCallback, useRef } from "react";
+import { Search, Filter, Plus, X, Check, ChevronDown, Tag } from "lucide-react";
+import {
+  downloadMultiStickerPDF,
+  downloadAllOrderStickersPDF,
+  generateMultiStickerPDF,
+  generateAllOrderStickersPDF,
+  generateNextBbdCode,
+  generateNextPbnCode,
+  generateProductBarcode,
+  type StickerData,
+  type OrderStickerItem,
+} from "@/lib/stickerGenerator";
 import CreateOnlineOrderModal from "@/app/components/createOnlineOrderModal/page";
 import OnlineLabelGenerator from "@/app/components/onlineLabel/page";
 import type jsPDF from "jspdf";
@@ -40,6 +51,9 @@ interface OrderItem {
   batch_number?: string;
   product_ingredient?: string;
   product_allergen?: string;
+  sticker_bbd_code?: string | null;
+  sticker_pbn_code?: string | null;
+  sticker_barcode?: string | null;
 }
 
 export default function OnlineOrderPage() {
@@ -160,6 +174,42 @@ export default function OnlineOrderPage() {
     line7: string;
     is_default: boolean;
   } | null>(null);
+
+  // Sticker preview state
+  const [showStickerPreview, setShowStickerPreview] = useState(false);
+  const [stickerPreviewUrl, setStickerPreviewUrl] = useState<string>('');
+  const [stickerPreviewData, setStickerPreviewData] = useState<{
+    stickerData: StickerData;
+    quantity: number;
+    productName: string;
+    // For "all order stickers" - store actual items for proper download
+    allOrderItems?: OrderStickerItem[];
+    lastBbdCode?: string | null;
+    lastPbnCode?: string | null;
+  } | null>(null);
+
+  // Refs for syncing horizontal scroll between header, scrollbar, and body
+  const headerScrollRef = useRef<HTMLDivElement>(null);
+  const scrollbarRef = useRef<HTMLDivElement>(null);
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
+
+  const syncScroll = (source: 'header' | 'scrollbar' | 'body') => {
+    const headerEl = headerScrollRef.current;
+    const scrollbarEl = scrollbarRef.current;
+    const bodyEl = bodyScrollRef.current;
+
+    if (!headerEl || !scrollbarEl || !bodyEl) return;
+
+    let scrollLeft = 0;
+    if (source === 'header') scrollLeft = headerEl.scrollLeft;
+    else if (source === 'scrollbar') scrollLeft = scrollbarEl.scrollLeft;
+    else if (source === 'body') scrollLeft = bodyEl.scrollLeft;
+
+    if (source !== 'header') headerEl.scrollLeft = scrollLeft;
+    if (source !== 'scrollbar') scrollbarEl.scrollLeft = scrollLeft;
+    if (source !== 'body') bodyEl.scrollLeft = scrollLeft;
+  };
+
   // Fetch header options on component mount
   useEffect(() => {
     const fetchHeaderOptions = async () => {
@@ -443,8 +493,114 @@ export default function OnlineOrderPage() {
 
         if (error) throw error;
 
+        // Fetch ALL products once for efficient matching
+        const { data: allProducts } = await supabase
+          .from("product_list")
+          .select("id, product_id, product_name, sticker_bbd_code, sticker_pbn_code, sticker_barcode, product_ingredient");
+
+        const allProductsList = allProducts || [];
+
+        // Create lookup maps for flexible matching
+        const productMapById = new Map();
+        const productMapByProductId = new Map();
+        const productMapByName = new Map();
+
+        allProductsList.forEach(p => {
+          productMapById.set(p.id, p);
+          if (p.product_id) {
+            productMapByProductId.set(p.product_id, p);
+          }
+          if (p.product_name) {
+            productMapByName.set(p.product_name.toLowerCase().trim(), p);
+          }
+        });
+
+        // Helper function to normalize string for comparison
+        const normalizeForMatch = (str: string): string => {
+          return str.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+        };
+
+        // Helper function to get words from a string
+        const getWords = (str: string): string[] => {
+          return normalizeForMatch(str).split(' ').filter(w => w.length > 2);
+        };
+
+        // Match order items with products using flexible matching
+        const itemsWithStickerCodes = (data || []).map((item) => {
+          // Try to find product by different methods
+          let productData = null;
+
+          // Try by numeric id
+          if (item.product_id && typeof item.product_id === 'number') {
+            productData = productMapById.get(item.product_id);
+          }
+          // Try by string product_id
+          if (!productData && item.product_id) {
+            productData = productMapByProductId.get(item.product_id);
+          }
+          // Try by exact name match
+          if (!productData && item.product_name) {
+            const normalizedName = item.product_name.toLowerCase().trim();
+            productData = productMapByName.get(normalizedName);
+
+            // Try normalized match (without special chars)
+            if (!productData) {
+              const cleanName = normalizeForMatch(item.product_name);
+              for (const [pName, p] of productMapByName.entries()) {
+                if (normalizeForMatch(pName) === cleanName) {
+                  productData = p;
+                  break;
+                }
+              }
+            }
+
+            // Try partial match if exact match fails
+            if (!productData) {
+              for (const [pName, p] of productMapByName.entries()) {
+                if (pName && (pName.includes(normalizedName) || normalizedName.includes(pName))) {
+                  productData = p;
+                  break;
+                }
+              }
+            }
+
+            // Try word-based matching
+            if (!productData) {
+              const itemWords = getWords(item.product_name);
+              if (itemWords.length > 0) {
+                let bestMatch = null;
+                let bestScore = 0;
+
+                for (const product of allProductsList) {
+                  if (!product.product_name) continue;
+                  const productWords = getWords(product.product_name);
+                  const matchingWords = itemWords.filter(w => productWords.includes(w));
+                  const score = matchingWords.length / Math.max(itemWords.length, productWords.length);
+
+                  if (score > bestScore && score >= 0.5) {
+                    bestScore = score;
+                    bestMatch = product;
+                  }
+                }
+
+                productData = bestMatch;
+              }
+            }
+          }
+
+          console.log('Row expand - Item:', item.product_name, '-> Product:', productData?.product_name, '| Ingredient:', productData?.product_ingredient?.substring(0, 30));
+
+          return {
+            ...item,
+            sticker_bbd_code: productData?.sticker_bbd_code || null,
+            sticker_pbn_code: productData?.sticker_pbn_code || null,
+            sticker_barcode: productData?.sticker_barcode || null,
+            product_ingredient: productData?.product_ingredient || item.product_ingredient || null
+          };
+        });
+
         // Calculate total amount from order items using product_price
-        const totalAmount = (data || []).reduce(
+        const totalAmount = itemsWithStickerCodes.reduce(
           (sum, item) => sum + item.product_price * item.quantity,
           0,
         );
@@ -458,12 +614,297 @@ export default function OnlineOrderPage() {
 
         setRowOrderItems((prev) => ({
           ...prev,
-          [order.id]: data || [],
+          [order.id]: itemsWithStickerCodes,
         }));
       } catch (error) {
         console.error("Error fetching order items:", error);
       }
     }
+  };
+
+  // Generate stickers for a single order item (quantity x stickers)
+  // For online orders: fetch ALL products and match by name (same logic as row expansion)
+  const handleGenerateStickers = async (item: OrderItem) => {
+    const productName = item.product_name || 'Unknown Product';
+
+    console.log('Single sticker - Product:', productName);
+    console.log('Single sticker - Item has ingredient:', item.product_ingredient?.substring(0, 50));
+
+    // Fetch ALL products to find match (same approach as row expansion)
+    const { data: allProducts } = await supabase
+      .from('product_list')
+      .select('id, product_name, product_ingredient, sticker_barcode');
+
+    let ingredients: string | null = null;
+    let barcode = item.sticker_barcode;
+
+    if (allProducts && productName) {
+      const normalizedName = productName.toLowerCase().trim();
+
+      // Helper for normalized matching
+      const normalizeForMatch = (str: string): string => {
+        return str.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+      };
+
+      // Try exact name match first
+      let matchedProduct = allProducts.find(p =>
+        p.product_name?.toLowerCase().trim() === normalizedName
+      );
+
+      // Try normalized match (without special chars)
+      if (!matchedProduct) {
+        const cleanName = normalizeForMatch(productName);
+        matchedProduct = allProducts.find(p =>
+          p.product_name && normalizeForMatch(p.product_name) === cleanName
+        );
+      }
+
+      // Try partial match
+      if (!matchedProduct) {
+        matchedProduct = allProducts.find(p => {
+          const pName = p.product_name?.toLowerCase().trim() || '';
+          return pName.includes(normalizedName) || normalizedName.includes(pName);
+        });
+      }
+
+      if (matchedProduct) {
+        console.log('Single sticker - Found product:', matchedProduct.product_name, '| Ingredient:', matchedProduct.product_ingredient?.substring(0, 50));
+        ingredients = matchedProduct.product_ingredient;
+        barcode = barcode || matchedProduct.sticker_barcode;
+      }
+    }
+
+    // Fallback to item's stored ingredient
+    if (!ingredients && item.product_ingredient) {
+      ingredients = item.product_ingredient;
+    }
+
+    // Final fallback
+    ingredients = ingredients || 'No ingredients listed';
+    console.log('Single sticker - Final ingredients:', ingredients.substring(0, 50));
+
+    // Use product-based barcode (consistent for same product)
+    barcode = barcode || generateProductBarcode(productName);
+
+    // Get last codes for generating unique BBD/PBN per sticker
+    let lastBbdCode: string | null = null;
+    let lastPbnCode: string | null = null;
+
+    try {
+      const { data: lastProduct } = await supabase
+        .from('product_list')
+        .select('sticker_bbd_code, sticker_pbn_code')
+        .not('sticker_bbd_code', 'is', null)
+        .order('id', { ascending: false })
+        .limit(1)
+        .single();
+
+      lastBbdCode = lastProduct?.sticker_bbd_code || null;
+      lastPbnCode = lastProduct?.sticker_pbn_code || null;
+    } catch {
+      // Start fresh if no existing codes
+    }
+
+    // Generate first sticker data for preview
+    const firstBbdCode = generateNextBbdCode(lastBbdCode);
+    const firstPbnCode = generateNextPbnCode(lastPbnCode);
+
+    const stickerData: StickerData = {
+      productName: productName,
+      ingredients: ingredients,
+      bbdCode: firstBbdCode,
+      pbnCode: firstPbnCode,
+      barcode: barcode
+    };
+
+    // Generate PDF
+    const doc = generateMultiStickerPDF(stickerData, item.quantity);
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+
+    if (stickerPreviewUrl) {
+      URL.revokeObjectURL(stickerPreviewUrl);
+    }
+
+    setStickerPreviewUrl(pdfUrl);
+    setStickerPreviewData({
+      stickerData,
+      quantity: item.quantity,
+      productName
+    });
+    setShowStickerPreview(true);
+  };
+
+  // Generate ALL stickers for an entire order (all products × quantities)
+  // For online orders: fetch items and match by name to get ingredients (same as row expansion)
+  const handleGenerateAllOrderStickers = async (orderId: number) => {
+    console.log('=== STICKER GENERATION DEBUG ===');
+    console.log('Order ID:', orderId);
+
+    // Step 1: Fetch order items
+    const { data: orderItems, error } = await supabase
+      .from('customer_order_item')
+      .select('*')
+      .eq('order_id', orderId);
+
+    console.log('Order items fetched:', orderItems);
+
+    if (error) {
+      console.error('Error fetching order items:', error);
+      alert('Error fetching order items: ' + error.message);
+      return;
+    }
+
+    if (!orderItems || orderItems.length === 0) {
+      alert('No items found for this order.');
+      return;
+    }
+
+    // Step 2: Fetch ALL products to match ingredients (same as row expansion)
+    const { data: allProducts } = await supabase
+      .from('product_list')
+      .select('id, product_name, product_ingredient, sticker_barcode');
+
+    console.log('All products fetched:', allProducts?.length);
+
+    // Helper for normalized matching
+    const normalizeForMatch = (str: string): string => {
+      return str.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+    };
+
+    // Step 3: Match each order item to its product and get ingredients
+    const stickerItems: OrderStickerItem[] = orderItems.map(item => {
+      let productIngredient: string | null = null;
+      let productBarcode: string | null = null;
+
+      console.log('Processing order item:', item.product_name);
+
+      if (allProducts && item.product_name) {
+        const normalizedItemName = item.product_name.toLowerCase().trim();
+        const cleanItemName = normalizeForMatch(item.product_name);
+
+        // Try exact name match first
+        let matchedProduct = allProducts.find(p =>
+          p.product_name?.toLowerCase().trim() === normalizedItemName
+        );
+
+        // Try normalized match (without special chars)
+        if (!matchedProduct) {
+          matchedProduct = allProducts.find(p =>
+            p.product_name && normalizeForMatch(p.product_name) === cleanItemName
+          );
+        }
+
+        // Try partial match
+        if (!matchedProduct) {
+          matchedProduct = allProducts.find(p => {
+            const pName = p.product_name?.toLowerCase().trim() || '';
+            return pName.includes(normalizedItemName) || normalizedItemName.includes(pName);
+          });
+        }
+
+        if (matchedProduct) {
+          console.log('Found product match:', matchedProduct.product_name, '| Ingredient:', matchedProduct.product_ingredient?.substring(0, 50));
+          productIngredient = matchedProduct.product_ingredient;
+          productBarcode = matchedProduct.sticker_barcode;
+        }
+      }
+
+      const finalIngredients = productIngredient || item.product_ingredient || 'No ingredients listed';
+      console.log('Final ingredients for', item.product_name, ':', finalIngredients.substring(0, 50));
+
+      return {
+        productName: item.product_name || 'Unknown Product',
+        ingredients: finalIngredients,
+        quantity: item.quantity,
+        existingBarcode: productBarcode || item.sticker_barcode || null
+      };
+    });
+
+    console.log('=== FINAL STICKER ITEMS ===');
+    console.log(stickerItems.map(s => ({ name: s.productName, ingredients: s.ingredients.substring(0, 50), qty: s.quantity })));
+
+    // Get last codes for generating unique BBD/PBN
+    let lastBbdCode: string | null = null;
+    let lastPbnCode: string | null = null;
+
+    try {
+      const { data: lastProduct } = await supabase
+        .from('product_list')
+        .select('sticker_bbd_code, sticker_pbn_code')
+        .not('sticker_bbd_code', 'is', null)
+        .order('id', { ascending: false })
+        .limit(1)
+        .single();
+
+      lastBbdCode = lastProduct?.sticker_bbd_code || null;
+      lastPbnCode = lastProduct?.sticker_pbn_code || null;
+    } catch {
+      // Start fresh if no existing codes
+    }
+
+    // Calculate total sticker count
+    const totalStickers = stickerItems.reduce((sum, item) => sum + item.quantity, 0);
+
+    // Generate PDF with all stickers
+    const doc = generateAllOrderStickersPDF(stickerItems, lastBbdCode, lastPbnCode);
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+
+    if (stickerPreviewUrl) {
+      URL.revokeObjectURL(stickerPreviewUrl);
+    }
+
+    // Find the order to get order_id
+    const order = orders.find(o => o.id === orderId);
+    const orderIdStr = order?.order_id || `order-${orderId}`;
+
+    setStickerPreviewUrl(pdfUrl);
+    setStickerPreviewData({
+      stickerData: {
+        productName: `All Products - Order ${orderIdStr}`,
+        ingredients: `${stickerItems.length} product(s), ${totalStickers} sticker(s)`,
+        bbdCode: 'Multiple',
+        pbnCode: 'Multiple',
+        barcode: 'Multiple'
+      },
+      quantity: totalStickers,
+      productName: `Order ${orderIdStr}`,
+      // Store actual items for proper download
+      allOrderItems: stickerItems,
+      lastBbdCode: lastBbdCode,
+      lastPbnCode: lastPbnCode
+    });
+    setShowStickerPreview(true);
+  };
+
+  // Download sticker from preview
+  const handleDownloadSticker = () => {
+    if (!stickerPreviewData) return;
+    const filename = `stickers-${stickerPreviewData.productName.replace(/\s+/g, '-')}-x${stickerPreviewData.quantity}.pdf`;
+
+    // If we have actual order items (from "all order stickers"), use those for accurate download
+    if (stickerPreviewData.allOrderItems && stickerPreviewData.allOrderItems.length > 0) {
+      downloadAllOrderStickersPDF(
+        stickerPreviewData.allOrderItems,
+        filename,
+        stickerPreviewData.lastBbdCode || null,
+        stickerPreviewData.lastPbnCode || null
+      );
+    } else {
+      // Single item sticker - use the stickerData directly
+      downloadMultiStickerPDF(stickerPreviewData.stickerData, stickerPreviewData.quantity, filename);
+    }
+  };
+
+  // Close sticker preview
+  const closeStickerPreview = () => {
+    if (stickerPreviewUrl) {
+      URL.revokeObjectURL(stickerPreviewUrl);
+    }
+    setStickerPreviewUrl('');
+    setStickerPreviewData(null);
+    setShowStickerPreview(false);
   };
 
   const handleGenerateLabels = async (order: Order) => {
@@ -1526,10 +1967,10 @@ export default function OnlineOrderPage() {
       style={{ fontFamily: '"Roboto Condensed", sans-serif' }}
     >
       <Sidepanel />
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header />
-        <main className="flex-1 p-6" style={{ backgroundColor: "#FCF0E3" }}>
-          <div className="bg-white rounded-lg shadow-sm p-6">
+        <main className="flex-1 p-6 overflow-auto" style={{ backgroundColor: "#FCF0E3" }}>
+          <div className="bg-white rounded-lg shadow-sm p-6 overflow-hidden">
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-3xl font-bold" style={{ color: "#5C2E1F" }}>
                 Online Orders
@@ -1765,91 +2206,123 @@ export default function OnlineOrderPage() {
               </div>
             )}
 
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full table-auto">
-                <thead>
-                  <tr className="border-b-2" style={{ borderColor: "#5C2E1F" }}>
-                    <th className="text-left py-3 px-2 w-10">
-                      <input
-                        type="checkbox"
-                        className="w-4 h-4 cursor-pointer"
-                        checked={
-                          selectedRows.size === currentOrders.length &&
-                          currentOrders.length > 0
-                        }
-                        onChange={(e) => handleSelectAll(e.target.checked)}
-                      />
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      ORDER ID
-                    </th>
-                    <th
-                      className="text-left py-3 px-3 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      CUSTOMER NAME
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      ORDER DATE
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      DELIVERY DATE
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      DELIVERY ADDRESS
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      AMOUNT ($)
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      STATUS
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      TRACKING NO
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      INVOICE
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      LABEL
-                    </th>
-                    <th
-                      className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      ACTIONS
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+            {/* Table Container */}
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              {/* Header Table */}
+              <div
+                ref={headerScrollRef}
+                className="overflow-x-auto overflow-y-hidden"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                onScroll={() => syncScroll('header')}
+              >
+                <table className="w-full table-auto min-w-[1400px]">
+                  <thead className="bg-white">
+                    <tr className="border-b-2" style={{ borderColor: "#5C2E1F" }}>
+                      <th className="text-left py-3 px-2 w-10">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 cursor-pointer"
+                          checked={
+                            selectedRows.size === currentOrders.length &&
+                            currentOrders.length > 0
+                          }
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                        />
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        ORDER ID
+                      </th>
+                      <th
+                        className="text-left py-3 px-3 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        CUSTOMER NAME
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        ORDER DATE
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        DELIVERY DATE
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        DELIVERY ADDRESS
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        AMOUNT ($)
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        STATUS
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        TRACKING NO
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        INVOICE
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        LABEL
+                      </th>
+                      <th
+                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
+                        style={{ color: "#5C2E1F" }}
+                      >
+                        ACTIONS
+                      </th>
+                    </tr>
+                  </thead>
+                </table>
+              </div>
+
+              {/* Horizontal Scrollbar - Under Header */}
+              <div
+                ref={scrollbarRef}
+                className="overflow-x-auto overflow-y-hidden"
+                style={{
+                  height: '14px',
+                  scrollbarWidth: 'auto',
+                  scrollbarColor: '#5C2E1F #f1f1f1'
+                }}
+                onScroll={() => syncScroll('scrollbar')}
+              >
+                <div style={{ width: '1400px', height: '1px' }}></div>
+              </div>
+
+              {/* Body Table */}
+              <div
+                ref={bodyScrollRef}
+                className="overflow-x-auto overflow-y-hidden"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                onScroll={() => syncScroll('body')}
+              >
+                <table className="w-full table-auto min-w-[1400px]">
+                  <tbody>
                   {loading ? (
                     <tr>
                       <td
@@ -1953,13 +2426,24 @@ export default function OnlineOrderPage() {
                               )}
                             </td>
                             <td className="py-3 px-2">
-                              <button
-                                onClick={() => handleGenerateLabels(order)}
-                                className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                                title="Generate Product Labels"
-                              >
-                                Labels
-                              </button>
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => handleGenerateLabels(order)}
+                                  className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                                  title="Generate Product Labels"
+                                >
+                                  Labels
+                                </button>
+                                <button
+                                  onClick={() => handleGenerateAllOrderStickers(order.id)}
+                                  className="px-2 py-1 text-xs text-white rounded hover:opacity-80"
+                                  style={{ backgroundColor: '#10B981' }}
+                                  title="Generate All Stickers for Order"
+                                >
+                                  <Tag size={12} className="inline mr-1" />
+                                  Stickers
+                                </button>
+                              </div>
                             </td>
                             <td className="py-3 px-2">
                               <button
@@ -2048,7 +2532,12 @@ export default function OnlineOrderPage() {
                               >
                                 AMOUNT ($)
                               </td>
-                              <td className="py-2 px-2"></td>
+                              <td
+                                className="py-2 px-2 text-xs font-bold text-center"
+                                style={{ color: "gray" }}
+                              >
+                                STICKER
+                              </td>
                               <td className="py-2 px-2"></td>
                               <td className="py-2 px-2"></td>
                             </tr>
@@ -2087,7 +2576,17 @@ export default function OnlineOrderPage() {
                                     item.product_price * item.quantity,
                                   )}
                                 </td>
-                                <td className="py-2 px-2"></td>
+                                <td className="py-2 px-2 text-center">
+                                  <button
+                                    onClick={() => handleGenerateStickers(item)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white rounded hover:opacity-80 transition-opacity"
+                                    style={{ backgroundColor: '#10B981' }}
+                                    title={`Generate ${item.quantity} sticker(s)`}
+                                  >
+                                    <Tag size={12} />
+                                    <span>x{item.quantity}</span>
+                                  </button>
+                                </td>
                                 <td className="py-2 px-2"></td>
                                 <td className="py-2 px-2"></td>
                               </tr>
@@ -2127,8 +2626,9 @@ export default function OnlineOrderPage() {
                       ))}
                     </>
                   )}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Pagination */}
@@ -2933,6 +3433,93 @@ export default function OnlineOrderPage() {
                     Save
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Sticker Preview Modal */}
+        {showStickerPreview && stickerPreviewData && (
+          <div
+            className="fixed inset-0 flex items-center justify-center z-50"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            onClick={closeStickerPreview}
+          >
+            <div
+              className="bg-white rounded-lg max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold" style={{ color: '#5C2E1F' }}>
+                  Sticker Preview
+                </h2>
+                <button
+                  onClick={closeStickerPreview}
+                  className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm">
+                {stickerPreviewData.allOrderItems && stickerPreviewData.allOrderItems.length > 0 ? (
+                  <>
+                    <p className="font-semibold mb-2">Sticker Contents ({stickerPreviewData.quantity} sticker(s)):</p>
+                    <div className="max-h-32 overflow-y-auto">
+                      {stickerPreviewData.allOrderItems.map((item, idx) => (
+                        <div key={idx} className="mb-2 p-2 bg-white rounded border text-xs">
+                          <p><strong>Product:</strong> {item.productName} (x{item.quantity})</p>
+                          <p><strong>Ingredients:</strong> {item.ingredients.substring(0, 100)}{item.ingredients.length > 100 ? '...' : ''}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p><strong>Product:</strong> {stickerPreviewData.productName}</p>
+                    <p><strong>Quantity:</strong> {stickerPreviewData.quantity} sticker(s)</p>
+                    <p><strong>Ingredients:</strong> {stickerPreviewData.stickerData.ingredients}</p>
+                    <p><strong>BBD Code:</strong> {stickerPreviewData.stickerData.bbdCode}</p>
+                    <p><strong>PBN Code:</strong> {stickerPreviewData.stickerData.pbnCode}</p>
+                  </>
+                )}
+              </div>
+
+              {/* PDF Preview */}
+              <div className="flex justify-center mb-4 p-4 bg-gray-100 rounded-lg">
+                <embed
+                  src={`${stickerPreviewUrl}#view=FitH&zoom=page-fit`}
+                  type="application/pdf"
+                  className="border border-gray-300 rounded bg-white"
+                  style={{ width: '500px', height: '300px' }}
+                />
+              </div>
+
+              <p className="text-xs text-gray-500 text-center mb-4">
+                Sticker size: 3cm x 1.5cm | {stickerPreviewData.quantity} page(s)
+              </p>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={handleDownloadSticker}
+                  className="flex-1 px-4 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                  style={{ backgroundColor: '#FF5722' }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7,10 12,15 17,10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download PDF
+                </button>
+                <button
+                  onClick={closeStickerPreview}
+                  className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                  style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>

@@ -11,9 +11,18 @@ import {
   Check,
   Image as ImageIcon,
   ChevronDown,
+  Tag,
 } from "lucide-react";
 import supabase from "@/lib/client";
 import Image from "next/image";
+import {
+  generateNextBbdCode,
+  generateNextPbnCode,
+  generate30DigitBarcode,
+  generateStickerBlobUrl,
+  downloadStickerPDF,
+  type StickerData,
+} from "@/lib/stickerGenerator";
 
 declare global {
   interface Window {
@@ -57,6 +66,9 @@ interface Product {
   product_description: string | null;
   product_cost: number | null;
   product_modified_at: string | null;
+  sticker_bbd_code: string | null;
+  sticker_pbn_code: string | null;
+  sticker_barcode: string | null;
 }
 
 interface Message {
@@ -109,6 +121,15 @@ export default function ProductPage() {
   const [isDuplicating, setIsDuplicating] = useState(false);
   const [duplicateSourceProduct, setDuplicateSourceProduct] = useState<Product | null>(null);
   const [activeDropdown, setActiveDropdown] = useState<number | null>(null);
+
+  // Sticker modal state
+  const [isStickerModalOpen, setIsStickerModalOpen] = useState(false);
+  const [stickerPreviewUrl, setStickerPreviewUrl] = useState<string>("");
+  const [stickerProduct, setStickerProduct] = useState<Product | null>(null);
+  const [isGeneratingSticker, setIsGeneratingSticker] = useState(false);
+  const [editableBbdCode, setEditableBbdCode] = useState<string>("");
+  const [editablePbnCode, setEditablePbnCode] = useState<string>("");
+  const [editableBarcode, setEditableBarcode] = useState<string>("");
 
   const [formData, setFormData] = useState({
     product_id: "",
@@ -236,6 +257,151 @@ export default function ProductPage() {
     setIsViewModalOpen(true);
   };
 
+  // Handle sticker preview
+  const handleStickerPreview = async (product: Product) => {
+    setIsGeneratingSticker(true);
+    setStickerProduct(product);
+    setIsStickerModalOpen(true);
+
+    try {
+      // Check if product has sticker codes, if not generate them
+      let bbdCode = product.sticker_bbd_code;
+      let pbnCode = product.sticker_pbn_code;
+      let barcode = product.sticker_barcode;
+
+      if (!bbdCode || !pbnCode || !barcode) {
+        // Get the last codes from database to generate new ones
+        const { data: lastProduct } = await supabase
+          .from('product_list')
+          .select('sticker_bbd_code, sticker_pbn_code')
+          .not('sticker_bbd_code', 'is', null)
+          .order('id', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (!bbdCode) {
+          bbdCode = generateNextBbdCode(lastProduct?.sticker_bbd_code || null);
+        }
+        if (!pbnCode) {
+          pbnCode = generateNextPbnCode(lastProduct?.sticker_pbn_code || null);
+        }
+        if (!barcode) {
+          barcode = generate30DigitBarcode(bbdCode, pbnCode);
+        }
+
+        // Save the generated codes to the database
+        await supabase
+          .from('product_list')
+          .update({
+            sticker_bbd_code: bbdCode,
+            sticker_pbn_code: pbnCode,
+            sticker_barcode: barcode
+          })
+          .eq('id', product.id);
+
+        // Update local state
+        setProducts(prev => prev.map(p =>
+          p.id === product.id
+            ? { ...p, sticker_bbd_code: bbdCode, sticker_pbn_code: pbnCode, sticker_barcode: barcode }
+            : p
+        ));
+
+        // Update the product reference
+        product = { ...product, sticker_bbd_code: bbdCode, sticker_pbn_code: pbnCode, sticker_barcode: barcode };
+        setStickerProduct(product);
+      }
+
+      // Set editable codes
+      setEditableBbdCode(bbdCode!);
+      setEditablePbnCode(pbnCode!);
+      setEditableBarcode(barcode!);
+
+      // Generate preview
+      const stickerData: StickerData = {
+        productName: product.product_name,
+        ingredients: product.product_ingredient || 'No ingredients listed',
+        bbdCode: bbdCode!,
+        pbnCode: pbnCode!,
+        barcode: barcode!
+      };
+
+      const previewUrl = generateStickerBlobUrl(stickerData);
+      setStickerPreviewUrl(previewUrl);
+    } catch (error) {
+      console.error('Error generating sticker preview:', error);
+    } finally {
+      setIsGeneratingSticker(false);
+    }
+  };
+
+  // Regenerate sticker preview with updated codes
+  const regenerateStickerPreview = () => {
+    if (!stickerProduct) return;
+
+    // Clean up previous blob URL
+    if (stickerPreviewUrl) {
+      URL.revokeObjectURL(stickerPreviewUrl);
+    }
+
+    const stickerData: StickerData = {
+      productName: stickerProduct.product_name,
+      ingredients: stickerProduct.product_ingredient || 'No ingredients listed',
+      bbdCode: editableBbdCode,
+      pbnCode: editablePbnCode,
+      barcode: editableBarcode
+    };
+
+    const previewUrl = generateStickerBlobUrl(stickerData);
+    setStickerPreviewUrl(previewUrl);
+  };
+
+  // Generate new barcode
+  const handleGenerateNewBarcode = () => {
+    const newBarcode = generate30DigitBarcode(editableBbdCode, editablePbnCode);
+    setEditableBarcode(newBarcode);
+  };
+
+  // Save updated sticker codes
+  const handleSaveStickerCodes = async () => {
+    if (!stickerProduct) return;
+
+    try {
+      await supabase
+        .from('product_list')
+        .update({
+          sticker_bbd_code: editableBbdCode,
+          sticker_pbn_code: editablePbnCode,
+          sticker_barcode: editableBarcode
+        })
+        .eq('id', stickerProduct.id);
+
+      // Update local state
+      setProducts(prev => prev.map(p =>
+        p.id === stickerProduct.id
+          ? { ...p, sticker_bbd_code: editableBbdCode, sticker_pbn_code: editablePbnCode, sticker_barcode: editableBarcode }
+          : p
+      ));
+
+      setStickerProduct({ ...stickerProduct, sticker_bbd_code: editableBbdCode, sticker_pbn_code: editablePbnCode, sticker_barcode: editableBarcode });
+    } catch (error) {
+      console.error('Error saving sticker codes:', error);
+    }
+  };
+
+  // Handle sticker download
+  const handleStickerDownload = () => {
+    if (!stickerProduct) return;
+
+    const stickerData: StickerData = {
+      productName: stickerProduct.product_name,
+      ingredients: stickerProduct.product_ingredient || 'No ingredients listed',
+      bbdCode: editableBbdCode,
+      pbnCode: editablePbnCode,
+      barcode: editableBarcode
+    };
+
+    downloadStickerPDF(stickerData, `sticker-${stickerProduct.product_id}.pdf`);
+  };
   const handleSwitchToEdit = () => {
     if (viewProduct) {
       setIsEditMode(true);
@@ -274,16 +440,66 @@ export default function ProductPage() {
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from("product_list") // Changed from 'product'
+        .from("product_list")
         .select("*")
-        .order("id", { ascending: false }); // Changed from 'created_at'
+        .order("id", { ascending: false });
 
       if (error) {
         console.error("Supabase error:", error);
         throw error;
       }
 
-      setProducts(data || []);
+      const products = data || [];
+
+      // Auto-assign codes to products without them
+      const productsWithoutCodes = products.filter(
+        p => !p.sticker_bbd_code || !p.sticker_pbn_code || !p.sticker_barcode
+      );
+
+      if (productsWithoutCodes.length > 0) {
+        // Get the last assigned codes from products that have them
+        const productsWithCodes = products.filter(p => p.sticker_bbd_code && p.sticker_pbn_code);
+        let currentBbdCode = productsWithCodes.length > 0
+          ? productsWithCodes.reduce((latest, p) => {
+              const pPrefix = parseInt(p.sticker_bbd_code?.substring(0, 4) || '0', 10);
+              const latestPrefix = parseInt(latest?.substring(0, 4) || '0', 10);
+              return pPrefix > latestPrefix ? p.sticker_bbd_code : latest;
+            }, productsWithCodes[0].sticker_bbd_code)
+          : null;
+        let currentPbnCode = productsWithCodes.length > 0
+          ? productsWithCodes.reduce((latest, p) => {
+              const pNum = parseInt(p.sticker_pbn_code?.replace('PBN', '') || '0', 10);
+              const latestNum = parseInt(latest?.replace('PBN', '') || '0', 10);
+              return pNum > latestNum ? p.sticker_pbn_code : latest;
+            }, productsWithCodes[0].sticker_pbn_code)
+          : null;
+
+        // Sort by id ascending to assign in order
+        const sortedProductsWithoutCodes = [...productsWithoutCodes].sort((a, b) => a.id - b.id);
+
+        for (const product of sortedProductsWithoutCodes) {
+          currentBbdCode = generateNextBbdCode(currentBbdCode);
+          currentPbnCode = generateNextPbnCode(currentPbnCode);
+          const barcode = generate30DigitBarcode(currentBbdCode, currentPbnCode);
+
+          // Update in database
+          await supabase
+            .from('product_list')
+            .update({
+              sticker_bbd_code: currentBbdCode,
+              sticker_pbn_code: currentPbnCode,
+              sticker_barcode: barcode
+            })
+            .eq('id', product.id);
+
+          // Update local product object
+          product.sticker_bbd_code = currentBbdCode;
+          product.sticker_pbn_code = currentPbnCode;
+          product.sticker_barcode = barcode;
+        }
+      }
+
+      setProducts(products);
     } catch (error) {
       console.error("Error fetching products:", error);
       setMessage({ type: "error", text: "Failed to load products" });
@@ -982,6 +1198,19 @@ export default function ProductPage() {
         photoPath = fileName;
       }
 
+      // Generate sticker codes for the new product
+      const { data: lastProduct } = await supabase
+        .from('product_list')
+        .select('sticker_bbd_code, sticker_pbn_code')
+        .not('sticker_bbd_code', 'is', null)
+        .order('id', { ascending: false })
+        .limit(1)
+        .single();
+
+      const newBbdCode = generateNextBbdCode(lastProduct?.sticker_bbd_code || null);
+      const newPbnCode = generateNextPbnCode(lastProduct?.sticker_pbn_code || null);
+      const newBarcode = generate30DigitBarcode(newBbdCode, newPbnCode);
+
       // Insert product into database with new fields
       const { data: insertData, error: insertError } = await supabase
         .from("product_list")
@@ -1006,6 +1235,9 @@ export default function ProductPage() {
           product_description: formData.description || null,
           product_cost: formData.cost ? Number(formData.cost) : null,
           product_created_at: new Date().toISOString(),
+          sticker_bbd_code: newBbdCode,
+          sticker_pbn_code: newPbnCode,
+          sticker_barcode: newBarcode,
         })
         .select();
 
@@ -1617,6 +1849,12 @@ export default function ProductPage() {
                       COST (S$)
                     </th>
                     <th
+                      className="text-left py-3 px-4 font-bold text-sm"
+                      style={{ color: "#5C2E1F" }}
+                    >
+                      STICKER
+                    </th>
+                    <th
                       className="text-left py-1 px-4 font-bold text-sm w-1"
                       style={{ color: "#5C2E1F", width: "2px", minWidth: "2px", maxWidth: "2px", whiteSpace: "nowrap", }}
                     >
@@ -1628,7 +1866,7 @@ export default function ProductPage() {
                   {loading ? (
                     <tr>
                       <td
-                        colSpan={9}
+                        colSpan={11}
                         className="text-center py-8 text-gray-500"
                       >
                         Loading products...
@@ -1637,7 +1875,7 @@ export default function ProductPage() {
                   ) : currentProducts.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={9}
+                        colSpan={11}
                         className="text-center py-8 text-gray-500"
                       >
                         {searchQuery
@@ -1717,7 +1955,20 @@ export default function ProductPage() {
                         <td className="py-3 px-4 text-sm">
                           {product.product_cost || '-'}
                         </td>
-                        <td 
+                        <td
+                          className="py-3 px-4 text-sm"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            onClick={() => handleStickerPreview(product)}
+                            className="flex items-center gap-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                            title="View Sticker"
+                          >
+                            <Tag size={12} />
+                            Sticker
+                          </button>
+                        </td>
+                        <td
                           className="py-1 px-1 text-sm relative"  style={{ width: "2px", minWidth: "2px", maxWidth: "2px", whiteSpace: "nowrap", }}
                           onClick={(e) => e.stopPropagation()}
                         >
@@ -2676,6 +2927,187 @@ export default function ProductPage() {
             >
               OK
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sticker Preview Modal */}
+      {isStickerModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
+          onClick={() => {
+            if (stickerPreviewUrl) URL.revokeObjectURL(stickerPreviewUrl);
+            setIsStickerModalOpen(false);
+            setStickerProduct(null);
+            setStickerPreviewUrl("");
+          }}
+        >
+          <div
+            className="bg-white rounded-lg max-w-xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h2
+                className="text-xl font-bold"
+                style={{ color: "#5C2E1F" }}
+              >
+                Sticker Preview
+              </h2>
+              <button
+                onClick={() => {
+                  if (stickerPreviewUrl) URL.revokeObjectURL(stickerPreviewUrl);
+                  setIsStickerModalOpen(false);
+                  setStickerProduct(null);
+                  setStickerPreviewUrl("");
+                }}
+                className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {isGeneratingSticker ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                <span className="ml-3 text-gray-600">Generating sticker...</span>
+              </div>
+            ) : (
+              <>
+                {/* Product Info */}
+                {stickerProduct && (
+                  <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm">
+                    <p><strong>Product:</strong> {stickerProduct.product_name}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Ingredients: {stickerProduct.product_ingredient || 'No ingredients listed'}
+                    </p>
+                  </div>
+                )}
+
+                {/* Customizable Code Inputs */}
+                <div className="mb-4 grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: "#5C2E1F" }}>
+                      BBD Code
+                    </label>
+                    <input
+                      type="text"
+                      value={editableBbdCode}
+                      onChange={(e) => setEditableBbdCode(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="e.g., 30302026"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: "#5C2E1F" }}>
+                      PBN Code
+                    </label>
+                    <input
+                      type="text"
+                      value={editablePbnCode}
+                      onChange={(e) => setEditablePbnCode(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="e.g., PBN3000"
+                    />
+                  </div>
+                </div>
+
+                {/* Barcode Input */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-1" style={{ color: "#5C2E1F" }}>
+                    Barcode (30 digits)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={editableBarcode}
+                      onChange={(e) => setEditableBarcode(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono text-xs"
+                      placeholder="30-digit barcode"
+                      maxLength={30}
+                    />
+                    <button
+                      onClick={handleGenerateNewBarcode}
+                      className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                      title="Generate new barcode"
+                    >
+                      Generate
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {editableBarcode.length}/30 digits
+                  </p>
+                </div>
+
+                {/* Update Preview Button */}
+                <div className="mb-4 flex gap-2">
+                  <button
+                    onClick={regenerateStickerPreview}
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+                    </svg>
+                    Update Preview
+                  </button>
+                  <button
+                    onClick={handleSaveStickerCodes}
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Check size={16} />
+                    Save Codes
+                  </button>
+                </div>
+
+                {/* Sticker Preview */}
+                <div className="flex justify-center mb-4 p-4 bg-gray-100 rounded-lg">
+                  {stickerPreviewUrl ? (
+                    <embed
+                      src={`${stickerPreviewUrl}#view=FitH&zoom=page-fit`}
+                      type="application/pdf"
+                      className="border border-gray-300 rounded bg-white"
+                      style={{ width: '500px', height: '280px' }}
+                    />
+                  ) : (
+                    <div className="text-gray-500 py-8">Click &quot;Update Preview&quot; to generate sticker</div>
+                  )}
+                </div>
+
+                {/* Size Info */}
+                <p className="text-xs text-gray-500 text-center mb-4">
+                  Sticker size: 3cm x 1.5cm | Margin: 0.2cm
+                </p>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleStickerDownload}
+                    className="flex-1 px-4 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                    style={{ backgroundColor: "#FF5722" }}
+                    disabled={!editableBbdCode || !editablePbnCode}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7,10 12,15 17,10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download PDF
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (stickerPreviewUrl) URL.revokeObjectURL(stickerPreviewUrl);
+                      setIsStickerModalOpen(false);
+                      setStickerProduct(null);
+                      setStickerPreviewUrl("");
+                    }}
+                    className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                    style={{ borderColor: "#5C2E1F", color: "#5C2E1F" }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
