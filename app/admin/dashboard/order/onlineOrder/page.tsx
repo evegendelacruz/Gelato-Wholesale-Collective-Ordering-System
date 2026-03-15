@@ -205,6 +205,8 @@ export default function OnlineOrderPage() {
   const [lastGpbnCode, setLastGpbnCode] = useState<string | null>(null); // Last GPBN that will be generated (for display)
   const [isGeneratingNewSticker, setIsGeneratingNewSticker] = useState(false);
   const [totalStickerCount, setTotalStickerCount] = useState(0);
+  const [showStickerDropdown, setShowStickerDropdown] = useState<number | null>(null);
+  const [showItemStickerDropdown, setShowItemStickerDropdown] = useState<string | null>(null); // format: "orderId-itemIndex"
 
   // Use ref for GPBN to avoid closure issues - this stores the starting code for current order
   const gpbnStartCodeRef = useRef<string | null>(null);
@@ -1069,6 +1071,84 @@ export default function OnlineOrderPage() {
     const currentStartCode = gpbnStartCodeRef.current;
 
     downloadOrderProductStickers(newStickerItems, newStickerOrderDate, filename, currentStartCode);
+  };
+
+  // Generate barcode or product sticker for a single item (same modal as order-level)
+  const handleItemStickerModal = async (
+    item: OrderItem,
+    orderId: number,
+    orderDate: string,
+    stickerType: "barcode" | "product"
+  ) => {
+    setIsGeneratingNewSticker(true);
+    setNewStickerType(stickerType);
+    setShowNewStickerModal(true);
+    setShowItemStickerDropdown(null);
+
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      alert('Order not found');
+      setIsGeneratingNewSticker(false);
+      setShowNewStickerModal(false);
+      return;
+    }
+
+    setNewStickerOrderId(order.order_id);
+    setNewStickerOrderDate(orderDate);
+
+    const productName = item.product_name || 'Unknown Product';
+
+    // Fetch product data
+    let ingredients = item.product_ingredient || 'No ingredients listed';
+    let shelfLife = '3 months';
+    let productId = item.product_id || '0';
+
+    // Try to fetch from product_list for more accurate data
+    if (item.product_id) {
+      const { data: product } = await supabase
+        .from('product_list')
+        .select('product_id, product_ingredient, product_shelflife')
+        .eq('product_id', item.product_id)
+        .single();
+
+      if (product) {
+        ingredients = product.product_ingredient || ingredients;
+        shelfLife = product.product_shelflife || shelfLife;
+        productId = product.product_id || productId;
+      }
+    }
+
+    // Generate 13-digit barcode from product_id
+    const barcode13 = '3' + productId.replace(/\D/g, '').padStart(12, '0').slice(-12);
+
+    const stickerItems: OrderItemForSticker[] = [{
+      productName,
+      ingredients,
+      quantity: item.quantity,
+      barcode13,
+      shelfLife
+    }];
+
+    setNewStickerItems(stickerItems);
+    setTotalStickerCount(item.quantity);
+
+    // Use the pre-assigned GPBN range for this order
+    const gpbnRange = orderGpbnRanges[orderId];
+    const lastGpbnNumber = gpbnRange?.start ? gpbnRange.start - 1 : 2999;
+    const startCode = `GPBN${lastGpbnNumber}`;
+    gpbnStartCodeRef.current = startCode;
+
+    // Generate previews
+    if (stickerType === "barcode") {
+      const previewUrl = generateOrderBarcodeStickersPreview(stickerItems);
+      setBarcodeStickerPreviewUrl(previewUrl);
+    } else {
+      const { previewUrl, lastGpbnCode: newGpbn } = generateOrderProductStickersPreview(stickerItems, orderDate, startCode);
+      setProductStickerPreviewUrl(previewUrl);
+      setLastGpbnCode(newGpbn);
+    }
+
+    setIsGeneratingNewSticker(false);
   };
 
   const handleGenerateLabels = async (order: Order) => {
@@ -2419,10 +2499,10 @@ export default function OnlineOrderPage() {
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                 onScroll={() => syncScroll('header')}
               >
-                <table className="w-full table-auto min-w-[1400px]">
+                <table className="w-full table-fixed min-w-[1400px]">
                   <thead className="bg-white">
                     <tr className="border-b-2" style={{ borderColor: "#5C2E1F" }}>
-                      <th className="text-left py-3 px-2 w-10">
+                      <th className="text-left py-3 px-2 w-[40px]">
                         <input
                           type="checkbox"
                           className="w-4 h-4 cursor-pointer"
@@ -2433,76 +2513,37 @@ export default function OnlineOrderPage() {
                           onChange={(e) => handleSelectAll(e.target.checked)}
                         />
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
-                        ORDER ID
-                      </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
-                        GPBN
-                      </th>
-                      <th
-                        className="text-left py-3 px-3 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[180px]" style={{ color: "#5C2E1F" }}>
                         CUSTOMER NAME
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
                         ORDER DATE
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
                         DELIVERY DATE
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[200px]" style={{ color: "#5C2E1F" }}>
                         DELIVERY ADDRESS
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: "#5C2E1F" }}>
                         AMOUNT ($)
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
                         STATUS
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
                         TRACKING NO
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
                         INVOICE
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[70px]" style={{ color: "#5C2E1F" }}>
                         LABEL
                       </th>
-                      <th
-                        className="text-left py-3 px-2 font-bold text-xs whitespace-nowrap"
-                        style={{ color: "#5C2E1F" }}
-                      >
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: "#5C2E1F" }}>
+                        STICKER
+                      </th>
+                      <th className="text-left py-3 px-2 font-bold text-xs w-[50px]" style={{ color: "#5C2E1F" }}>
                         ACTIONS
                       </th>
                     </tr>
@@ -2531,12 +2572,12 @@ export default function OnlineOrderPage() {
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                 onScroll={() => syncScroll('body')}
               >
-                <table className="w-full table-auto min-w-[1400px]">
+                <table className="w-full table-fixed min-w-[1400px]">
                   <tbody>
                   {loading ? (
                     <tr>
                       <td
-                        colSpan={13}
+                        colSpan={12}
                         className="text-center py-8 text-gray-500"
                       >
                         Loading orders...
@@ -2544,7 +2585,7 @@ export default function OnlineOrderPage() {
                     </tr>
                   ) : error ? (
                     <tr>
-                      <td colSpan={13} className="text-center py-8">
+                      <td colSpan={12} className="text-center py-8">
                         <div className="text-red-500 font-medium">
                           Error loading orders
                         </div>
@@ -2556,7 +2597,7 @@ export default function OnlineOrderPage() {
                   ) : currentOrders.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={13}
+                        colSpan={12}
                         className="text-center py-8 text-gray-500"
                       >
                         {searchQuery
@@ -2570,7 +2611,7 @@ export default function OnlineOrderPage() {
                         <Fragment key={order.id}>
                           {/* Main Order Row */}
                           <tr className="border-b border-gray-200 hover:bg-gray-50">
-                            <td className="py-3 px-2">
+                            <td className="py-3 px-2 w-[40px]">
                               <input
                                 type="checkbox"
                                 className="w-4 h-4 cursor-pointer"
@@ -2580,38 +2621,22 @@ export default function OnlineOrderPage() {
                                 }
                               />
                             </td>
-                            <td className="py-3 px-2 text-xs font-medium whitespace-nowrap">
-                              {order.order_id}
+                            <td className="py-3 px-2 text-xs w-[180px]" title={order.customer_name}>
+                              <div className="truncate">{order.customer_name}</div>
                             </td>
-                            <td className="py-3 px-2 text-xs font-medium whitespace-nowrap text-green-700">
-                              {orderGpbnRanges[order.id]?.itemCount > 0
-                                ? orderGpbnRanges[order.id].start === orderGpbnRanges[order.id].end
-                                  ? `GPBN${orderGpbnRanges[order.id].start}`
-                                  : `GPBN${orderGpbnRanges[order.id].start}-${orderGpbnRanges[order.id].end}`
-                                : '-'}
-                            </td>
-                            <td
-                              className="py-3 px-3 text-xs max-w-37.5 truncate"
-                              title={order.customer_name}
-                            >
-                              {order.customer_name}
-                            </td>
-                            <td className="py-3 px-2 text-xs whitespace-nowrap">
+                            <td className="py-3 px-2 text-xs w-[100px] whitespace-nowrap">
                               {formatDate(order.order_date)}
                             </td>
-                            <td className="py-3 px-2 text-xs whitespace-nowrap">
+                            <td className="py-3 px-2 text-xs w-[100px] whitespace-nowrap">
                               {formatDate(order.delivery_date)}
                             </td>
-                            <td
-                              className="py-3 px-2 text-xs max-w-37.5 truncate"
-                              title={order.delivery_address || ""}
-                            >
-                              {order.delivery_address || "-"}
+                            <td className="py-3 px-2 text-xs w-[200px]" title={order.delivery_address || ""}>
+                              <div className="truncate">{order.delivery_address || "-"}</div>
                             </td>
-                            <td className="py-3 px-2 text-xs font-medium whitespace-nowrap">
+                            <td className="py-3 px-2 text-xs font-medium w-[90px] whitespace-nowrap">
                               ${formatCurrency(order.total_amount)}
                             </td>
-                            <td className="py-3 px-2">
+                            <td className="py-3 px-2 w-[100px]">
                               <select
                                 value={order.status || "pending"}
                                 onChange={(e) =>
@@ -2625,43 +2650,68 @@ export default function OnlineOrderPage() {
                                 <option value="Cancelled">Cancelled</option>
                               </select>
                             </td>
-                            <td className="py-3 px-2 text-xs whitespace-nowrap">
-                              {order.tracking_no || "-"}
+                            <td className="py-3 px-2 text-xs w-[100px]">
+                              <div className="truncate">{order.tracking_no || "-"}</div>
                             </td>
-                            <td className="py-3 px-2">
+                            <td className="py-3 px-2 w-[100px]">
                               {order.invoice_id ? (
                                 <button
                                   onClick={() => handleViewInvoice(order)}
                                   className="text-xs font-normal text-blue-700 hover:underline cursor-pointer transition-all"
                                 >
-                                  View Invoice
+                                  View
                                 </button>
                               ) : (
-                                <span className="text-xs font-normal text-gray-700">
-                                  Not Generated
+                                <span className="text-xs font-normal text-gray-500">
+                                  -
                                 </span>
                               )}
                             </td>
-                            <td className="py-3 px-2">
-                              <div className="flex gap-1">
+                            <td className="py-3 px-2 w-[70px]">
+                              <button
+                                onClick={() => handleGenerateLabels(order)}
+                                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                                title="Generate Product Labels"
+                              >
+                                Labels
+                              </button>
+                            </td>
+                            <td className="py-3 px-2 w-[90px] relative">
+                              <div className="relative inline-block">
                                 <button
-                                  onClick={() => handleGenerateLabels(order)}
-                                  className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                                  title="Generate Product Labels"
-                                >
-                                  Labels
-                                </button>
-                                <button
-                                  onClick={() => handleOpenNewStickerModal(order.id)}
+                                  onClick={() => setShowStickerDropdown(showStickerDropdown === order.id ? null : order.id)}
                                   className="flex items-center gap-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                                  title="View Sticker"
+                                  title="Sticker Options"
                                 >
                                   <Tag size={12} />
                                   Sticker
+                                  <ChevronDown size={12} />
                                 </button>
+                                {showStickerDropdown === order.id && (
+                                  <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[140px]">
+                                    <button
+                                      onClick={() => {
+                                        handleOpenNewStickerModal(order.id, "barcode");
+                                        setShowStickerDropdown(null);
+                                      }}
+                                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
+                                    >
+                                      Barcode Sticker
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        handleOpenNewStickerModal(order.id, "product");
+                                        setShowStickerDropdown(null);
+                                      }}
+                                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
+                                    >
+                                      Product Sticker
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </td>
-                            <td className="py-3 px-2">
+                            <td className="py-3 px-2 w-[50px]">
                               <button
                                 onClick={() => handleRowExpand(order)}
                                 className="text-gray-600 hover:text-gray-900 transition-colors p-1"
@@ -2811,7 +2861,7 @@ export default function OnlineOrderPage() {
                             <tr className="bg-white border-b border-gray-200">
                               <td className="py-2 px-2"></td>
                               <td
-                                colSpan={12}
+                                colSpan={11}
                                 className="text-center py-4 text-gray-500 text-xs border-l border-gray-400"
                               >
                                 Loading order items...
@@ -2824,7 +2874,7 @@ export default function OnlineOrderPage() {
                             <tr className="bg-blue-50 border-b border-gray-200">
                               <td className="py-3 px-2"></td>
                               <td
-                                colSpan={12}
+                                colSpan={11}
                                 className="py-3 px-2 border-l border-gray-400"
                               >
                                 <div className="flex items-start gap-2">
