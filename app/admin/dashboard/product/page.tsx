@@ -21,7 +21,16 @@ import {
   generate30DigitBarcode,
   generateStickerBlobUrl,
   downloadStickerPDF,
+  generate13DigitBarcode,
+  generateNextGpbnCode,
+  calculateBBD,
+  generateBarcodeStickerBlobUrl,
+  generateProductStickerBlobUrl,
+  downloadBarcodeStickerPDF,
+  downloadProductStickerPDF,
   type StickerData,
+  type BarcodeStickerData,
+  type ProductStickerData,
 } from "@/lib/stickerGenerator";
 
 declare global {
@@ -69,6 +78,9 @@ interface Product {
   sticker_bbd_code: string | null;
   sticker_pbn_code: string | null;
   sticker_barcode: string | null;
+  // New sticker fields
+  barcode_13digit: string | null;
+  sticker_gpbn_code: string | null;
 }
 
 interface Message {
@@ -130,6 +142,14 @@ export default function ProductPage() {
   const [editableBbdCode, setEditableBbdCode] = useState<string>("");
   const [editablePbnCode, setEditablePbnCode] = useState<string>("");
   const [editableBarcode, setEditableBarcode] = useState<string>("");
+
+  // New sticker types state
+  const [stickerType, setStickerType] = useState<"barcode" | "product">("barcode");
+  const [barcode13Digit, setBarcode13Digit] = useState<string>("");
+  const [gpbnCode, setGpbnCode] = useState<string>("");
+  const [bbdDate, setBbdDate] = useState<string>("");
+  const [barcodeStickerPreviewUrl, setBarcodeStickerPreviewUrl] = useState<string>("");
+  const [productStickerPreviewUrl, setProductStickerPreviewUrl] = useState<string>("");
 
   const [formData, setFormData] = useState({
     product_id: "",
@@ -262,6 +282,7 @@ export default function ProductPage() {
     setIsGeneratingSticker(true);
     setStickerProduct(product);
     setIsStickerModalOpen(true);
+    setStickerType("barcode"); // Default to barcode sticker
 
     try {
       // Check if product has sticker codes, if not generate them
@@ -269,8 +290,12 @@ export default function ProductPage() {
       let pbnCode = product.sticker_pbn_code;
       let barcode = product.sticker_barcode;
 
+      // New sticker codes
+      let barcode13 = product.barcode_13digit;
+      let gpbn = product.sticker_gpbn_code;
+
+      // Generate old sticker codes if needed
       if (!bbdCode || !pbnCode || !barcode) {
-        // Get the last codes from database to generate new ones
         const { data: lastProduct } = await supabase
           .from('product_list')
           .select('sticker_bbd_code, sticker_pbn_code')
@@ -288,35 +313,72 @@ export default function ProductPage() {
         if (!barcode) {
           barcode = generate30DigitBarcode(bbdCode, pbnCode);
         }
-
-        // Save the generated codes to the database
-        await supabase
-          .from('product_list')
-          .update({
-            sticker_bbd_code: bbdCode,
-            sticker_pbn_code: pbnCode,
-            sticker_barcode: barcode
-          })
-          .eq('id', product.id);
-
-        // Update local state
-        setProducts(prev => prev.map(p =>
-          p.id === product.id
-            ? { ...p, sticker_bbd_code: bbdCode, sticker_pbn_code: pbnCode, sticker_barcode: barcode }
-            : p
-        ));
-
-        // Update the product reference
-        product = { ...product, sticker_bbd_code: bbdCode, sticker_pbn_code: pbnCode, sticker_barcode: barcode };
-        setStickerProduct(product);
       }
 
-      // Set editable codes
+      // Generate new sticker codes if needed
+      if (!barcode13) {
+        const { data: lastBarcode } = await supabase
+          .from('product_list')
+          .select('barcode_13digit')
+          .not('barcode_13digit', 'is', null)
+          .order('id', { ascending: false })
+          .limit(1)
+          .single();
+
+        barcode13 = generate13DigitBarcode(lastBarcode?.barcode_13digit || null);
+      }
+
+      if (!gpbn) {
+        const { data: lastGpbn } = await supabase
+          .from('product_list')
+          .select('sticker_gpbn_code')
+          .not('sticker_gpbn_code', 'is', null)
+          .order('id', { ascending: false })
+          .limit(1)
+          .single();
+
+        gpbn = generateNextGpbnCode(lastGpbn?.sticker_gpbn_code || null);
+      }
+
+      // Save all generated codes to the database
+      const updateData: Record<string, string | null> = {
+        sticker_bbd_code: bbdCode,
+        sticker_pbn_code: pbnCode,
+        sticker_barcode: barcode,
+        barcode_13digit: barcode13,
+        sticker_gpbn_code: gpbn,
+      };
+
+      await supabase
+        .from('product_list')
+        .update(updateData)
+        .eq('id', product.id);
+
+      // Update local state
+      setProducts(prev => prev.map(p =>
+        p.id === product.id
+          ? { ...p, ...updateData }
+          : p
+      ));
+
+      // Update the product reference
+      product = { ...product, ...updateData } as Product;
+      setStickerProduct(product);
+
+      // Set editable codes (old sticker)
       setEditableBbdCode(bbdCode!);
       setEditablePbnCode(pbnCode!);
       setEditableBarcode(barcode!);
 
-      // Generate preview
+      // Set new sticker codes
+      setBarcode13Digit(barcode13!);
+      setGpbnCode(gpbn!);
+
+      // Calculate BBD based on shelf life
+      const bbdDateValue = calculateBBD(product.product_shelflife || '3 months');
+      setBbdDate(bbdDateValue);
+
+      // Generate preview for old sticker
       const stickerData: StickerData = {
         productName: product.product_name,
         ingredients: product.product_ingredient || 'No ingredients listed',
@@ -324,9 +386,27 @@ export default function ProductPage() {
         pbnCode: pbnCode!,
         barcode: barcode!
       };
-
       const previewUrl = generateStickerBlobUrl(stickerData);
       setStickerPreviewUrl(previewUrl);
+
+      // Generate Barcode Sticker preview
+      const barcodeStickerData: BarcodeStickerData = {
+        productName: product.product_name,
+        barcode13: barcode13!
+      };
+      const barcodePreview = generateBarcodeStickerBlobUrl(barcodeStickerData);
+      setBarcodeStickerPreviewUrl(barcodePreview);
+
+      // Generate Product Sticker preview
+      const productStickerData: ProductStickerData = {
+        productName: product.product_name,
+        ingredients: product.product_ingredient || 'No ingredients listed',
+        bbd: bbdDateValue,
+        gpbnCode: gpbn!
+      };
+      const productPreview = generateProductStickerBlobUrl(productStickerData);
+      setProductStickerPreviewUrl(productPreview);
+
     } catch (error) {
       console.error('Error generating sticker preview:', error);
     } finally {
@@ -355,6 +435,42 @@ export default function ProductPage() {
     setStickerPreviewUrl(previewUrl);
   };
 
+  // Regenerate Barcode Sticker preview
+  const regenerateBarcodeStickerPreview = () => {
+    if (!stickerProduct) return;
+
+    if (barcodeStickerPreviewUrl) {
+      URL.revokeObjectURL(barcodeStickerPreviewUrl);
+    }
+
+    const data: BarcodeStickerData = {
+      productName: stickerProduct.product_name,
+      barcode13: barcode13Digit
+    };
+
+    const previewUrl = generateBarcodeStickerBlobUrl(data);
+    setBarcodeStickerPreviewUrl(previewUrl);
+  };
+
+  // Regenerate Product Sticker preview
+  const regenerateProductStickerPreview = () => {
+    if (!stickerProduct) return;
+
+    if (productStickerPreviewUrl) {
+      URL.revokeObjectURL(productStickerPreviewUrl);
+    }
+
+    const data: ProductStickerData = {
+      productName: stickerProduct.product_name,
+      ingredients: stickerProduct.product_ingredient || 'No ingredients listed',
+      bbd: bbdDate,
+      gpbnCode: gpbnCode
+    };
+
+    const previewUrl = generateProductStickerBlobUrl(data);
+    setProductStickerPreviewUrl(previewUrl);
+  };
+
   // Generate new barcode
   const handleGenerateNewBarcode = () => {
     const newBarcode = generate30DigitBarcode(editableBbdCode, editablePbnCode);
@@ -366,23 +482,27 @@ export default function ProductPage() {
     if (!stickerProduct) return;
 
     try {
+      const updateData: Record<string, string | null> = {
+        sticker_bbd_code: editableBbdCode,
+        sticker_pbn_code: editablePbnCode,
+        sticker_barcode: editableBarcode,
+        barcode_13digit: barcode13Digit,
+        sticker_gpbn_code: gpbnCode,
+      };
+
       await supabase
         .from('product_list')
-        .update({
-          sticker_bbd_code: editableBbdCode,
-          sticker_pbn_code: editablePbnCode,
-          sticker_barcode: editableBarcode
-        })
+        .update(updateData)
         .eq('id', stickerProduct.id);
 
       // Update local state
       setProducts(prev => prev.map(p =>
         p.id === stickerProduct.id
-          ? { ...p, sticker_bbd_code: editableBbdCode, sticker_pbn_code: editablePbnCode, sticker_barcode: editableBarcode }
+          ? { ...p, ...updateData }
           : p
       ));
 
-      setStickerProduct({ ...stickerProduct, sticker_bbd_code: editableBbdCode, sticker_pbn_code: editablePbnCode, sticker_barcode: editableBarcode });
+      setStickerProduct({ ...stickerProduct, ...updateData } as Product);
     } catch (error) {
       console.error('Error saving sticker codes:', error);
     }
@@ -401,6 +521,32 @@ export default function ProductPage() {
     };
 
     downloadStickerPDF(stickerData, `sticker-${stickerProduct.product_id}.pdf`);
+  };
+
+  // Handle Barcode Sticker download
+  const handleBarcodeStickerDownload = () => {
+    if (!stickerProduct) return;
+
+    const data: BarcodeStickerData = {
+      productName: stickerProduct.product_name,
+      barcode13: barcode13Digit
+    };
+
+    downloadBarcodeStickerPDF(data, `barcode-sticker-${stickerProduct.product_id}.pdf`);
+  };
+
+  // Handle Product Sticker download
+  const handleProductStickerDownload = () => {
+    if (!stickerProduct) return;
+
+    const data: ProductStickerData = {
+      productName: stickerProduct.product_name,
+      ingredients: stickerProduct.product_ingredient || 'No ingredients listed',
+      bbd: bbdDate,
+      gpbnCode: gpbnCode
+    };
+
+    downloadProductStickerPDF(data, `product-sticker-${stickerProduct.product_id}.pdf`);
   };
   const handleSwitchToEdit = () => {
     if (viewProduct) {
@@ -2938,13 +3084,17 @@ export default function ProductPage() {
           style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
           onClick={() => {
             if (stickerPreviewUrl) URL.revokeObjectURL(stickerPreviewUrl);
+            if (barcodeStickerPreviewUrl) URL.revokeObjectURL(barcodeStickerPreviewUrl);
+            if (productStickerPreviewUrl) URL.revokeObjectURL(productStickerPreviewUrl);
             setIsStickerModalOpen(false);
             setStickerProduct(null);
             setStickerPreviewUrl("");
+            setBarcodeStickerPreviewUrl("");
+            setProductStickerPreviewUrl("");
           }}
         >
           <div
-            className="bg-white rounded-lg max-w-xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-lg max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
@@ -2957,9 +3107,13 @@ export default function ProductPage() {
               <button
                 onClick={() => {
                   if (stickerPreviewUrl) URL.revokeObjectURL(stickerPreviewUrl);
+                  if (barcodeStickerPreviewUrl) URL.revokeObjectURL(barcodeStickerPreviewUrl);
+                  if (productStickerPreviewUrl) URL.revokeObjectURL(productStickerPreviewUrl);
                   setIsStickerModalOpen(false);
                   setStickerProduct(null);
                   setStickerPreviewUrl("");
+                  setBarcodeStickerPreviewUrl("");
+                  setProductStickerPreviewUrl("");
                 }}
                 className="p-1 hover:bg-gray-100 rounded-full transition-colors"
               >
@@ -2981,131 +3135,293 @@ export default function ProductPage() {
                     <p className="text-xs text-gray-500 mt-1">
                       Ingredients: {stickerProduct.product_ingredient || 'No ingredients listed'}
                     </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Shelf Life: {stickerProduct.product_shelflife || 'Not specified'}
+                    </p>
                   </div>
                 )}
 
-                {/* Customizable Code Inputs */}
-                <div className="mb-4 grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-1" style={{ color: "#5C2E1F" }}>
-                      BBD Code
-                    </label>
-                    <input
-                      type="text"
-                      value={editableBbdCode}
-                      onChange={(e) => setEditableBbdCode(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                      placeholder="e.g., 30302026"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1" style={{ color: "#5C2E1F" }}>
-                      PBN Code
-                    </label>
-                    <input
-                      type="text"
-                      value={editablePbnCode}
-                      onChange={(e) => setEditablePbnCode(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                      placeholder="e.g., PBN3000"
-                    />
-                  </div>
-                </div>
-
-                {/* Barcode Input */}
+                {/* Sticker Type Selector */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium mb-1" style={{ color: "#5C2E1F" }}>
-                    Barcode (30 digits)
+                  <label className="block text-sm font-medium mb-2" style={{ color: "#5C2E1F" }}>
+                    Sticker Type
                   </label>
                   <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={editableBarcode}
-                      onChange={(e) => setEditableBarcode(e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono text-xs"
-                      placeholder="30-digit barcode"
-                      maxLength={30}
-                    />
                     <button
-                      onClick={handleGenerateNewBarcode}
-                      className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
-                      title="Generate new barcode"
+                      onClick={() => setStickerType("barcode")}
+                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                        stickerType === "barcode"
+                          ? "bg-orange-500 text-white"
+                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      }`}
                     >
-                      Generate
+                      Barcode Sticker
+                    </button>
+                    <button
+                      onClick={() => setStickerType("product")}
+                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                        stickerType === "product"
+                          ? "bg-orange-500 text-white"
+                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      }`}
+                    >
+                      Product Sticker
                     </button>
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {editableBarcode.length}/30 digits
-                  </p>
                 </div>
 
-                {/* Update Preview Button */}
-                <div className="mb-4 flex gap-2">
-                  <button
-                    onClick={regenerateStickerPreview}
-                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
-                    </svg>
-                    Update Preview
-                  </button>
-                  <button
-                    onClick={handleSaveStickerCodes}
-                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Check size={16} />
-                    Save Codes
-                  </button>
-                </div>
+                {/* Barcode Sticker Section */}
+                {stickerType === "barcode" && (
+                  <>
+                    <div className="mb-4 p-4 border border-orange-200 rounded-lg bg-orange-50">
+                      <h3 className="text-sm font-semibold mb-3" style={{ color: "#5C2E1F" }}>
+                        Barcode Sticker Settings
+                      </h3>
+                      <div>
+                        <label className="block text-sm font-medium mb-1" style={{ color: "#5C2E1F" }}>
+                          13-Digit Barcode (starts with 3)
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={barcode13Digit}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '').slice(0, 13);
+                              setBarcode13Digit(val);
+                            }}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                            placeholder="3000000000001"
+                            maxLength={13}
+                          />
+                          <button
+                            onClick={() => {
+                              const newBarcode = generate13DigitBarcode(barcode13Digit);
+                              setBarcode13Digit(newBarcode);
+                            }}
+                            className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                          >
+                            Generate
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {barcode13Digit.length}/13 digits
+                        </p>
+                      </div>
+                    </div>
 
-                {/* Sticker Preview */}
-                <div className="flex justify-center mb-4 p-4 bg-gray-100 rounded-lg">
-                  {stickerPreviewUrl ? (
-                    <embed
-                      src={`${stickerPreviewUrl}#view=FitH&zoom=page-fit`}
-                      type="application/pdf"
-                      className="border border-gray-300 rounded bg-white"
-                      style={{ width: '500px', height: '280px' }}
-                    />
-                  ) : (
-                    <div className="text-gray-500 py-8">Click &quot;Update Preview&quot; to generate sticker</div>
-                  )}
-                </div>
+                    {/* Update Preview Button */}
+                    <div className="mb-4 flex gap-2">
+                      <button
+                        onClick={regenerateBarcodeStickerPreview}
+                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+                        </svg>
+                        Update Preview
+                      </button>
+                      <button
+                        onClick={handleSaveStickerCodes}
+                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Check size={16} />
+                        Save Codes
+                      </button>
+                    </div>
 
-                {/* Size Info */}
-                <p className="text-xs text-gray-500 text-center mb-4">
-                  Sticker size: 3cm x 1.5cm | Margin: 0.2cm
-                </p>
+                    {/* Barcode Sticker Preview */}
+                    <div className="flex justify-center mb-4 p-4 bg-gray-100 rounded-lg">
+                      {barcodeStickerPreviewUrl ? (
+                        <embed
+                          src={`${barcodeStickerPreviewUrl}#view=FitH&zoom=page-fit`}
+                          type="application/pdf"
+                          className="border border-gray-300 rounded bg-white"
+                          style={{ width: '500px', height: '280px' }}
+                        />
+                      ) : (
+                        <div className="text-gray-500 py-8">Click &quot;Update Preview&quot; to generate sticker</div>
+                      )}
+                    </div>
 
-                {/* Action Buttons */}
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleStickerDownload}
-                    className="flex-1 px-4 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
-                    style={{ backgroundColor: "#FF5722" }}
-                    disabled={!editableBbdCode || !editablePbnCode}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="7,10 12,15 17,10" />
-                      <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                    Download PDF
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (stickerPreviewUrl) URL.revokeObjectURL(stickerPreviewUrl);
-                      setIsStickerModalOpen(false);
-                      setStickerProduct(null);
-                      setStickerPreviewUrl("");
-                    }}
-                    className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
-                    style={{ borderColor: "#5C2E1F", color: "#5C2E1F" }}
-                  >
-                    Close
-                  </button>
-                </div>
+                    {/* Size Info */}
+                    <p className="text-xs text-gray-500 text-center mb-4">
+                      Sticker size: 3cm x 1.5cm
+                    </p>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-3">
+                      <button
+                        onClick={handleBarcodeStickerDownload}
+                        className="flex-1 px-4 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                        style={{ backgroundColor: "#FF5722" }}
+                        disabled={!barcode13Digit || barcode13Digit.length !== 13}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7,10 12,15 17,10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        Download Barcode Sticker
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (stickerPreviewUrl) URL.revokeObjectURL(stickerPreviewUrl);
+                          if (barcodeStickerPreviewUrl) URL.revokeObjectURL(barcodeStickerPreviewUrl);
+                          if (productStickerPreviewUrl) URL.revokeObjectURL(productStickerPreviewUrl);
+                          setIsStickerModalOpen(false);
+                          setStickerProduct(null);
+                          setStickerPreviewUrl("");
+                          setBarcodeStickerPreviewUrl("");
+                          setProductStickerPreviewUrl("");
+                        }}
+                        className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                        style={{ borderColor: "#5C2E1F", color: "#5C2E1F" }}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {/* Product Sticker Section */}
+                {stickerType === "product" && (
+                  <>
+                    <div className="mb-4 p-4 border border-orange-200 rounded-lg bg-orange-50">
+                      <h3 className="text-sm font-semibold mb-3" style={{ color: "#5C2E1F" }}>
+                        Product Sticker Settings
+                      </h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-1" style={{ color: "#5C2E1F" }}>
+                            BBD (Best Before Date)
+                          </label>
+                          <input
+                            type="text"
+                            value={bbdDate}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '').slice(0, 8);
+                              setBbdDate(val);
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                            placeholder="DDMMYYYY"
+                            maxLength={8}
+                          />
+                          <p className="text-xs text-gray-400 mt-1">
+                            Format: DDMMYYYY (e.g., 15062026)
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1" style={{ color: "#5C2E1F" }}>
+                            GPBN Code
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={gpbnCode}
+                              onChange={(e) => setGpbnCode(e.target.value)}
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                              placeholder="GPBN3000"
+                            />
+                            <button
+                              onClick={() => {
+                                setGpbnCode(generateNextGpbnCode(gpbnCode));
+                              }}
+                              className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                            >
+                              +1
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">
+                            Starts with 3000
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3">
+                        <button
+                          onClick={() => {
+                            const newBbd = calculateBBD(stickerProduct?.product_shelflife || '3 months');
+                            setBbdDate(newBbd);
+                          }}
+                          className="text-sm text-orange-600 hover:text-orange-700 underline"
+                        >
+                          Recalculate BBD from shelf life
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Update Preview Button */}
+                    <div className="mb-4 flex gap-2">
+                      <button
+                        onClick={regenerateProductStickerPreview}
+                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+                        </svg>
+                        Update Preview
+                      </button>
+                      <button
+                        onClick={handleSaveStickerCodes}
+                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Check size={16} />
+                        Save Codes
+                      </button>
+                    </div>
+
+                    {/* Product Sticker Preview */}
+                    <div className="flex justify-center mb-4 p-4 bg-gray-100 rounded-lg">
+                      {productStickerPreviewUrl ? (
+                        <embed
+                          src={`${productStickerPreviewUrl}#view=FitH&zoom=page-fit`}
+                          type="application/pdf"
+                          className="border border-gray-300 rounded bg-white"
+                          style={{ width: '500px', height: '280px' }}
+                        />
+                      ) : (
+                        <div className="text-gray-500 py-8">Click &quot;Update Preview&quot; to generate sticker</div>
+                      )}
+                    </div>
+
+                    {/* Size Info */}
+                    <p className="text-xs text-gray-500 text-center mb-4">
+                      Sticker size: 3cm x 1.5cm
+                    </p>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-3">
+                      <button
+                        onClick={handleProductStickerDownload}
+                        className="flex-1 px-4 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                        style={{ backgroundColor: "#FF5722" }}
+                        disabled={!bbdDate || !gpbnCode}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7,10 12,15 17,10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        Download Product Sticker
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (stickerPreviewUrl) URL.revokeObjectURL(stickerPreviewUrl);
+                          if (barcodeStickerPreviewUrl) URL.revokeObjectURL(barcodeStickerPreviewUrl);
+                          if (productStickerPreviewUrl) URL.revokeObjectURL(productStickerPreviewUrl);
+                          setIsStickerModalOpen(false);
+                          setStickerProduct(null);
+                          setStickerPreviewUrl("");
+                          setBarcodeStickerPreviewUrl("");
+                          setProductStickerPreviewUrl("");
+                        }}
+                        className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
+                        style={{ borderColor: "#5C2E1F", color: "#5C2E1F" }}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

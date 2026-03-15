@@ -87,6 +87,13 @@ model ProductList {
   product_cost        Float?
   product_modified_at DateTime?
 
+  // Sticker codes
+  sticker_bbd_code    String?   // BBD code for old sticker (e.g., 30302026)
+  sticker_pbn_code    String?   // PBN code for old sticker (e.g., PBN3000)
+  sticker_barcode     String?   // 30-digit barcode for old sticker
+  barcode_13digit     String?   // 13-digit barcode starting with 3
+  sticker_gpbn_code   String?   // GPBN code (e.g., GPBN3000)
+
   // Relations
   clientProducts     ClientProduct[]
   clientOrderItems   ClientOrderItem[]
@@ -314,4 +321,17 @@ model FooterOption {
   is_default  Boolean @default(false)
 
   @@map("footer_options")
+}
+
+// ============================================
+// GPBN COUNTER TABLE
+// Tracks the last used GPBN number for sequential sticker generation
+// ============================================
+
+model GpbnCounter {
+  id               Int      @id @default(1)
+  last_gpbn_number Int      @default(2999)
+  updated_at       DateTime @default(now()) @updatedAt
+
+  @@map("gpbn_counter")
 }

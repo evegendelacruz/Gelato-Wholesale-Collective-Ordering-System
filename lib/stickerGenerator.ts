@@ -94,6 +94,18 @@ export interface StickerData {
   barcode: string;
 }
 
+export interface BarcodeStickerData {
+  productName: string;
+  barcode13: string; // 13-digit barcode starting with 3
+}
+
+export interface ProductStickerData {
+  productName: string;
+  ingredients: string;
+  bbd: string; // BBD date in DDMMYYYY format
+  gpbnCode: string; // GPBN code (e.g., GPBN3000)
+}
+
 /**
  * Generates a 30-digit barcode
  * Format: BBD(8) + PBN number(4) + timestamp(10) + random(8) = 30 digits
@@ -586,4 +598,660 @@ export function printStickerPDF(data: StickerData): void {
   const pdfBlob = doc.output('blob');
   const pdfUrl = URL.createObjectURL(pdfBlob);
   window.open(pdfUrl, '_blank');
+}
+
+// ============================================================================
+// NEW STICKER TYPES: Barcode Sticker & Product Sticker (3cm x 1.5cm)
+// ============================================================================
+
+/**
+ * Generates a 13-digit barcode starting with 3
+ * Format: 3 + 12 random/sequential digits
+ */
+export function generate13DigitBarcode(lastBarcode: string | null): string {
+  if (!lastBarcode) {
+    return '3000000000001';
+  }
+
+  // Extract the numeric part and increment
+  const numPart = parseInt(lastBarcode, 10);
+  const nextNum = numPart + 1;
+
+  // Ensure it still starts with 3 and is 13 digits
+  const nextBarcode = nextNum.toString().padStart(13, '0');
+
+  // If overflow, reset to 3000000000001
+  if (!nextBarcode.startsWith('3') || nextBarcode.length > 13) {
+    return '3000000000001';
+  }
+
+  return nextBarcode;
+}
+
+/**
+ * Generates the next GPBN code
+ * Format: GPBN#### starting from GPBN3000
+ */
+export function generateNextGpbnCode(lastGpbnCode: string | null): string {
+  if (!lastGpbnCode) {
+    return 'GPBN3000';
+  }
+
+  // Extract the number part
+  const numPart = parseInt(lastGpbnCode.replace('GPBN', ''), 10);
+  const nextNum = numPart + 1;
+
+  return `GPBN${nextNum}`;
+}
+
+/**
+ * Calculate BBD (Best Before Date) based on shelf life
+ * @param shelfLife - e.g., "3 months", "6 months", "12 months", "1 year"
+ * @returns BBD in DDMMYYYY format
+ */
+export function calculateBBD(shelfLife: string | null | undefined): string {
+  const today = new Date();
+  let months = 0;
+
+  // Handle null/undefined shelfLife - default to 3 months
+  if (!shelfLife || typeof shelfLife !== 'string') {
+    today.setMonth(today.getMonth() + 3);
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const yyyy = today.getFullYear();
+    return `${dd}${mm}${yyyy}`;
+  }
+
+  // Parse shelf life string
+  const lowerShelfLife = shelfLife.toLowerCase().trim();
+
+  if (lowerShelfLife.includes('year')) {
+    const years = parseInt(lowerShelfLife) || 1;
+    months = years * 12;
+  } else if (lowerShelfLife.includes('month')) {
+    months = parseInt(lowerShelfLife) || 3;
+  } else if (lowerShelfLife.includes('week')) {
+    const weeks = parseInt(lowerShelfLife) || 1;
+    today.setDate(today.getDate() + (weeks * 7));
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const yyyy = today.getFullYear();
+    return `${dd}${mm}${yyyy}`;
+  } else if (lowerShelfLife.includes('day')) {
+    const days = parseInt(lowerShelfLife) || 30;
+    today.setDate(today.getDate() + days);
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const yyyy = today.getFullYear();
+    return `${dd}${mm}${yyyy}`;
+  } else {
+    // Default to 3 months if unrecognized
+    months = parseInt(lowerShelfLife) || 3;
+  }
+
+  // Add months
+  today.setMonth(today.getMonth() + months);
+
+  const dd = String(today.getDate()).padStart(2, '0');
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const yyyy = today.getFullYear();
+
+  return `${dd}${mm}${yyyy}`;
+}
+
+/**
+ * Generate Barcode Sticker PDF (3cm x 1.5cm)
+ * Layout matching Design/Barcode Sticker.png:
+ * - Product Name (bold, top, can wrap to 3 lines)
+ * - Barcode image (middle, taller)
+ * - 13-digit code below barcode (matching barcode value)
+ */
+export function generateBarcodeStickerPDF(data: BarcodeStickerData): jsPDF {
+  const widthMm = 30;  // 3cm
+  const heightMm = 15; // 1.5cm
+  const marginMm = 1.5;
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: [heightMm, widthMm]
+  });
+
+  const contentWidth = widthMm - (marginMm * 2);
+  const contentStartX = marginMm;
+
+  // Product Name at top (bold, center aligned, can wrap to max 3 lines)
+  doc.setFont('helvetica', 'bold');
+  let nameFontSize = 5;
+  doc.setFontSize(nameFontSize);
+
+  // Calculate responsive font size
+  while (nameFontSize > 3 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
+    nameFontSize -= 0.3;
+    doc.setFontSize(nameFontSize);
+  }
+
+  let nameLines = doc.splitTextToSize(data.productName, contentWidth);
+  // Limit to 3 lines as shown in design
+  if (nameLines.length > 3) {
+    nameLines = nameLines.slice(0, 3);
+  }
+
+  const lineHeight = nameFontSize * 0.4;
+  let currentY = marginMm + 1.5;
+
+  // Center align each line
+  nameLines.forEach((line: string) => {
+    const lineWidth = doc.getTextWidth(line);
+    const lineX = contentStartX + (contentWidth - lineWidth) / 2;
+    doc.text(line, lineX, currentY);
+    currentY += lineHeight;
+  });
+
+  // Calculate barcode dimensions - make it taller and narrower
+  const barcodeStartY = currentY + 0.3;
+  const barcodeHeight = 5; // Taller barcode
+  const barcodeWidth = contentWidth * 0.85; // Narrower barcode
+  const barcodeX = contentStartX + (contentWidth - barcodeWidth) / 2; // Centered
+
+  try {
+    // Generate barcode with the exact 13-digit code
+    const barcodeDataUrl = drawBarcodeToCanvas(data.barcode13, 300, 100); // Adjusted ratio for taller barcode
+    if (barcodeDataUrl) {
+      doc.addImage(barcodeDataUrl, 'PNG', barcodeX, barcodeStartY, barcodeWidth, barcodeHeight);
+    }
+  } catch (e) {
+    console.error('Error generating barcode:', e);
+  }
+
+  // 13-digit code below barcode (centered, same value as barcode)
+  const codeY = barcodeStartY + barcodeHeight + 1.2;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(3.5);
+
+  // Format barcode with spaces for readability: 3 01 2 3 4 5 6 7 8 9 0 1
+  const formattedCode = data.barcode13.split('').join(' ');
+  const codeTextWidth = doc.getTextWidth(formattedCode);
+  const codeX = contentStartX + (contentWidth - codeTextWidth) / 2;
+  doc.text(formattedCode, codeX, codeY);
+
+  return doc;
+}
+
+/**
+ * Generate Product Sticker PDF (3cm x 1.5cm)
+ * Layout matching Design/Product Sticker.png:
+ * - Product Name (bold, top, can wrap to 3 lines)
+ * - Ingredients (smaller, justified)
+ * - BBD: DDMMYYYY GBNXXXX or GPBNXXXX (bottom)
+ */
+export function generateProductStickerPDF(data: ProductStickerData): jsPDF {
+  const widthMm = 30;  // 3cm
+  const heightMm = 15; // 1.5cm
+  const marginMm = 1.5;
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: [heightMm, widthMm]
+  });
+
+  const contentWidth = widthMm - (marginMm * 2);
+  const contentStartX = marginMm;
+
+  // Product Name at top (bold, center aligned, can wrap)
+  doc.setFont('helvetica', 'bold');
+  let nameFontSize = 5;
+  doc.setFontSize(nameFontSize);
+
+  // Calculate responsive font size
+  while (nameFontSize > 3 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
+    nameFontSize -= 0.3;
+    doc.setFontSize(nameFontSize);
+  }
+
+  let nameLines = doc.splitTextToSize(data.productName, contentWidth);
+  // Limit to 3 lines
+  if (nameLines.length > 3) {
+    nameLines = nameLines.slice(0, 3);
+  }
+
+  const nameLineHeight = nameFontSize * 0.4;
+  let currentY = marginMm + 1.5;
+
+  // Center align each line
+  nameLines.forEach((line: string) => {
+    const lineWidth = doc.getTextWidth(line);
+    const lineX = contentStartX + (contentWidth - lineWidth) / 2;
+    doc.text(line, lineX, currentY);
+    currentY += nameLineHeight;
+  });
+
+  // BBD and GPBN at bottom
+  const bbdCodeY = heightMm - marginMm - 0.5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(4.5);
+  const bbdText = `BBD: ${data.bbd} ${data.gpbnCode}`;
+  const bbdWidth = doc.getTextWidth(bbdText);
+  const bbdX = contentStartX + (contentWidth - bbdWidth) / 2;
+  doc.text(bbdText, bbdX, bbdCodeY);
+
+  // Ingredients in middle (fill available space)
+  const ingredientsStartY = currentY + 0.8;
+  const ingredientsEndY = bbdCodeY - 1.5;
+  const availableHeight = ingredientsEndY - ingredientsStartY;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(3);
+
+  const ingredientLines = doc.splitTextToSize(data.ingredients, contentWidth);
+  const ingredientLineHeight = 1;
+  const maxLines = Math.floor(availableHeight / ingredientLineHeight);
+  const displayLines = ingredientLines.slice(0, Math.max(1, maxLines));
+
+  let ingredientY = ingredientsStartY;
+  displayLines.forEach((line: string, index: number) => {
+    if (ingredientY + ingredientLineHeight > ingredientsEndY) return;
+
+    // Justify all lines except the last
+    if (index < displayLines.length - 1 && line.trim().length > 0) {
+      const words = line.split(' ').filter((w: string) => w.length > 0);
+      if (words.length > 1) {
+        const totalWordsWidth = words.reduce((sum: number, word: string) => sum + doc.getTextWidth(word), 0);
+        const spaceWidth = (contentWidth - totalWordsWidth) / (words.length - 1);
+        let xPos = contentStartX;
+        words.forEach((word: string, wordIndex: number) => {
+          doc.text(word, xPos, ingredientY);
+          if (wordIndex < words.length - 1) {
+            xPos += doc.getTextWidth(word) + spaceWidth;
+          }
+        });
+      } else {
+        doc.text(line, contentStartX, ingredientY);
+      }
+    } else {
+      doc.text(line, contentStartX, ingredientY);
+    }
+    ingredientY += ingredientLineHeight;
+  });
+
+  return doc;
+}
+
+/**
+ * Generate Barcode Sticker blob URL for preview
+ */
+export function generateBarcodeStickerBlobUrl(data: BarcodeStickerData): string {
+  const doc = generateBarcodeStickerPDF(data);
+  const pdfBlob = doc.output('blob');
+  return URL.createObjectURL(pdfBlob);
+}
+
+/**
+ * Generate Product Sticker blob URL for preview
+ */
+export function generateProductStickerBlobUrl(data: ProductStickerData): string {
+  const doc = generateProductStickerPDF(data);
+  const pdfBlob = doc.output('blob');
+  return URL.createObjectURL(pdfBlob);
+}
+
+/**
+ * Download Barcode Sticker PDF
+ */
+export function downloadBarcodeStickerPDF(data: BarcodeStickerData, filename: string): void {
+  const doc = generateBarcodeStickerPDF(data);
+  doc.save(filename);
+}
+
+/**
+ * Download Product Sticker PDF
+ */
+export function downloadProductStickerPDF(data: ProductStickerData, filename: string): void {
+  const doc = generateProductStickerPDF(data);
+  doc.save(filename);
+}
+
+// ============================================================================
+// ORDER STICKER GENERATION FUNCTIONS
+// For generating barcode and product stickers for orders
+// ============================================================================
+
+export interface OrderItemForSticker {
+  productName: string;
+  ingredients: string;
+  quantity: number;
+  barcode13: string; // From product_list.barcode_13digit
+  shelfLife: string; // From product_list.product_shelflife
+}
+
+/**
+ * Calculate BBD from a specific order date + shelf life
+ * @param orderDate - The date the order was placed (string in YYYY-MM-DD or Date object)
+ * @param shelfLife - e.g., "3 months", "6 months", "12 months", "1 year"
+ * @returns BBD in DDMMYYYY format
+ */
+export function calculateBBDFromOrderDate(orderDate: string | Date, shelfLife: string | null | undefined): string {
+  let date: Date;
+
+  if (typeof orderDate === 'string') {
+    date = new Date(orderDate);
+  } else {
+    date = new Date(orderDate);
+  }
+
+  // If invalid date, use today
+  if (isNaN(date.getTime())) {
+    date = new Date();
+  }
+
+  // Handle null/undefined shelfLife - default to 3 months
+  if (!shelfLife || typeof shelfLife !== 'string') {
+    date.setMonth(date.getMonth() + 3);
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    return `${dd}${mm}${yyyy}`;
+  }
+
+  const lowerShelfLife = shelfLife.toLowerCase().trim();
+  let months = 0;
+
+  if (lowerShelfLife.includes('year')) {
+    const years = parseInt(lowerShelfLife) || 1;
+    months = years * 12;
+  } else if (lowerShelfLife.includes('month')) {
+    months = parseInt(lowerShelfLife) || 3;
+  } else if (lowerShelfLife.includes('week')) {
+    const weeks = parseInt(lowerShelfLife) || 1;
+    date.setDate(date.getDate() + (weeks * 7));
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    return `${dd}${mm}${yyyy}`;
+  } else if (lowerShelfLife.includes('day')) {
+    const days = parseInt(lowerShelfLife) || 30;
+    date.setDate(date.getDate() + days);
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    return `${dd}${mm}${yyyy}`;
+  } else {
+    months = parseInt(lowerShelfLife) || 3;
+  }
+
+  date.setMonth(date.getMonth() + months);
+
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = date.getFullYear();
+
+  return `${dd}${mm}${yyyy}`;
+}
+
+/**
+ * Generate all Barcode Stickers for an order (compiled PDF)
+ * Each item generates quantity stickers, all with the same barcode
+ */
+export function generateOrderBarcodeStickers(items: OrderItemForSticker[]): jsPDF {
+  const widthMm = 30;
+  const heightMm = 15;
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: [heightMm, widthMm]
+  });
+
+  let isFirstPage = true;
+
+  for (const item of items) {
+    for (let i = 0; i < item.quantity; i++) {
+      if (!isFirstPage) {
+        doc.addPage([heightMm, widthMm], 'landscape');
+      }
+      isFirstPage = false;
+
+      const data: BarcodeStickerData = {
+        productName: item.productName,
+        barcode13: item.barcode13
+      };
+
+      drawBarcodeStickerContent(doc, data, widthMm, heightMm);
+    }
+  }
+
+  return doc;
+}
+
+/**
+ * Generate all Product Stickers for an order (compiled PDF)
+ * Each item generates quantity stickers with incrementing GPBN codes
+ */
+export function generateOrderProductStickers(
+  items: OrderItemForSticker[],
+  orderDate: string | Date,
+  startGpbnCode: string | null = null
+): { doc: jsPDF; lastGpbnCode: string } {
+  const widthMm = 30;
+  const heightMm = 15;
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: [heightMm, widthMm]
+  });
+
+  let currentGpbnCode = startGpbnCode;
+  let isFirstPage = true;
+
+  for (const item of items) {
+    // Calculate BBD based on order date and shelf life
+    const bbd = calculateBBDFromOrderDate(orderDate, item.shelfLife);
+
+    for (let i = 0; i < item.quantity; i++) {
+      if (!isFirstPage) {
+        doc.addPage([heightMm, widthMm], 'landscape');
+      }
+      isFirstPage = false;
+
+      // Generate next GPBN code
+      currentGpbnCode = generateNextGpbnCode(currentGpbnCode);
+
+      const data: ProductStickerData = {
+        productName: item.productName,
+        ingredients: item.ingredients || 'No ingredients listed',
+        bbd: bbd,
+        gpbnCode: currentGpbnCode
+      };
+
+      drawProductStickerContent(doc, data, widthMm, heightMm);
+    }
+  }
+
+  return { doc, lastGpbnCode: currentGpbnCode || 'GPBN3000' };
+}
+
+/**
+ * Helper function to draw barcode sticker content on a page
+ */
+function drawBarcodeStickerContent(doc: jsPDF, data: BarcodeStickerData, widthMm: number, heightMm: number): void {
+  const marginMm = 1.5;
+  const contentWidth = widthMm - (marginMm * 2);
+  const contentStartX = marginMm;
+
+  // Product Name at top (bold, center aligned, can wrap to max 3 lines)
+  doc.setFont('helvetica', 'bold');
+  let nameFontSize = 5;
+  doc.setFontSize(nameFontSize);
+
+  while (nameFontSize > 3 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
+    nameFontSize -= 0.3;
+    doc.setFontSize(nameFontSize);
+  }
+
+  let nameLines = doc.splitTextToSize(data.productName, contentWidth);
+  if (nameLines.length > 3) {
+    nameLines = nameLines.slice(0, 3);
+  }
+
+  const lineHeight = nameFontSize * 0.4;
+  let currentY = marginMm + 1.5;
+
+  nameLines.forEach((line: string) => {
+    const lineWidth = doc.getTextWidth(line);
+    const lineX = contentStartX + (contentWidth - lineWidth) / 2;
+    doc.text(line, lineX, currentY);
+    currentY += lineHeight;
+  });
+
+  // Barcode
+  const barcodeStartY = currentY + 0.3;
+  const barcodeHeight = 5;
+  const barcodeWidth = contentWidth * 0.85;
+  const barcodeX = contentStartX + (contentWidth - barcodeWidth) / 2;
+
+  try {
+    const barcodeDataUrl = drawBarcodeToCanvas(data.barcode13, 300, 100);
+    if (barcodeDataUrl) {
+      doc.addImage(barcodeDataUrl, 'PNG', barcodeX, barcodeStartY, barcodeWidth, barcodeHeight);
+    }
+  } catch (e) {
+    console.error('Error generating barcode:', e);
+  }
+
+  // Code below barcode
+  const codeY = barcodeStartY + barcodeHeight + 1.2;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(3.5);
+
+  const formattedCode = data.barcode13.split('').join(' ');
+  const codeTextWidth = doc.getTextWidth(formattedCode);
+  const codeX = contentStartX + (contentWidth - codeTextWidth) / 2;
+  doc.text(formattedCode, codeX, codeY);
+}
+
+/**
+ * Helper function to draw product sticker content on a page
+ */
+function drawProductStickerContent(doc: jsPDF, data: ProductStickerData, widthMm: number, heightMm: number): void {
+  const marginMm = 1.5;
+  const contentWidth = widthMm - (marginMm * 2);
+  const contentStartX = marginMm;
+
+  // Product Name at top (bold, center aligned, can wrap)
+  doc.setFont('helvetica', 'bold');
+  let nameFontSize = 5;
+  doc.setFontSize(nameFontSize);
+
+  while (nameFontSize > 3 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
+    nameFontSize -= 0.3;
+    doc.setFontSize(nameFontSize);
+  }
+
+  let nameLines = doc.splitTextToSize(data.productName, contentWidth);
+  if (nameLines.length > 3) {
+    nameLines = nameLines.slice(0, 3);
+  }
+
+  const nameLineHeight = nameFontSize * 0.4;
+  let currentY = marginMm + 1.5;
+
+  nameLines.forEach((line: string) => {
+    const lineWidth = doc.getTextWidth(line);
+    const lineX = contentStartX + (contentWidth - lineWidth) / 2;
+    doc.text(line, lineX, currentY);
+    currentY += nameLineHeight;
+  });
+
+  // BBD and GPBN at bottom
+  const bbdCodeY = heightMm - marginMm - 0.5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(4.5);
+  const bbdText = `BBD: ${data.bbd} ${data.gpbnCode}`;
+  const bbdWidth = doc.getTextWidth(bbdText);
+  const bbdX = contentStartX + (contentWidth - bbdWidth) / 2;
+  doc.text(bbdText, bbdX, bbdCodeY);
+
+  // Ingredients in middle
+  const ingredientsStartY = currentY + 0.8;
+  const ingredientsEndY = bbdCodeY - 1.5;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(3);
+
+  const ingredientLines = doc.splitTextToSize(data.ingredients, contentWidth);
+  const ingredientLineHeight = 1;
+  const availableHeight = ingredientsEndY - ingredientsStartY;
+  const maxLines = Math.floor(availableHeight / ingredientLineHeight);
+  const displayLines = ingredientLines.slice(0, Math.max(1, maxLines));
+
+  let ingredientY = ingredientsStartY;
+  displayLines.forEach((line: string, index: number) => {
+    if (ingredientY + ingredientLineHeight > ingredientsEndY) return;
+
+    if (index < displayLines.length - 1 && line.trim().length > 0) {
+      const words = line.split(' ').filter((w: string) => w.length > 0);
+      if (words.length > 1) {
+        const totalWordsWidth = words.reduce((sum: number, word: string) => sum + doc.getTextWidth(word), 0);
+        const spaceWidth = (contentWidth - totalWordsWidth) / (words.length - 1);
+        let xPos = contentStartX;
+        words.forEach((word: string, wordIndex: number) => {
+          doc.text(word, xPos, ingredientY);
+          if (wordIndex < words.length - 1) {
+            xPos += doc.getTextWidth(word) + spaceWidth;
+          }
+        });
+      } else {
+        doc.text(line, contentStartX, ingredientY);
+      }
+    } else {
+      doc.text(line, contentStartX, ingredientY);
+    }
+    ingredientY += ingredientLineHeight;
+  });
+}
+
+/**
+ * Download all Barcode Stickers for an order
+ */
+export function downloadOrderBarcodeStickers(items: OrderItemForSticker[], filename: string): void {
+  const doc = generateOrderBarcodeStickers(items);
+  doc.save(filename);
+}
+
+/**
+ * Download all Product Stickers for an order
+ */
+export function downloadOrderProductStickers(
+  items: OrderItemForSticker[],
+  orderDate: string | Date,
+  filename: string,
+  startGpbnCode: string | null = null
+): string {
+  const { doc, lastGpbnCode } = generateOrderProductStickers(items, orderDate, startGpbnCode);
+  doc.save(filename);
+  return lastGpbnCode;
+}
+
+/**
+ * Generate blob URL for order barcode stickers preview
+ */
+export function generateOrderBarcodeStickersPreview(items: OrderItemForSticker[]): string {
+  const doc = generateOrderBarcodeStickers(items);
+  const pdfBlob = doc.output('blob');
+  return URL.createObjectURL(pdfBlob);
+}
+
+/**
+ * Generate blob URL for order product stickers preview
+ */
+export function generateOrderProductStickersPreview(
+  items: OrderItemForSticker[],
+  orderDate: string | Date,
+  startGpbnCode: string | null = null
+): { previewUrl: string; lastGpbnCode: string } {
+  const { doc, lastGpbnCode } = generateOrderProductStickers(items, orderDate, startGpbnCode);
+  const pdfBlob = doc.output('blob');
+  return { previewUrl: URL.createObjectURL(pdfBlob), lastGpbnCode };
 }
