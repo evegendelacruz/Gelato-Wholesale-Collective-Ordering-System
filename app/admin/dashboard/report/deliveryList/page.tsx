@@ -7,6 +7,11 @@ import Header from '@/app/components/header/page';
 import supabase from "@/lib/client";
 
 
+interface OrderItem {
+  product_type: string;
+  quantity: number;
+}
+
 interface DeliveryDateData {
   delivery_date: string;
   total_orders: number;
@@ -15,6 +20,7 @@ interface DeliveryDateData {
     address: string;
     invoice: string;
     order_type?: 'client' | 'customer';
+    items?: OrderItem[];
   }>;
 }
 
@@ -148,11 +154,17 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         invoice_id,
         client_auth_id,
         client_user!client_order_client_auth_id_fkey(
-          client_businessName, 
+          client_businessName,
           client_delivery_address,
           ad_streetName,
           ad_country,
           ad_postal
+        ),
+        client_order_item(
+          quantity,
+          product_list(
+            product_type
+          )
         )
       `)
       .eq('delivery_date', deliveryDate)
@@ -166,7 +178,17 @@ const generateAndSaveReport = async (deliveryDate: string) => {
     // **NEW: Fetch customer orders**
     const { data: customerOrders, error: customerOrdersError } = await supabase
       .from('customer_order')
-      .select('id, delivery_date, invoice_id, customer_name, delivery_address')
+      .select(`
+        id,
+        delivery_date,
+        invoice_id,
+        customer_name,
+        delivery_address,
+        customer_order_item(
+          product_type,
+          quantity
+        )
+      `)
       .eq('delivery_date', deliveryDate)
       .order('customer_name', { ascending: true });
 
@@ -230,35 +252,53 @@ const generateAndSaveReport = async (deliveryDate: string) => {
     }
 
     const clientOrdersList = validClientOrders.map((order) => {
-      const clientData = Array.isArray(order.client_user) 
+      const clientData = Array.isArray(order.client_user)
         ? order.client_user[0]
         : order.client_user;
-      
+
       const addressParts = [
         clientData?.ad_streetName,
         clientData?.ad_country,
         clientData?.ad_postal
       ].filter(Boolean);
-      
-      const combinedAddress = addressParts.length > 0 
-        ? addressParts.join(', ') 
+
+      const combinedAddress = addressParts.length > 0
+        ? addressParts.join(', ')
         : clientData?.client_delivery_address || 'N/A';
-      
+
+      // Extract order items with product type from product_list
+      const orderItems: OrderItem[] = Array.isArray(order.client_order_item)
+        ? order.client_order_item.map((item: { quantity: number; product_list: { product_type: string } | null }) => ({
+            product_type: item.product_list?.product_type || 'Unknown',
+            quantity: item.quantity
+          }))
+        : [];
+
       return {
         company: clientData?.client_businessName || 'N/A',
         address: combinedAddress,
         invoice: order.invoice_id,
-        order_type: 'client' as const // **FIX: Use 'as const' for literal type**
+        order_type: 'client' as const,
+        items: orderItems
       };
     });
 
     // **NEW: Transform customer orders with proper typing**
     const customerOrdersList = validCustomerOrders.map((order) => {
+      // Extract order items with product type
+      const orderItems: OrderItem[] = Array.isArray(order.customer_order_item)
+        ? order.customer_order_item.map((item: { product_type: string | null; quantity: number }) => ({
+            product_type: item.product_type || 'Unknown',
+            quantity: item.quantity
+          }))
+        : [];
+
       return {
         company: order.customer_name || 'N/A',
         address: order.delivery_address || 'N/A',
         invoice: order.invoice_id,
-        order_type: 'customer' as const // **FIX: Use 'as const' for literal type**
+        order_type: 'customer' as const,
+        items: orderItems
       };
     });
 
@@ -576,13 +616,18 @@ const generateAndSaveReport = async (deliveryDate: string) => {
 
     // Add data rows
     dateData.orders.forEach((order, index) => {
+      // Format items as "Qty x ProductType" on separate lines
+      const itemsText = order.items && order.items.length > 0
+        ? order.items.map(item => `${item.quantity}x ${item.product_type}`).join('\n')
+        : '';
+
       const row = worksheet.addRow({
         no: index + 1,
         company: order.company,
         address: order.address,
         operatingHours: '',
         invoice: order.invoice,
-        items: '',
+        items: itemsText,
         remarks: '',
         temp: '',
         route: ''
@@ -1077,8 +1122,12 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                                     <td className="border border-black text-center px-2 py-2" style={{ fontSize: '9px' }}>
                                     {order.invoice}
                                     </td>
-                                    <td className="border border-black text-center px-2 py-2" style={{ fontSize: '9px' }}>
-                                    {/* Empty for manual entry */}
+                                    <td className="border border-black text-left px-2 py-2" style={{ fontSize: '8px' }}>
+                                    {order.items && order.items.length > 0
+                                      ? order.items.map((item, idx) => (
+                                          <div key={idx}>{item.quantity}x {item.product_type}</div>
+                                        ))
+                                      : '-'}
                                     </td>
                                     <td className="border border-black text-center px-2 py-2" style={{ fontSize: '9px' }}>
                                     {/* Empty for manual entry */}

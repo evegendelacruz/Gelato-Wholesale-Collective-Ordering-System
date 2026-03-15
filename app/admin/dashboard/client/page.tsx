@@ -391,12 +391,11 @@ const handleSaveProductChanges = async () => {
 
     if (clientProductError) throw clientProductError;
 
+    // All assigned products are now considered published (simplified flow)
     const assignedProductIds = new Set(clientProductsData?.map(item => item.product_id) || []);
-    const publishedProductIds = new Set(
-      clientProductsData?.filter(item => item.is_published).map(item => item.product_id) || []
-    );
-    
-    setPublishedProducts(publishedProductIds);
+
+    // Set all assigned products as published
+    setPublishedProducts(assignedProductIds);
 
     // Create a map of product_id to custom_price
     const customPriceMap = new Map(
@@ -411,46 +410,45 @@ const handleSaveProductChanges = async () => {
 
     if (productsError) throw productsError;
 
-    // Separate into assigned (not published), published, and other products
-    const assignedNotPublished: Product[] = [];
-    const publishedProductsList: Product[] = [];
+    // Separate into assigned (client's products) and other products
+    const clientsProducts: Product[] = [];
     const otherProducts: Product[] = [];
 
     allProducts?.forEach(product => {
-      if (publishedProductIds.has(product.id)) {
-        publishedProductsList.push(product);
-      } else if (assignedProductIds.has(product.id)) {
-        assignedNotPublished.push(product);
+      if (assignedProductIds.has(product.id)) {
+        clientsProducts.push(product);
       } else {
         otherProducts.push(product);
       }
     });
 
-    setAvailableProducts([...assignedNotPublished, ...publishedProductsList, ...otherProducts]);
-    
-    setAssignedProductCount(assignedNotPublished.length);
-    setPublishedProductCount(publishedProductsList.length);
-    
+    // Client's products first, then other available products
+    setAvailableProducts([...clientsProducts, ...otherProducts]);
+
+    // No more "assigned but not published" - set to 0
+    setAssignedProductCount(0);
+    setPublishedProductCount(clientsProducts.length);
+
     // Initialize editing prices with existing custom prices
     const initialPrices = new Map<string, number>();
     clientProductsData?.forEach(cp => {
       initialPrices.set(cp.product_id.toString(), cp.custom_price);
     });
     setEditingCustomPrices(initialPrices);
-    
-    // Pre-select published products with their custom prices
+
+    // Pre-select all client's products with their custom prices
     const initialSelected = new Map<string, number>();
-    publishedProductsList.forEach(product => {
+    clientsProducts.forEach(product => {
       const customPrice = customPriceMap.get(product.id) || product.product_price;
       initialSelected.set(product.id.toString(), customPrice);
     });
     setSelectedProducts(initialSelected);
-    
+
   } catch (error) {
     console.error('Error fetching products:', error);
-    setMessage({ 
-      type: 'error', 
-      text: error instanceof Error ? error.message : 'Failed to load products' 
+    setMessage({
+      type: 'error',
+      text: error instanceof Error ? error.message : 'Failed to load products'
     });
     setTimeout(() => setMessage({ type: '', text: '' }), 1000);
     throw error;
@@ -528,14 +526,8 @@ const handleCustomPriceChange = (productListId: string, price: string) => {
   setEditingCustomPrices(newEditingPrices);
 };
 
-// Replace the handleAddClientProducts function:
+// Simplified handleAddClientProducts - assignment = publishing immediately
 const handleAddClientProducts = async () => {
-  if (selectedProducts.size === 0) {
-    setMessage({ type: 'error', text: 'No changes to save' });
-    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-    return;
-  }
-
   if (!selectedClientAuthId) {
     setMessage({ type: 'error', text: 'No client selected. Please try again.' });
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
@@ -547,7 +539,7 @@ const handleAddClientProducts = async () => {
 
     const { data: existingProducts, error: checkError } = await supabase
       .from('client_product')
-      .select('product_id, is_published')
+      .select('product_id, custom_price')
       .eq('client_auth_id', selectedClientAuthId);
 
     if (checkError) {
@@ -556,13 +548,11 @@ const handleAddClientProducts = async () => {
     }
 
     const existingProductMap = new Map(
-      existingProducts?.map(p => [p.product_id, p.is_published]) || []
+      existingProducts?.map(p => [p.product_id, p.custom_price]) || []
     );
 
     const productsToInsert = [];
     const productsToUpdate = [];
-    const productsToPublish = [];
-    const productsToUnpublish = [];
     const productsToDelete = [];
 
     // Track which products are currently selected
@@ -570,54 +560,33 @@ const handleAddClientProducts = async () => {
       Array.from(selectedProducts.keys()).map(id => parseInt(id))
     );
 
-    // Process ALL existing products to check for unpublishing/deletion
-    for (const [productId, wasPublished] of existingProductMap.entries()) {
-      const isStillSelected = selectedProductIds.has(productId);
-      
-      if (!isStillSelected) {
-        // Product was unchecked
-        if (wasPublished) {
-          // Unpublish it
-          productsToUnpublish.push(productId);
-        } else {
-          // Delete it (was assigned but never published)
-          productsToDelete.push(productId);
-        }
+    // Find products to delete (existing but no longer selected)
+    for (const [productId] of existingProductMap.entries()) {
+      if (!selectedProductIds.has(productId)) {
+        productsToDelete.push(productId);
       }
     }
 
     // Process selected products
     for (const [productListId, customPrice] of selectedProducts.entries()) {
       const productId = parseInt(productListId);
-      const wasAssigned = existingProductMap.has(productId);
-      
-      if (wasAssigned) {
-        // Product already exists in DB
-        if (publishedProducts.has(productListId)) {
-          // This is a published product that's still selected - keep it published
-          productsToUpdate.push({
-            client_auth_id: selectedClientAuthId,
-            product_id: productId,
-            custom_price: customPrice,
-            is_published: true
-          });
-        } else {
-          // This is an assigned (not published) product that's now checked - publish it
-          productsToPublish.push({
-            client_auth_id: selectedClientAuthId,
-            product_id: productId,
-            custom_price: customPrice,
-            is_published: true
-          });
-        }
+      const existingPrice = existingProductMap.get(productId);
+
+      if (existingPrice !== undefined) {
+        // Product exists - always update to ensure is_published is true
+        productsToUpdate.push({
+          client_auth_id: selectedClientAuthId,
+          product_id: productId,
+          custom_price: customPrice
+        });
       } else {
-        // New product - insert as assigned but not published
+        // New product - insert as published immediately
         productsToInsert.push({
           client_auth_id: selectedClientAuthId,
           product_id: productId,
           custom_price: customPrice,
           is_available: true,
-          is_published: false,
+          is_published: true,
           created_at: new Date().toISOString()
         });
       }
@@ -633,7 +602,7 @@ const handleAddClientProducts = async () => {
 
       if (deleteError) {
         console.error('Delete error:', deleteError);
-        throw new Error('Failed to delete products');
+        throw new Error('Failed to remove products');
       }
     }
 
@@ -649,87 +618,46 @@ const handleAddClientProducts = async () => {
       }
     }
 
-    // Execute updates (keep published)
+    // Execute updates (also ensure is_published is true)
     if (productsToUpdate.length > 0) {
       const updatePromises = productsToUpdate.map(product =>
         supabase
           .from('client_product')
-          .update({ 
-            custom_price: product.custom_price,
-            is_published: true
-          })
+          .update({ custom_price: product.custom_price, is_published: true })
           .eq('client_auth_id', product.client_auth_id)
           .eq('product_id', product.product_id)
       );
 
       const updateResults = await Promise.all(updatePromises);
       const updateError = updateResults.find(result => result.error);
-      
+
       if (updateError) {
         console.error('Update error:', updateError.error);
-        throw new Error('Failed to update product');
+        throw new Error('Failed to update product prices');
       }
     }
 
-    // Execute publish operations
-    if (productsToPublish.length > 0) {
-      const publishPromises = productsToPublish.map(product =>
-        supabase
-          .from('client_product')
-          .update({ 
-            custom_price: product.custom_price,
-            is_published: true
-          })
-          .eq('client_auth_id', product.client_auth_id)
-          .eq('product_id', product.product_id)
-      );
-
-      const publishResults = await Promise.all(publishPromises);
-      const publishError = publishResults.find(result => result.error);
-      
-      if (publishError) {
-        console.error('Publish error:', publishError.error);
-        throw new Error('Failed to publish product');
-      }
-    }
-
-    // Execute unpublish operations
-    if (productsToUnpublish.length > 0) {
-      const unpublishPromises = productsToUnpublish.map(productId =>
-        supabase
-          .from('client_product')
-          .update({ is_published: false })
-          .eq('client_auth_id', selectedClientAuthId)
-          .eq('product_id', productId)
-      );
-
-      const unpublishResults = await Promise.all(unpublishPromises);
-      const unpublishError = unpublishResults.find(result => result.error);
-      
-      if (unpublishError) {
-        console.error('Unpublish error:', unpublishError.error);
-      }
-    }
-
-    let successMessage = '';
+    // Build success message
+    const actions = [];
     if (productsToInsert.length > 0) {
-      successMessage += `${productsToInsert.length} product(s) assigned. `;
-    }
-    if (productsToPublish.length > 0) {
-      successMessage += `${productsToPublish.length} product(s) published. `;
+      actions.push(`${productsToInsert.length} product(s) added`);
     }
     if (productsToUpdate.length > 0) {
-      successMessage += `${productsToUpdate.length} product(s) updated. `;
-    }
-    if (productsToUnpublish.length > 0) {
-      successMessage += `${productsToUnpublish.length} product(s) unpublished. `;
+      actions.push(`${productsToUpdate.length} product(s) updated`);
     }
     if (productsToDelete.length > 0) {
-      successMessage += `${productsToDelete.length} product(s) removed.`;
+      actions.push(`${productsToDelete.length} product(s) removed`);
     }
 
+    const hasChanges = productsToInsert.length > 0 || productsToDelete.length > 0 || productsToUpdate.length > 0;
+    const successMessage = hasChanges
+      ? actions.join(', ') + '!'
+      : 'Products saved successfully!';
+
     setIsClientProductModalOpen(false);
-    setIsClientProductSuccessOpen(true);
+    if (hasChanges) {
+      setIsClientProductSuccessOpen(true);
+    }
     setSelectedProducts(new Map());
     setEditingCustomPrices(new Map());
     setProductSearchQuery('');
@@ -738,16 +666,16 @@ const handleAddClientProducts = async () => {
     setPublishedProductCount(0);
     setPublishedProducts(new Set());
 
-    setMessage({ type: 'success', text: successMessage.trim() || 'Changes saved successfully!' });
-    setTimeout(() => setMessage({ type: '', text: '' }), 1000);
+    setMessage({ type: 'success', text: successMessage });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
 
   } catch (error) {
     console.error('Error managing client products:', error);
-    setMessage({ 
-      type: 'error', 
-      text: error instanceof Error ? error.message : 'Failed to manage products. Please try again.' 
+    setMessage({
+      type: 'error',
+      text: error instanceof Error ? error.message : 'Failed to manage products. Please try again.'
     });
-    setTimeout(() => setMessage({ type: '', text: '' }), 1000);
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
   } finally {
     setLoading(false);
   }
@@ -1943,7 +1871,7 @@ const handleUpdate = async () => {
                     Manage Client Products
                   </h2>
                   <p className="text-gray-500 mt-1">
-                    Select products and set custom prices for this client
+                    Add products with custom prices - they&apos;ll be visible to the client immediately
                   </p>
                 </div>
                 <button 
@@ -1996,97 +1924,20 @@ const handleUpdate = async () => {
                 </div>
               </div>
 
-              {/* Products Assigned to This Client (Not Published) */}
-              {assignedProductCount > 0 && (
-                <>
-                  <div className="mb-3">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                      Products Assigned to This Client ({assignedProductCount})
-                      <span className="ml-2 text-xs text-gray-500">(Not visible to client yet - check to publish)</span>
-                    </h3>
-                    <div className="overflow-x-auto max-h-64 border border-blue-200 rounded-lg bg-blue-50">
-                      <table className="w-full">
-                        <thead className="bg-blue-100 sticky top-0">
-                          <tr className="border-b border-blue-200">
-                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F', width: '50px' }}>
-                              PUBLISH
-                            </th>
-                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                              PRODUCT ID
-                            </th>
-                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                              PRODUCT NAME
-                            </th>
-                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                              TYPE
-                            </th>
-                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                              DEFAULT PRICE
-                            </th>
-                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                              CUSTOM PRICE
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {availableProducts
-                            .slice(0, assignedProductCount)
-                            .filter(product => 
-                              product.product_name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-                              product.product_id.toLowerCase().includes(productSearchQuery.toLowerCase())
-                            )
-                            .map((product) => {
-                              const isChecked = selectedProducts.has(product.id.toString());
-                              return (
-                                <tr key={product.product_id} className="border-b border-blue-200 hover:bg-blue-100 bg-white">
-                                  <td className="py-3 px-4">
-                                    <input 
-                                      type="checkbox" 
-                                      className="w-4 h-4 cursor-pointer"
-                                      checked={isChecked}
-                                      onChange={(e) => handleProductSelection(product.id, e.target.checked, product.product_price)}
-                                    />
-                                  </td>
-                                  <td className="py-3 px-4 text-sm">{product.product_id}</td>
-                                  <td className="py-3 px-4 text-sm">{product.product_name}</td>
-                                  <td className="py-3 px-4 text-sm">{product.product_type}</td>
-                                  <td className="py-3 px-4 text-sm">S$ {product.product_price.toFixed(2)}</td>
-                                  <td className="py-3 px-4">
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      min="0"
-                                      value={selectedProducts.get(product.id.toString()) || editingCustomPrices.get(product.id.toString()) || ''}
-                                      onChange={(e) => handleCustomPriceChange(product.id.toString(), e.target.value)}
-                                      placeholder="0.00"
-                                      className="w-32 px-3 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
-                                    />
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                  <div className="my-4 border-t-2 border-gray-300"></div>
-                </>
-              )}
-
-              {/* Products Published to This Client */}
+              {/* Client's Products (Assigned & Published) */}
               {publishedProductCount > 0 && (
                 <>
                   <div className="mb-3">
                     <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                      Products Published to This Client ({publishedProductCount})
-                      <span className="ml-2 text-xs text-green-600">(Visible to client - uncheck to unpublish)</span>
+                      Client&apos;s Products ({publishedProductCount})
+                      <span className="ml-2 text-xs text-green-600">(Visible to client - uncheck to remove)</span>
                     </h3>
                     <div className="overflow-x-auto max-h-64 border border-green-200 rounded-lg bg-green-50">
                       <table className="w-full">
                         <thead className="bg-green-100 sticky top-0">
                           <tr className="border-b border-green-200">
                             <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F', width: '50px' }}>
-                              PUBLISHED
+                              ACTIVE
                             </th>
                             <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
                               PRODUCT ID
@@ -2100,44 +1951,48 @@ const handleUpdate = async () => {
                             <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
                               DEFAULT PRICE
                             </th>
-                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                              CUSTOM PRICE
+                            <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F', minWidth: '180px' }}>
+                              CLIENT PRICE (S$)
                             </th>
                           </tr>
                         </thead>
                         <tbody>
                           {availableProducts
-                            .slice(assignedProductCount, assignedProductCount + publishedProductCount)
-                            .filter(product => 
+                            .slice(0, publishedProductCount)
+                            .filter(product =>
                               product.product_name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
                               product.product_id.toLowerCase().includes(productSearchQuery.toLowerCase())
                             )
                             .map((product) => {
                               const isChecked = selectedProducts.has(product.id.toString());
+                              const currentPrice = selectedProducts.get(product.id.toString()) || editingCustomPrices.get(product.id.toString()) || product.product_price;
                               return (
                                 <tr key={product.product_id} className="border-b border-green-200 hover:bg-green-100 bg-white">
                                   <td className="py-3 px-4">
-                                    <input 
-                                      type="checkbox" 
-                                      className="w-4 h-4 cursor-pointer"
+                                    <input
+                                      type="checkbox"
+                                      className="w-5 h-5 cursor-pointer accent-green-600"
                                       checked={isChecked}
                                       onChange={(e) => handleProductSelection(product.id, e.target.checked, product.product_price)}
                                     />
                                   </td>
                                   <td className="py-3 px-4 text-sm">{product.product_id}</td>
-                                  <td className="py-3 px-4 text-sm">{product.product_name}</td>
+                                  <td className="py-3 px-4 text-sm font-medium">{product.product_name}</td>
                                   <td className="py-3 px-4 text-sm">{product.product_type}</td>
-                                  <td className="py-3 px-4 text-sm">S$ {product.product_price.toFixed(2)}</td>
+                                  <td className="py-3 px-4 text-sm text-gray-500">S$ {product.product_price.toFixed(2)}</td>
                                   <td className="py-3 px-4">
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      min="0"
-                                      value={selectedProducts.get(product.id.toString()) || editingCustomPrices.get(product.id.toString()) || product.product_price}
-                                      onChange={(e) => handleCustomPriceChange(product.id.toString(), e.target.value)}
-                                      placeholder="0.00"
-                                      className="w-32 px-3 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
-                                    />
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-medium">S$</span>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={currentPrice}
+                                        onChange={(e) => handleCustomPriceChange(product.id.toString(), e.target.value)}
+                                        placeholder="0.00"
+                                        className="w-28 px-3 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm font-medium"
+                                      />
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -2150,18 +2005,18 @@ const handleUpdate = async () => {
                 </>
               )}
 
-              {/* Other Available Products */}
+              {/* Available Products to Add */}
               <div className="mb-3">
                 <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                  Other Available Products ({availableProducts.length - assignedProductCount - publishedProductCount})
-                  <span className="ml-2 text-xs text-gray-500">(Check to assign to client)</span>
+                  Available Products ({availableProducts.length - publishedProductCount})
+                  <span className="ml-2 text-xs text-orange-600">(Check to add to client - will be visible immediately)</span>
                 </h3>
-                <div className="overflow-x-auto max-h-64 border border-gray-200 rounded-lg">
+                <div className="overflow-x-auto max-h-72 border border-orange-200 rounded-lg">
                   <table className="w-full">
-                    <thead className="bg-gray-50 sticky top-0">
-                      <tr className="border-b">
+                    <thead className="bg-orange-50 sticky top-0">
+                      <tr className="border-b border-orange-200">
                         <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F', width: '50px' }}>
-                          SELECT
+                          ADD
                         </th>
                         <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
                           PRODUCT ID
@@ -2175,45 +2030,52 @@ const handleUpdate = async () => {
                         <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
                           DEFAULT PRICE
                         </th>
-                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                          CUSTOM PRICE
+                        <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F', minWidth: '180px' }}>
+                          CLIENT PRICE (S$)
                         </th>
                       </tr>
                     </thead>
                     <tbody>
                       {availableProducts
-                        .slice(assignedProductCount + publishedProductCount)
-                        .filter(product => 
+                        .slice(publishedProductCount)
+                        .filter(product =>
                           product.product_name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
                           product.product_id.toLowerCase().includes(productSearchQuery.toLowerCase())
                         )
                         .map((product) => {
                           const isChecked = selectedProducts.has(product.id.toString());
                           return (
-                            <tr key={product.product_id} className="border-b hover:bg-gray-50">
+                            <tr key={product.product_id} className={`border-b border-orange-100 hover:bg-orange-50 ${isChecked ? 'bg-orange-100' : 'bg-white'}`}>
                               <td className="py-3 px-4">
-                                <input 
-                                  type="checkbox" 
-                                  className="w-4 h-4 cursor-pointer"
+                                <input
+                                  type="checkbox"
+                                  className="w-5 h-5 cursor-pointer accent-orange-500"
                                   checked={isChecked}
                                   onChange={(e) => handleProductSelection(product.id, e.target.checked, product.product_price)}
                                 />
                               </td>
                               <td className="py-3 px-4 text-sm">{product.product_id}</td>
-                              <td className="py-3 px-4 text-sm">{product.product_name}</td>
+                              <td className="py-3 px-4 text-sm font-medium">{product.product_name}</td>
                               <td className="py-3 px-4 text-sm">{product.product_type}</td>
-                              <td className="py-3 px-4 text-sm">S$ {product.product_price.toFixed(2)}</td>
+                              <td className="py-3 px-4 text-sm text-gray-500">S$ {product.product_price.toFixed(2)}</td>
                               <td className="py-3 px-4">
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  value={selectedProducts.get(product.id.toString()) || ''}
-                                  onChange={(e) => handleCustomPriceChange(product.id.toString(), e.target.value)}
-                                  disabled={!isChecked}
-                                  placeholder="0.00"
-                                  className="w-32 px-3 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
-                                />
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium">S$</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={selectedProducts.get(product.id.toString()) || ''}
+                                    onChange={(e) => handleCustomPriceChange(product.id.toString(), e.target.value)}
+                                    disabled={!isChecked}
+                                    placeholder={product.product_price.toFixed(2)}
+                                    className={`w-28 px-3 py-2 border-2 rounded-lg focus:outline-none focus:ring-2 text-sm font-medium ${
+                                      isChecked
+                                        ? 'border-orange-300 focus:ring-orange-500 focus:border-orange-500'
+                                        : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                                    }`}
+                                  />
+                                </div>
                               </td>
                             </tr>
                           );
@@ -2223,20 +2085,41 @@ const handleUpdate = async () => {
                 </div>
               </div>
 
-              {/* Selected Count */}
-              <div className="mt-4 text-sm text-gray-600">
-                {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''} selected
-              </div>
-
-              <div className="flex justify-center mt-6">
-                <button
-                  onClick={handleAddClientProducts}
-                  disabled={loading}
-                  className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#FF5722' }}
-                >
-                  {loading ? 'Saving Changes...' : 'Save Changes'}
-                </button>
+              {/* Summary and Save Button */}
+              <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm">
+                    <span className="font-medium text-gray-700">
+                      {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''} selected for this client
+                    </span>
+                    {selectedProducts.size > publishedProductCount && (
+                      <span className="ml-2 text-orange-600">
+                        ({selectedProducts.size - publishedProductCount} new)
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleAddClientProducts}
+                    disabled={loading}
+                    className="px-8 py-2.5 text-white rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    {loading ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                        </svg>
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Check size={18} />
+                        Save Changes
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2259,10 +2142,10 @@ const handleUpdate = async () => {
               </div>
             </div>
             <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
-              Products Added Successfully!
+              Changes Saved Successfully!
             </h2>
             <p className="text-gray-600 mb-6">
-              {selectedProducts.size} product{selectedProducts.size !== 1 ? 's have' : ' has'} been added to the client with custom pricing.
+              Products are now visible to the client with the custom prices you set.
             </p>
             <button
               onClick={() => setIsClientProductSuccessOpen(false)}
