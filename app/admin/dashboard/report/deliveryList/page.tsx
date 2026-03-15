@@ -268,10 +268,16 @@ const generateAndSaveReport = async (deliveryDate: string) => {
 
       // Extract order items with product type from product_list
       const orderItems: OrderItem[] = Array.isArray(order.client_order_item)
-        ? order.client_order_item.map((item: { quantity: number; product_list: { product_type: string } | null }) => ({
-            product_type: item.product_list?.product_type || 'Unknown',
-            quantity: item.quantity
-          }))
+        ? order.client_order_item.map((item: { quantity: number; product_list: { product_type: string }[] | { product_type: string } | null }) => {
+            const productList = item.product_list;
+            const productType = Array.isArray(productList)
+              ? productList[0]?.product_type
+              : productList?.product_type;
+            return {
+              product_type: productType || 'Unknown',
+              quantity: item.quantity
+            };
+          })
         : [];
 
       return {
