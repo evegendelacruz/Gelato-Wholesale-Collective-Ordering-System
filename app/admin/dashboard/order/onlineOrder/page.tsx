@@ -2842,16 +2842,35 @@ export default function OnlineOrderPage() {
                                     item.product_price * item.quantity,
                                   )}
                                 </td>
-                                <td className="py-2 px-2 text-center">
-                                  <button
-                                    onClick={() => handleGenerateStickers(item)}
-                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white rounded hover:opacity-80 transition-opacity"
-                                    style={{ backgroundColor: '#10B981' }}
-                                    title={`Generate ${item.quantity} sticker(s)`}
-                                  >
-                                    <Tag size={12} />
-                                    <span>x{item.quantity}</span>
-                                  </button>
+                                <td className="py-2 px-2 text-center relative">
+                                  <div className="relative inline-block">
+                                    <button
+                                      onClick={() => setShowItemStickerDropdown(showItemStickerDropdown === `${order.id}-${index}` ? null : `${order.id}-${index}`)}
+                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white rounded hover:opacity-80 transition-opacity"
+                                      style={{ backgroundColor: '#10B981' }}
+                                      title={`Generate ${item.quantity} sticker(s)`}
+                                    >
+                                      <Tag size={12} />
+                                      <span>x{item.quantity}</span>
+                                      <ChevronDown size={10} />
+                                    </button>
+                                    {showItemStickerDropdown === `${order.id}-${index}` && (
+                                      <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[140px]">
+                                        <button
+                                          onClick={() => handleItemStickerModal(item, order.id, order.order_date, "barcode")}
+                                          className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
+                                        >
+                                          Barcode Sticker
+                                        </button>
+                                        <button
+                                          onClick={() => handleItemStickerModal(item, order.id, order.order_date, "product")}
+                                          className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
+                                        >
+                                          Product Sticker
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="py-2 px-2"></td>
                                 <td className="py-2 px-2"></td>
