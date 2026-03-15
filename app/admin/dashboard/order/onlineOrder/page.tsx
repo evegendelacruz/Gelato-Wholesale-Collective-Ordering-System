@@ -2,6 +2,7 @@
 import Sidepanel from "@/app/components/sidepanel/page";
 import Header from "@/app/components/header/page";
 import supabase from "@/lib/client";
+import Image from "next/image";
 import { useState, useEffect, Fragment, useCallback, useRef } from "react";
 import { Search, Filter, Plus, X, Check, ChevronDown, Tag } from "lucide-react";
 import {
@@ -12,7 +13,6 @@ import {
   generateNextBbdCode,
   generateNextPbnCode,
   generateProductBarcode,
-  generateNextGpbnCode,
   downloadOrderBarcodeStickers,
   downloadOrderProductStickers,
   generateOrderBarcodeStickersPreview,
@@ -61,6 +61,28 @@ interface OrderItem {
   sticker_pbn_code?: string | null;
   sticker_barcode?: string | null;
 }
+
+// Helper function to load image as base64 for PDF
+const loadImageAsBase64 = (src: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } else {
+        reject(new Error('Failed to get canvas context'));
+      }
+    };
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = src;
+  });
+};
 
 export default function OnlineOrderPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -650,7 +672,8 @@ export default function OnlineOrderPage() {
 
   // Generate stickers for a single order item (quantity x stickers)
   // For online orders: fetch ALL products and match by name (same logic as row expansion)
-  const handleGenerateStickers = async (item: OrderItem) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleGenerateStickers = async (item: OrderItem) => {
     const productName = item.product_name || 'Unknown Product';
 
     console.log('Single sticker - Product:', productName);
@@ -763,7 +786,8 @@ export default function OnlineOrderPage() {
 
   // Generate ALL stickers for an entire order (all products × quantities)
   // For online orders: fetch items and match by name to get ingredients (same as row expansion)
-  const handleGenerateAllOrderStickers = async (orderId: number) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleGenerateAllOrderStickers = async (orderId: number) => {
     console.log('=== STICKER GENERATION DEBUG ===');
     console.log('Order ID:', orderId);
 
@@ -1555,6 +1579,7 @@ export default function OnlineOrderPage() {
         line6?: string;
         line7?: string;
       },
+      logoBase64?: string,
     ) => {
       if (!selectedHeader) return;
 
@@ -1584,6 +1609,15 @@ export default function OnlineOrderPage() {
           yPos += lineHeight;
         }
       });
+
+      // Add logo in upper right corner
+      if (logoBase64) {
+        try {
+          doc.addImage(logoBase64, 'PNG', 165, 10, 30, 20);
+        } catch (e) {
+          console.error('Failed to add logo to PDF:', e);
+        }
+      }
     };
 
     const renderFooterInPDF = (
@@ -1619,12 +1653,12 @@ export default function OnlineOrderPage() {
       });
     };
 
-    const generatePDFContent = (doc: jsPDF) => {
+    const generatePDFContent = (doc: jsPDF, logoBase64?: string) => {
       doc.setFont("helvetica");
       const selectedHeader = headerOptions.find(
         (h) => h.id === selectedHeaderId,
       );
-      renderHeaderInPDF(doc, selectedHeader);
+      renderHeaderInPDF(doc, selectedHeader, logoBase64);
 
       // Title
       doc.setFontSize(16);
@@ -1794,7 +1828,16 @@ export default function OnlineOrderPage() {
           unit: "mm",
           format: "a4",
         });
-        generatePDFContent(doc);
+
+        // Load logo image
+        let logoBase64: string | undefined;
+        try {
+          logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
+        } catch (e) {
+          console.error('Failed to load logo:', e);
+        }
+
+        generatePDFContent(doc, logoBase64);
         doc.autoPrint();
         const pdfBlob = doc.output("blob");
         const blobUrl = URL.createObjectURL(pdfBlob);
@@ -1814,7 +1857,16 @@ export default function OnlineOrderPage() {
           unit: "mm",
           format: "a4",
         });
-        generatePDFContent(doc);
+
+        // Load logo image
+        let logoBase64: string | undefined;
+        try {
+          logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
+        } catch (e) {
+          console.error('Failed to load logo:', e);
+        }
+
+        generatePDFContent(doc, logoBase64);
         const fileName = `Invoice_${order.invoice_id}_${formatDate(order.delivery_date).replace(/\//g, "-")}.pdf`;
         doc.save(fileName);
       } catch (error) {
@@ -1921,30 +1973,41 @@ export default function OnlineOrderPage() {
                     (h) => h.id === selectedHeaderId,
                   );
                   return (
-                    <div className="mb-2">
-                      {header?.line1 && (
-                        <div className="font-bold text-[10px]">
-                          {header.line1}
-                        </div>
-                      )}
-                      {header?.line2 && (
-                        <div className="text-[10px]">{header.line2}</div>
-                      )}
-                      {header?.line3 && (
-                        <div className="text-[10px]">{header.line3}</div>
-                      )}
-                      {header?.line4 && (
-                        <div className="text-[10px]">{header.line4}</div>
-                      )}
-                      {header?.line5 && (
-                        <div className="text-[10px]">{header.line5}</div>
-                      )}
-                      {header?.line6 && (
-                        <div className="text-[10px]">{header.line6}</div>
-                      )}
-                      {header?.line7 && (
-                        <div className="text-[10px]">{header.line7}</div>
-                      )}
+                    <div className="mb-2 flex justify-between items-start">
+                      <div>
+                        {header?.line1 && (
+                          <div className="font-bold text-[10px]">
+                            {header.line1}
+                          </div>
+                        )}
+                        {header?.line2 && (
+                          <div className="text-[10px]">{header.line2}</div>
+                        )}
+                        {header?.line3 && (
+                          <div className="text-[10px]">{header.line3}</div>
+                        )}
+                        {header?.line4 && (
+                          <div className="text-[10px]">{header.line4}</div>
+                        )}
+                        {header?.line5 && (
+                          <div className="text-[10px]">{header.line5}</div>
+                        )}
+                        {header?.line6 && (
+                          <div className="text-[10px]">{header.line6}</div>
+                        )}
+                        {header?.line7 && (
+                          <div className="text-[10px]">{header.line7}</div>
+                        )}
+                      </div>
+                      <div>
+                        <Image
+                          src="/assets/file_logo.png"
+                          alt="Company Logo"
+                          width={80}
+                          height={60}
+                          style={{ objectFit: 'contain' }}
+                        />
+                      </div>
                     </div>
                   );
                 })()}

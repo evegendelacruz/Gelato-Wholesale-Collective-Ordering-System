@@ -1,5 +1,7 @@
 'use client';
 
+import Image from 'next/image';
+
 interface OrderItem {
   id: number;
   product_name: string;
@@ -133,7 +135,12 @@ export default function ClientInvoice({
             font-weight: bold;
             margin-bottom: 0px;
           }
- 
+          .logo-container {
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-end;
+          }
+
           .tax-invoice-title {
             font-size: 20px;
             color: #0D909A;
@@ -330,6 +337,15 @@ export default function ClientInvoice({
               <div>{selectedHeader?.line5 || 'GST Registration No. : 201319550R'}</div>
               <div>{selectedHeader?.line6 || 'Company Registration No. UEN:'}</div>
               <div>{selectedHeader?.line7 || '201319550R'}</div>
+            </div>
+            <div className="logo-container">
+              <Image
+                src="/assets/file_logo.png"
+                alt="Company Logo"
+                width={80}
+                height={60}
+                style={{ objectFit: 'contain' }}
+              />
             </div>
           </div>
 

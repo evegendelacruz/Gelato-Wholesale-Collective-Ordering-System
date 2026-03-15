@@ -16,7 +16,6 @@ import {
   generateNextBbdCode,
   generateNextPbnCode,
   generateProductBarcode,
-  generateNextGpbnCode,
   downloadOrderBarcodeStickers,
   downloadOrderProductStickers,
   generateOrderBarcodeStickersPreview,
@@ -59,6 +58,28 @@ interface SupabaseOrderResponse {
   updated_at: string;
   client_user?: { client_businessName?: string } | Array<{ client_businessName?: string }>;
 }
+
+// Helper function to load image as base64 for PDF
+const loadImageAsBase64 = (src: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } else {
+        reject(new Error('Failed to get canvas context'));
+      }
+    };
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = src;
+  });
+};
 
 export default function OrderPage() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -675,7 +696,7 @@ const handleDeleteHeaderOption = async (headerId) => {
   setShowDeleteConfirmModal(true);
 };
 
-const renderHeaderInPDF = (doc, selectedHeader) => {
+const renderHeaderInPDF = (doc, selectedHeader, logoBase64?: string) => {
   if (!selectedHeader) return;
 
   doc.setFontSize(10);
@@ -706,6 +727,15 @@ const renderHeaderInPDF = (doc, selectedHeader) => {
       yPos += lineHeight;
     }
   });
+
+  // Add logo in upper right corner
+  if (logoBase64) {
+    try {
+      doc.addImage(logoBase64, 'PNG', 165, 10, 30, 20);
+    } catch (e) {
+      console.error('Failed to add logo to PDF:', e);
+    }
+  }
 };
 
 const renderFooterInPDF = (doc, selectedFooter) => {
@@ -1063,7 +1093,8 @@ const handleDelete = async () => {
 
   // Generate stickers for a single order item (quantity x stickers)
   // Uses product_id to fetch ingredients directly from product_list (same as Labels)
-  const handleGenerateStickers = async (item: {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleGenerateStickers = async (item: {
     display_product_name: string;
     product_ingredient: string | null;
     sticker_bbd_code: string | null;
@@ -1240,7 +1271,8 @@ const handleDelete = async () => {
 
   // Generate ALL stickers for an entire order (all products × quantities)
   // Uses the SAME approach as handleGenerateLabels - Supabase JOIN with product_list
-  const handleGenerateAllOrderStickers = async (orderId: number) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleGenerateAllOrderStickers = async (orderId: number) => {
     console.log('=== STICKER GENERATION DEBUG ===');
     console.log('Order ID:', orderId);
 
@@ -1277,7 +1309,7 @@ const handleDelete = async () => {
         if (Array.isArray(item.product_list)) {
           productIngredients = item.product_list[0]?.product_ingredient || productIngredients;
         } else {
-          productIngredients = (item.product_list as any).product_ingredient || productIngredients;
+          productIngredients = (item.product_list as { product_ingredient?: string }).product_ingredient || productIngredients;
         }
       }
 
@@ -1428,7 +1460,7 @@ const handleDelete = async () => {
     }
 
     // Map items to sticker format
-    const stickerItems: OrderItemForSticker[] = items.map((item, index) => {
+    const stickerItems: OrderItemForSticker[] = items.map((item) => {
       let ingredients = 'No ingredients listed';
       let shelfLife = '3 months';
       let productId = item.product_id?.toString() || '0';
@@ -1551,10 +1583,10 @@ const handleDelete = async () => {
 
 const handlePrintInvoice = async () => {
   if (!selectedOrder || !clientData) return;
-  
+
   try {
     const jsPDF = (await import('jspdf')).default;
-    
+
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -1566,8 +1598,16 @@ const handlePrintInvoice = async () => {
 
     doc.setFont('helvetica');
 
+    // Load logo image
+    let logoBase64: string | undefined;
+    try {
+      logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
+    } catch (e) {
+      console.error('Failed to load logo:', e);
+    }
+
     const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-    renderHeaderInPDF(doc, selectedHeader);
+    renderHeaderInPDF(doc, selectedHeader, logoBase64);
 
     // Title
     doc.setFontSize(16);
@@ -1748,12 +1788,12 @@ const handlePrintInvoice = async () => {
 
 const handleDownloadPDF = async () => {
   if (!selectedOrder || !clientData) return;
-  
+
   setIsGeneratingPDF(true);
-  
+
   try {
     const jsPDF = (await import('jspdf')).default;
-    
+
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -1765,8 +1805,16 @@ const handleDownloadPDF = async () => {
 
     doc.setFont('helvetica');
 
+    // Load logo image
+    let logoBase64: string | undefined;
+    try {
+      logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
+    } catch (e) {
+      console.error('Failed to load logo:', e);
+    }
+
     const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-    renderHeaderInPDF(doc, selectedHeader);
+    renderHeaderInPDF(doc, selectedHeader, logoBase64);
 
     // Title
     doc.setFontSize(16);
