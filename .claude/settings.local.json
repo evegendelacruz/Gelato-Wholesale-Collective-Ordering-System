@@ -14,7 +14,8 @@
       "Bash(while:*)",
       "Bash(do sleep 5)",
       "Bash(done)",
-      "Bash(npx prisma migrate dev:*)"
+      "Bash(npx prisma migrate dev:*)",
+      "Bash(npx eslint:*)"
     ]
   }
 }

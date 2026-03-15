@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { X, Plus, Trash2, ArrowLeft, Check } from 'lucide-react';
+import { X, Plus, Trash2, ArrowLeft, Check, Search } from 'lucide-react';
 import supabase from '@/lib/client';
 
 interface OrderItem {
@@ -9,11 +9,28 @@ interface OrderItem {
   gelato_type: string;
   quantity: number;
   product_weight: number;
-  product_milkbase: number;  
-  product_sugarbase: number;  
+  product_milkbase: number;
+  product_sugarbase: number;
   product_notes: string;
   product_price: number;
   product_cost: number;
+  product_ingredient: string;
+  is_from_product_list?: boolean;
+  product_list_id?: number;
+}
+
+interface Product {
+  id: number;
+  product_id: string;
+  product_name: string;
+  product_type: string;
+  product_gelato_type: string;
+  product_weight: number;
+  product_milkbased: number | null;
+  product_sugarbased: number | null;
+  product_price: number;
+  product_cost: number | null;
+  product_ingredient: string | null;
 }
 
 interface CreateOnlineOrderModalProps {
@@ -26,49 +43,73 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-    const [showProductEditor, setShowProductEditor] = useState(false);
-    const [productFormData, setProductFormData] = useState({
+  const [showProductEditor, setShowProductEditor] = useState(false);
+  const [productFormData, setProductFormData] = useState({
     option_name: '',
     product_type: '',
     gelato_type: '',
     product_weight: 0,
     product_price: 0,
     product_cost: 0
-    });
-    const [productTypeOptions, setProductTypeOptions] = useState<string[]>([]);
-    const [gelatoTypeOptions, setGelatoTypeOptions] = useState<string[]>([]);
-    const [isAddOptionModalOpen, setIsAddOptionModalOpen] = useState(false);
-    const [addOptionType, setAddOptionType] = useState<'product_type' | 'gelato_type' | null>(null);
-    const [addOptionLabel, setAddOptionLabel] = useState('');
-    const [newOptionValue, setNewOptionValue] = useState('');
-    
+  });
+  const [productTypeOptions, setProductTypeOptions] = useState<string[]>([]);
+  const [gelatoTypeOptions, setGelatoTypeOptions] = useState<string[]>([]);
+  const [isAddOptionModalOpen, setIsAddOptionModalOpen] = useState(false);
+  const [addOptionType, setAddOptionType] = useState<'product_type' | 'gelato_type' | null>(null);
+  const [addOptionLabel, setAddOptionLabel] = useState('');
+  const [newOptionValue, setNewOptionValue] = useState('');
 
-    useEffect(() => {
+  // Product list state
+  const [products, setProducts] = useState<Product[]>([]);
+  const [showProductPicker, setShowProductPicker] = useState<number | null>(null);
+  const [productPickerSearch, setProductPickerSearch] = useState('');
+
+  // Fetch products from product_list
+  const fetchProducts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('product_list')
+        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_milkbased, product_sugarbased, product_price, product_cost, product_ingredient')
+        .order('product_name', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching products:', error);
+        return;
+      }
+
+      setProducts(data || []);
+    } catch (error) {
+      console.error('Error fetching products:', error);
+    }
+  };
+
+  useEffect(() => {
     const loadOptions = async () => {
-        try {
+      try {
         const { data: productTypes, error: productTypeError } = await supabase
-            .from('order_dropdown_options')  // Changed from 'dropdown_options'
-            .select('option_value')
-            .eq('option_type', 'product_type');
+          .from('order_dropdown_options')
+          .select('option_value')
+          .eq('option_type', 'product_type');
 
         const { data: gelatoTypes, error: gelatoTypeError } = await supabase
-            .from('order_dropdown_options')  // Changed from 'dropdown_options'
-            .select('option_value')
-            .eq('option_type', 'gelato_type');
+          .from('order_dropdown_options')
+          .select('option_value')
+          .eq('option_type', 'gelato_type');
 
         if (!productTypeError && productTypes) {
-            setProductTypeOptions(productTypes.map(item => item.option_value));
+          setProductTypeOptions(productTypes.map(item => item.option_value));
         }
 
         if (!gelatoTypeError && gelatoTypes) {
-            setGelatoTypeOptions(gelatoTypes.map(item => item.option_value));
+          setGelatoTypeOptions(gelatoTypes.map(item => item.option_value));
         }
-        } catch (error) {
+      } catch (error) {
         console.error('Error loading options:', error);
-        }
+      }
     };
     loadOptions();
-    }, []);
+    fetchProducts();
+  }, []);
 
   
   // Step 1: Order Details
@@ -78,38 +119,75 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
   const [notes, setNotes] = useState('');
   
   // Step 2: Order Items
- const [orderItems, setOrderItems] = useState<OrderItem[]>([
-  {
-    product_name: '',
-    product_type: '',
-    gelato_type: '',
-    quantity: 1,
-    product_weight: 0,
-    product_milkbase: 0,  
-    product_sugarbase: 0,
-    product_notes: '',
-    product_price: 0,
-    product_cost: 0
-  }
-]);
-
-  const handleAddItem = () => {
-  setOrderItems([
-    ...orderItems,
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([
     {
       product_name: '',
       product_type: '',
       gelato_type: '',
       quantity: 1,
       product_weight: 0,
-      product_milkbase: 0,  
-      product_sugarbase: 0,  
+      product_milkbase: 0,
+      product_sugarbase: 0,
       product_notes: '',
       product_price: 0,
-      product_cost: 0
+      product_cost: 0,
+      product_ingredient: '',
+      is_from_product_list: false
     }
   ]);
-};
+
+  const handleAddItem = () => {
+    setOrderItems([
+      ...orderItems,
+      {
+        product_name: '',
+        product_type: '',
+        gelato_type: '',
+        quantity: 1,
+        product_weight: 0,
+        product_milkbase: 0,
+        product_sugarbase: 0,
+        product_notes: '',
+        product_price: 0,
+        product_cost: 0,
+        product_ingredient: '',
+        is_from_product_list: false
+      }
+    ]);
+  };
+
+  // Handle selecting a product from the product list
+  const handleSelectProduct = (index: number, product: Product) => {
+    const updatedItems = [...orderItems];
+    updatedItems[index] = {
+      ...updatedItems[index],
+      product_name: product.product_name,
+      product_type: product.product_type || '',
+      gelato_type: product.product_gelato_type || '',
+      product_weight: product.product_weight || 0,
+      product_milkbase: product.product_milkbased || 0,
+      product_sugarbase: product.product_sugarbased || 0,
+      product_price: product.product_price || 0,
+      product_cost: product.product_cost || 0,
+      product_ingredient: product.product_ingredient || '',
+      is_from_product_list: true,
+      product_list_id: product.id
+    };
+    setOrderItems(updatedItems);
+    setShowProductPicker(null);
+    setProductPickerSearch('');
+  };
+
+  // Filter products based on search query for product picker
+  const getFilteredProducts = () => {
+    const query = productPickerSearch.toLowerCase();
+    if (!query) return products;
+    return products.filter(p =>
+      p.product_name.toLowerCase().includes(query) ||
+      p.product_id.toLowerCase().includes(query) ||
+      p.product_type?.toLowerCase().includes(query)
+    );
+  };
 
 interface CustomDropdownProps {
   label: string;
@@ -334,98 +412,170 @@ const handleRemoveGelatoType = async (option: string) => {
     }
   };
 
+  // Generate product ID for new products
+  const generateProductId = async (): Promise<string> => {
+    try {
+      const { data: existingProducts, error: fetchError } = await supabase
+        .from('product_list')
+        .select('product_id')
+        .like('product_id', 'GEL-%')
+        .order('product_id', { ascending: false })
+        .limit(1);
+
+      if (fetchError) {
+        console.error('Error fetching existing products:', fetchError);
+      }
+
+      let nextNumber = 1;
+      if (existingProducts && existingProducts.length > 0) {
+        const lastId = existingProducts[0].product_id;
+        const match = lastId.match(/GEL-(\d+)/);
+        if (match) {
+          nextNumber = parseInt(match[1], 10) + 1;
+        }
+      }
+
+      return `GEL-${nextNumber.toString().padStart(4, '0')}`;
+    } catch (error) {
+      console.error('Error generating product ID:', error);
+      return `GEL-${Date.now()}`;
+    }
+  };
+
   const handleSubmit = async () => {
-  if (!validateStep2()) return;
+    if (!validateStep2()) return;
 
-  try {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    // Generate tracking number and order_id
-    const trackingNo = `TRK-${Date.now().toString().slice(-8)}`;
-    const orderId = `ORD-${Date.now()}`;
-    
-    // Get current date in YYYY-MM-DD format
-    const currentDate = new Date().toISOString().split('T')[0];
+      // First, add new products to product_list (those not from existing product list)
+      const newProducts = orderItems.filter(item => !item.is_from_product_list && item.product_name.trim());
 
-    // Insert customer order - database will auto-generate id
-    const { data: orderData, error: orderError } = await supabase
-      .from('customer_order')
-      .insert({
-        order_id: orderId,
-        customer_name: customerName.trim(),
-        order_date: currentDate,
-        delivery_date: deliveryDate,
-        delivery_address: deliveryAddress.trim(),
-        status: 'Pending',
-        notes: notes.trim() || null,
-        tracking_no: trackingNo
-      })
-      .select()
-      .single();
+      for (const item of newProducts) {
+        // Check if product already exists by name
+        const { data: existingProduct } = await supabase
+          .from('product_list')
+          .select('id')
+          .eq('product_name', item.product_name.trim())
+          .single();
 
-    if (orderError) {
-      console.error('Order insert error details:', {
-        error: orderError,
-        message: orderError.message,
-        details: orderError.details,
-        hint: orderError.hint,
-        code: orderError.code
-      });
-      alert(`Failed to create order: ${orderError.message || 'Unknown error'}`);
-      throw orderError;
-    }
+        if (!existingProduct) {
+          // Generate product ID
+          const productId = await generateProductId();
 
-    if (!orderData) {
-      throw new Error('No order data returned after insert');
-    }
+          // Add to product_list
+          const { error: productError } = await supabase
+            .from('product_list')
+            .insert({
+              product_id: productId,
+              product_name: item.product_name.trim(),
+              product_type: item.product_type || null,
+              product_gelato_type: item.gelato_type || null,
+              product_weight: item.product_weight || 0,
+              product_milkbased: item.product_milkbase || null,
+              product_sugarbased: item.product_sugarbase || null,
+              product_price: item.product_price || 0,
+              product_cost: item.product_cost || null,
+              product_ingredient: item.product_ingredient || null,
+              product_created_at: new Date().toISOString()
+            });
 
-    // Insert order items - database will auto-generate id and product_id
-    const itemsToInsert = orderItems.map(item => ({
-      order_id: orderData.id,
-      product_name: item.product_name.trim(),
-      product_type: item.product_type,
-      quantity: item.quantity,
-      gelato_type: item.gelato_type,
-      product_weight: item.product_weight,
-      calculated_weight: parseFloat((item.product_weight * item.quantity).toFixed(2)),
-      product_milkbase: item.product_milkbase,
-      product_sugarbase: item.product_sugarbase,
-      product_notes: item.product_notes.trim() || null,
-      product_price: item.product_price,
-      product_cost: item.product_cost
-    }));
+          if (productError) {
+            console.error('Error adding product to product_list:', productError);
+            // Continue with order creation even if product insert fails
+          }
+        }
+      }
 
-    const { error: itemsError } = await supabase
-      .from('customer_order_item')
-      .insert(itemsToInsert);
+      // Generate tracking number and order_id
+      const trackingNo = `TRK-${Date.now().toString().slice(-8)}`;
+      const orderId = `ORD-${Date.now()}`;
 
-    if (itemsError) {
-      console.error('Items insert error details:', {
-        error: itemsError,
-        message: itemsError.message,
-        details: itemsError.details,
-        hint: itemsError.hint,
-        code: itemsError.code
-      });
-      alert(`Failed to create order items: ${itemsError.message || 'Unknown error'}`);
-      throw itemsError;
-    }
+      // Get current date in YYYY-MM-DD format
+      const currentDate = new Date().toISOString().split('T')[0];
 
-    // Show success message
-    setShowSuccess(true);
-    
-    // Reset after delay
-    setTimeout(() => {
-      setShowSuccess(false);
-      resetForm();
-      onSuccess();
-      onClose();
-    }, 2000);
+      // Insert customer order - database will auto-generate id
+      const { data: orderData, error: orderError } = await supabase
+        .from('customer_order')
+        .insert({
+          order_id: orderId,
+          customer_name: customerName.trim(),
+          order_date: currentDate,
+          delivery_date: deliveryDate,
+          delivery_address: deliveryAddress.trim(),
+          status: 'Pending',
+          notes: notes.trim() || null,
+          tracking_no: trackingNo
+        })
+        .select()
+        .single();
 
-  } catch (error) {
-    console.error('Error creating order:', error);
-  } finally {
-    setLoading(false);
+      if (orderError) {
+        console.error('Order insert error details:', {
+          error: orderError,
+          message: orderError.message,
+          details: orderError.details,
+          hint: orderError.hint,
+          code: orderError.code
+        });
+        alert(`Failed to create order: ${orderError.message || 'Unknown error'}`);
+        throw orderError;
+      }
+
+      if (!orderData) {
+        throw new Error('No order data returned after insert');
+      }
+
+      // Insert order items - database will auto-generate id and product_id
+      const itemsToInsert = orderItems.map(item => ({
+        order_id: orderData.id,
+        product_name: item.product_name.trim(),
+        product_type: item.product_type,
+        quantity: item.quantity,
+        gelato_type: item.gelato_type,
+        product_weight: item.product_weight,
+        calculated_weight: parseFloat((item.product_weight * item.quantity).toFixed(2)),
+        product_milkbase: item.product_milkbase,
+        product_sugarbase: item.product_sugarbase,
+        product_notes: item.product_notes.trim() || null,
+        product_price: item.product_price,
+        product_cost: item.product_cost
+      }));
+
+      const { error: itemsError } = await supabase
+        .from('customer_order_item')
+        .insert(itemsToInsert);
+
+      if (itemsError) {
+        console.error('Items insert error details:', {
+          error: itemsError,
+          message: itemsError.message,
+          details: itemsError.details,
+          hint: itemsError.hint,
+          code: itemsError.code
+        });
+        alert(`Failed to create order items: ${itemsError.message || 'Unknown error'}`);
+        throw itemsError;
+      }
+
+      // Refresh products list for next time
+      fetchProducts();
+
+      // Show success message
+      setShowSuccess(true);
+
+      // Reset after delay
+      setTimeout(() => {
+        setShowSuccess(false);
+        resetForm();
+        onSuccess();
+        onClose();
+      }, 2000);
+
+    } catch (error) {
+      console.error('Error creating order:', error);
+    } finally {
+      setLoading(false);
   }
 };
 
@@ -436,7 +586,7 @@ const handleRemoveGelatoType = async (option: string) => {
     setDeliveryAddress('');
     setNotes('');
     setOrderItems([
-        {
+      {
         product_name: '',
         product_type: '',
         gelato_type: '',
@@ -446,10 +596,14 @@ const handleRemoveGelatoType = async (option: string) => {
         product_sugarbase: 0,
         product_notes: '',
         product_price: 0,
-        product_cost: 0
-        }
+        product_cost: 0,
+        product_ingredient: '',
+        is_from_product_list: false
+      }
     ]);
-    };
+    setShowProductPicker(null);
+    setProductPickerSearch('');
+  };
 
   const handleClose = () => {
     if (!loading) {
@@ -618,14 +772,39 @@ const handleRemoveGelatoType = async (option: string) => {
                     <div className="col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                         Product Name <span className="text-red-500">*</span>
+                        {item.is_from_product_list && (
+                          <span className="ml-2 text-xs text-green-600 font-normal">(From Product List)</span>
+                        )}
                         </label>
-                        <input
-                        type="text"
-                        value={item.product_name}
-                        onChange={(e) => handleItemChange(index, 'product_name', e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        placeholder="Enter product name"
-                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={item.product_name}
+                            onChange={(e) => {
+                              const updatedItems = [...orderItems];
+                              updatedItems[index] = {
+                                ...updatedItems[index],
+                                product_name: e.target.value,
+                                is_from_product_list: false,
+                                product_list_id: undefined
+                              };
+                              setOrderItems(updatedItems);
+                            }}
+                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            placeholder="Enter product name..."
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowProductPicker(index);
+                              setProductPickerSearch('');
+                            }}
+                            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2 whitespace-nowrap"
+                          >
+                            <Search size={16} />
+                            Select from List
+                          </button>
+                        </div>
                     </div>
 
                     <div>
@@ -746,6 +925,32 @@ const handleRemoveGelatoType = async (option: string) => {
                         onChange={(e) => handleItemChange(index, 'product_sugarbase', parseFloat(e.target.value) || 0)}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                         placeholder="0.00"
+                        />
+                    </div>
+
+                    <div className="col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Ingredients
+                        </label>
+                        <textarea
+                        value={item.product_ingredient}
+                        onChange={(e) => handleItemChange(index, 'product_ingredient', e.target.value)}
+                        rows={2}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                        placeholder="Enter ingredients (optional)"
+                        />
+                    </div>
+
+                    <div className="col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Product Notes
+                        </label>
+                        <textarea
+                        value={item.product_notes}
+                        onChange={(e) => handleItemChange(index, 'product_notes', e.target.value)}
+                        rows={2}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                        placeholder="Enter any notes (optional)"
                         />
                     </div>
                     </div>
@@ -939,6 +1144,97 @@ const handleRemoveGelatoType = async (option: string) => {
                   className="px-4 py-2 bg-orange-500 text-white rounded text-sm hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Add Option
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Product Picker Modal */}
+        {showProductPicker !== null && (
+          <div
+            className="fixed inset-0 flex items-center justify-center"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)', zIndex: 9999 }}
+          >
+            <div className="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col shadow-xl">
+              <div className="flex items-center justify-between p-4 border-b">
+                <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>
+                  Select Product from List
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowProductPicker(null);
+                    setProductPickerSearch('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-4 border-b">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search size={16} className="text-gray-400" />
+                  </div>
+                  <input
+                    type="text"
+                    value={productPickerSearch}
+                    onChange={(e) => setProductPickerSearch(e.target.value)}
+                    placeholder="Search products by name, ID, or type..."
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4">
+                {getFilteredProducts().length > 0 ? (
+                  <div className="space-y-2">
+                    {getFilteredProducts().map((product) => (
+                      <button
+                        key={product.id}
+                        type="button"
+                        onClick={() => handleSelectProduct(showProductPicker, product)}
+                        className="w-full px-4 py-3 text-left border border-gray-200 rounded-lg hover:bg-orange-50 hover:border-orange-300 transition-colors"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="font-medium text-gray-900">{product.product_name}</div>
+                            <div className="text-sm text-gray-500 mt-1">
+                              {product.product_id} | {product.product_type || 'N/A'} | {product.product_gelato_type || 'N/A'}
+                            </div>
+                            {product.product_ingredient && (
+                              <div className="text-xs text-gray-400 mt-1">
+                                Ingredients: {product.product_ingredient.substring(0, 50)}{product.product_ingredient.length > 50 ? '...' : ''}
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <div className="font-semibold text-orange-600">${product.product_price.toFixed(2)}</div>
+                            <div className="text-xs text-gray-500">{product.product_weight} kg</div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    {products.length === 0 ? 'No products available in the product list.' : 'No products match your search.'}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 border-t bg-gray-50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowProductPicker(null);
+                    setProductPickerSearch('');
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  Cancel
                 </button>
               </div>
             </div>
