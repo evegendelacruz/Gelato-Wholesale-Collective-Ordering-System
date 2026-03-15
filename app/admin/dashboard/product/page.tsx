@@ -2438,7 +2438,7 @@ export default function ProductPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1 text-gray-700">
-                      Cost (S$) <span className="text-red-500">*</span>
+                      Cost (S$)
                     </label>
                     <input
                       type="number"

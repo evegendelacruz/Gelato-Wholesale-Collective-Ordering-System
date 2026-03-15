@@ -706,7 +706,7 @@ const handleRemoveGelatoType = async (option: string) => {
 
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Cost ($) <span className="text-red-500">*</span>
+                        Cost ($)
                         </label>
                         <input
                         type="number"
@@ -863,7 +863,7 @@ const handleRemoveGelatoType = async (option: string) => {
 
                 <div>
                     <label className="block text-sm font-medium mb-2" style={{ color: '#5C2E1F' }}>
-                    Cost ($) *
+                    Cost ($)
                     </label>
                     <input
                     type="number"
