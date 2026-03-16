@@ -1185,7 +1185,18 @@ export default function OnlineOrderPage() {
 
       if (error) throw error;
 
-      setSelectedOrderItems(data || []);
+      // Get GPBN based on order date (same as product sticker)
+      const orderDateStr = new Date(order.order_date).toISOString().split('T')[0];
+      const gpbnNumber = deliveryDateGpbn[orderDateStr] || 3000;
+      const gpbnCode = `GPBN${gpbnNumber}`;
+
+      // Add GPBN as batch_number to each item
+      const itemsWithGpbn = (data || []).map(item => ({
+        ...item,
+        batch_number: gpbnCode
+      }));
+
+      setSelectedOrderItems(itemsWithGpbn);
       setSelectedClientData({
         client_businessName: order.customer_name,
         client_delivery_address: order.delivery_address,

@@ -880,6 +880,11 @@ const handleDelete = async () => {
       return `${day}/${month}/${year}`;
     };
 
+    // Get GPBN based on order date (same as product sticker)
+    const orderDateStr = new Date(order.order_date).toISOString().split('T')[0];
+    const gpbnNumber = deliveryDateGpbn[orderDateStr] || 3000;
+    const gpbnCode = `GPBN${gpbnNumber}`;
+
     // Map items to include product details at root level
     const itemsWithDetails = items?.map(item => {
       // Handle both array and object responses from Supabase
@@ -902,7 +907,8 @@ const handleDelete = async () => {
         ingredients: item.label_ingredients || productIngredients,
         allergen: item.label_allergens || productAllergen,
         bestBefore: item.best_before ? formatDateDisplay(item.best_before) : '',
-        batchNumber: item.batch_number ? String(item.batch_number) : '',
+        // Use GPBN code as batch number (same as product sticker)
+        batchNumber: gpbnCode,
         order_date: order.order_date
       };
     }) || [];

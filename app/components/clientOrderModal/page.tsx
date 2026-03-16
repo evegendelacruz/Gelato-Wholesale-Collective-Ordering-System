@@ -1099,9 +1099,7 @@ const handleClose = () => {
                   <label className="block text-sm font-medium mb-1 text-gray-700">
                     Delivery Date <span className="text-red-500">*</span>
                   </label>
-                  <p className="text-xs text-gray-600 mb-2">
-                    * Minimum 2-day lead time required. Orders placed today can be delivered starting from {new Date(new Date().setDate(new Date().getDate() + 3)).toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' })}.
-                  </p>
+                  
                   <input
                     type="date"
                     value={deliveryDate}
