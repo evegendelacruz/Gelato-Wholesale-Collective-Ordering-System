@@ -662,10 +662,10 @@ export default function ClientQuotationPage() {
 
       // Dotted line
       yPos += 5;
-      doc.setLineDashPattern([1, 1], 0);
+      (doc as any).setLineDashPattern([1, 1], 0);
       doc.setDrawColor(200, 200, 200);
       doc.line(20, yPos, 190, yPos);
-      doc.setLineDashPattern([], 0);
+      (doc as any).setLineDashPattern([], 0);
 
       // Totals
       const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
@@ -1083,10 +1083,10 @@ export default function ClientQuotationPage() {
 
       // Dotted line
       yPos += 5;
-      doc.setLineDashPattern([1, 1], 0);
+      (doc as any).setLineDashPattern([1, 1], 0);
       doc.setDrawColor(200, 200, 200);
       doc.line(20, yPos, 190, yPos);
-      doc.setLineDashPattern([], 0);
+      (doc as any).setLineDashPattern([], 0);
 
       // Totals
       const subtotal = quotationItemsView.reduce((sum, item) => sum + item.subtotal, 0);
