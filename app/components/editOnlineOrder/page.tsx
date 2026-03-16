@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
 import supabase from '@/lib/client';
 
 interface Order {
@@ -15,6 +15,23 @@ interface Order {
   tracking_no: string;
   total_amount: number;
   invoice_id: string;
+}
+
+interface OrderItem {
+  id: number;
+  product_id: string | null;
+  product_name: string;
+  quantity: number;
+  product_price: number;
+  product_cost: number | null;
+  product_type: string | null;
+  gelato_type: string | null;
+  calculated_weight: string | null;
+  label_ingredients: string | null;
+  label_allergens: string | null;
+  best_before: string | null;
+  batch_number: string | null;
+  isDeleted?: boolean;
 }
 
 interface EditOnlineOrderModalProps {
@@ -35,9 +52,56 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
     status: 'Pending'
   });
   const [loading, setLoading] = useState(false);
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
 
   useEffect(() => {
-    if (order) {
+    const fetchOrderItems = async () => {
+      try {
+        console.log('Fetching order items for online order ID:', order.id);
+
+        const { data: orderItemsData, error: itemsError } = await supabase
+          .from('customer_order_item')
+          .select('*')
+          .eq('order_id', order.id);
+
+        console.log('Order items response:', { data: orderItemsData, error: itemsError });
+
+        if (itemsError) {
+          console.error('Items error details:', itemsError);
+          throw itemsError;
+        }
+
+        if (!orderItemsData || orderItemsData.length === 0) {
+          console.log('No order items found');
+          setOrderItems([]);
+          return;
+        }
+
+        const mappedItems = orderItemsData.map(item => ({
+          id: item.id,
+          product_id: item.product_id,
+          product_name: item.product_name,
+          quantity: item.quantity,
+          product_price: item.product_price,
+          product_cost: item.product_cost,
+          product_type: item.product_type,
+          gelato_type: item.gelato_type,
+          calculated_weight: item.calculated_weight,
+          label_ingredients: item.label_ingredients,
+          label_allergens: item.label_allergens,
+          best_before: item.best_before,
+          batch_number: item.batch_number
+        }));
+
+        console.log('Mapped order items:', mappedItems);
+        setOrderItems(mappedItems);
+      } catch (error) {
+        console.error('Error fetching order items:', error);
+        setOrderItems([]);
+      }
+    };
+
+    if (isOpen && order) {
       setFormData({
         customer_name: order.customer_name || '',
         order_date: order.order_date ? new Date(order.order_date).toISOString().split('T')[0] : '',
@@ -47,15 +111,79 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
         notes: order.notes || '',
         status: order.status || 'Pending'
       });
+
+      fetchOrderItems();
     }
-  }, [order]);
+  }, [isOpen, order]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleItemChange = (index: number, field: keyof OrderItem, value: string | number) => {
+    const updatedItems = [...orderItems];
+    updatedItems[index] = {
+      ...updatedItems[index],
+      [field]: value
+    };
+    setOrderItems(updatedItems);
+  };
+
+  const handleRemoveItem = (index: number) => {
+    const updatedItems = [...orderItems];
+    updatedItems[index] = {
+      ...updatedItems[index],
+      isDeleted: true
+    };
+    setOrderItems(updatedItems);
+  };
+
+  const handleRestoreItem = (index: number) => {
+    const updatedItems = [...orderItems];
+    updatedItems[index] = {
+      ...updatedItems[index],
+      isDeleted: false
+    };
+    setOrderItems(updatedItems);
+  };
+
+  const calculateTotalAmount = () => {
+    return orderItems
+      .filter(item => !item.isDeleted)
+      .reduce((sum, item) => sum + (item.product_price * item.quantity), 0);
+  };
+
+  const activeOrderItems = orderItems.filter(item => !item.isDeleted);
+  const deletedOrderItems = orderItems.filter(item => item.isDeleted);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      const { error } = await supabase
+      // Validate dates
+      if (!formData.order_date || !formData.delivery_date) {
+        alert('Please fill in all required fields');
+        setLoading(false);
+        return;
+      }
+
+      // Check if there are any active items left
+      const itemsToKeep = orderItems.filter(item => !item.isDeleted);
+      if (itemsToKeep.length === 0) {
+        alert('Order must have at least one item. Please add items or cancel the order instead.');
+        setLoading(false);
+        return;
+      }
+
+      const totalAmount = calculateTotalAmount();
+
+      // Update order
+      const { error: orderError } = await supabase
         .from('customer_order')
         .update({
           customer_name: formData.customer_name,
@@ -65,11 +193,42 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
           tracking_no: formData.tracking_no,
           notes: formData.notes,
           status: formData.status,
+          total_amount: totalAmount,
           updated_at: new Date().toISOString()
         })
         .eq('id', order.id);
 
-      if (error) throw error;
+      if (orderError) throw orderError;
+
+      // Delete items marked for deletion
+      const itemsToDelete = orderItems.filter(item => item.isDeleted);
+      if (itemsToDelete.length > 0) {
+        console.log('Deleting removed items:', itemsToDelete.map(i => i.id));
+        const { error: deleteError } = await supabase
+          .from('customer_order_item')
+          .delete()
+          .in('id', itemsToDelete.map(item => item.id));
+
+        if (deleteError) {
+          console.error('Error deleting items:', deleteError);
+          throw new Error(`Failed to remove items: ${deleteError.message}`);
+        }
+      }
+
+      // Update remaining order items
+      for (const item of itemsToKeep) {
+        const { error: itemError } = await supabase
+          .from('customer_order_item')
+          .update({
+            quantity: item.quantity,
+            product_price: item.product_price
+          })
+          .eq('id', item.id);
+
+        if (itemError) {
+          throw new Error(`Item update failed: ${itemError.message}`);
+        }
+      }
 
       onSuccess();
     } catch (error) {
@@ -84,117 +243,253 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
 
   return (
     <div className="fixed inset-0 z-50 overflow-auto flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-auto">
+      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-auto">
         <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4 shrink-0 rounded-t-lg flex justify-between items-center">
           <h2 className="text-2xl font-bold" style={{ color: '#5C2E1F' }}>
-            Edit Online Order
+            Edit Online Order - {order.order_id}
           </h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700" disabled={loading}>
             <X size={24} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Customer Info */}
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
-              Customer Name *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.customer_name}
-              onChange={(e) => setFormData({ ...formData, customer_name: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
+            <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
+              Customer Information
+            </h3>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="mb-3">
+                <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
+                  Customer Name *
+                </label>
+                <input
+                  type="text"
+                  name="customer_name"
+                  required
+                  value={formData.customer_name}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <p className="text-sm"><span className="font-medium">Invoice ID:</span> {order.invoice_id || 'N/A'}</p>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
+          {/* Order Details */}
+          <div>
+            <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
+              Order Details
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
+                  Order Date *
+                </label>
+                <input
+                  type="date"
+                  name="order_date"
+                  required
+                  value={formData.order_date}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
+                  Delivery Date *
+                </label>
+                <input
+                  type="date"
+                  name="delivery_date"
+                  required
+                  value={formData.delivery_date}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
               <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
-                Order Date *
+                Delivery Address *
               </label>
-              <input
-                type="date"
+              <textarea
+                name="delivery_address"
                 required
-                value={formData.order_date}
-                onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
+                value={formData.delivery_address}
+                onChange={handleInputChange}
+                rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
 
-            <div>
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
+                  Tracking Number
+                </label>
+                <input
+                  type="text"
+                  name="tracking_no"
+                  value={formData.tracking_no}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
+                  Status
+                </label>
+                <select
+                  name="status"
+                  value={formData.status}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4">
               <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
-                Delivery Date *
+                Notes
               </label>
-              <input
-                type="date"
-                required
-                value={formData.delivery_date}
-                onChange={(e) => setFormData({ ...formData, delivery_date: e.target.value })}
+              <textarea
+                name="notes"
+                value={formData.notes}
+                onChange={handleInputChange}
+                rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                placeholder="Additional notes..."
               />
             </div>
           </div>
 
+          {/* Order Items */}
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
-              Delivery Address *
-            </label>
-            <textarea
-              required
-              value={formData.delivery_address}
-              onChange={(e) => setFormData({ ...formData, delivery_address: e.target.value })}
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
+            <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
+              Order Items ({activeOrderItems.length})
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm table-fixed">
+                <thead>
+                  <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-2 font-bold text-xs w-[30%]">PRODUCT</th>
+                    <th className="text-center py-2 px-2 font-bold text-xs w-[12%]">TYPE</th>
+                    <th className="text-center py-2 px-2 font-bold text-xs w-[12%]">QUANTITY</th>
+                    <th className="text-right py-2 px-2 font-bold text-xs w-[15%]">UNIT PRICE</th>
+                    <th className="text-right py-2 px-2 font-bold text-xs w-[15%]">SUBTOTAL</th>
+                    <th className="text-center py-2 px-2 font-bold text-xs w-[10%]">ACTION</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderItems.map((item, index) => (
+                    <tr
+                      key={item.id}
+                      className={`border-b border-gray-200 ${item.isDeleted ? 'bg-red-50 opacity-50' : ''}`}
+                    >
+                      <td className="py-2 px-2 text-xs">
+                        <span className={item.isDeleted ? 'line-through text-red-500' : ''}>
+                          {item.product_name}
+                        </span>
+                        {item.isDeleted && (
+                          <span className="ml-2 text-red-500 text-xs">(Will be removed)</span>
+                        )}
+                      </td>
+                      <td className="py-2 px-2 text-center text-xs">
+                        {item.gelato_type || item.product_type || '-'}
+                      </td>
+                      <td className="py-2 px-2 text-center">
+                        {item.isDeleted ? (
+                          <span className="text-gray-400">{item.quantity}</span>
+                        ) : (
+                          <input
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => handleItemChange(index, 'quantity', Number(e.target.value))}
+                            min="1"
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-center text-xs"
+                          />
+                        )}
+                      </td>
+                      <td className="py-2 px-2 text-right">
+                        {item.isDeleted ? (
+                          <span className="text-gray-400">${item.product_price.toFixed(2)}</span>
+                        ) : (
+                          <input
+                            type="number"
+                            value={item.product_price}
+                            onChange={(e) => handleItemChange(index, 'product_price', Number(e.target.value))}
+                            step="0.01"
+                            min="0"
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-right text-xs"
+                          />
+                        )}
+                      </td>
+                      <td className="py-2 px-2 text-right text-xs font-medium">
+                        <span className={item.isDeleted ? 'text-gray-400 line-through' : ''}>
+                          ${(item.product_price * item.quantity).toFixed(2)}
+                        </span>
+                      </td>
+                      <td className="py-2 px-2 text-center">
+                        {item.isDeleted ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreItem(index)}
+                            className="text-green-500 hover:text-green-700 text-xs underline"
+                            title="Restore item"
+                          >
+                            Restore
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveItem(index)}
+                            className="text-red-500 hover:text-red-700 transition-colors"
+                            title="Remove item"
+                            disabled={activeOrderItems.length <= 1}
+                          >
+                            <Trash2 size={16} className={activeOrderItems.length <= 1 ? 'opacity-30' : ''} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {deletedOrderItems.length > 0 && (
+              <p className="text-sm text-red-500 mt-2">
+                {deletedOrderItems.length} item(s) will be removed when you save
+              </p>
+            )}
+
+            {/* Order Summary */}
+            <div className="mt-4 flex justify-end">
+              <div className="w-64 space-y-2">
+                <div className="flex justify-between text-lg font-bold border-t pt-2" style={{ color: '#5C2E1F' }}>
+                  <span>Total:</span>
+                  <span>${calculateTotalAmount().toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
-              Tracking Number
-            </label>
-            <input
-              type="text"
-              value={formData.tracking_no}
-              onChange={(e) => setFormData({ ...formData, tracking_no: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-              disabled
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
-              Status
-            </label>
-            <select
-              value={formData.status}
-              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-            >
-              <option value="Pending">Pending</option>
-              <option value="Completed">Completed</option>
-              <option value="Cancelled">Cancelled</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
-              Notes
-            </label>
-            <textarea
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-              placeholder="Additional notes..."
-            />
-          </div>
-
-          <div className="flex gap-3 pt-4">
+          {/* Action Buttons */}
+          <div className="flex gap-3 pt-4 border-t">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              disabled={loading}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
             >
               Cancel
             </button>

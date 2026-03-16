@@ -1,6 +1,6 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { X, Search, Trash2, Check } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Search, Trash2, Check, Plus } from 'lucide-react';
 import supabase from '@/lib/client';
 import Image from 'next/image';
 
@@ -20,6 +20,10 @@ interface Product {
   product_gelato_type: string;
   product_weight: number;
   product_price: number;
+  product_cost: number | null;
+  product_milkbased: number | null;
+  product_sugarbased: number | null;
+  product_ingredient: string | null;
   product_image: string | null;
 }
 
@@ -31,7 +35,7 @@ interface ClientProduct {
 }
 
 interface OrderItem {
-  product_id: number;
+  product_id: number | null;
   product_name: string;
   quantity: number;
   unit_price: number;
@@ -39,6 +43,15 @@ interface OrderItem {
   weight: number;
   request: string;
   subtotal: number;
+  product_type: string;
+  product_cost: number;
+  product_milkbase: number;
+  product_sugarbase: number;
+  product_ingredient: string;
+  is_manual: boolean;
+  is_from_product_list: boolean;
+  publish_to_client: boolean;  // Add product to client's assigned products
+  add_to_product_list: boolean; // For manual items: add to product_list table
 }
 
 interface ClientOrderModalProps {
@@ -47,36 +60,175 @@ interface ClientOrderModalProps {
   onSuccess: () => void;
 }
 
+// Custom Dropdown Component for Product Type and Gelato Type
+interface CustomDropdownProps {
+  label: string;
+  name: string;
+  value: string;
+  options: string[];
+  onChange: (e: { target: { name: string; value: string } }) => void;
+  onAddOption: () => void;
+  onRemoveOption: (option: string) => void;
+  required?: boolean;
+}
+
+const CustomDropdown = ({ label, name, value, options, onChange, onAddOption, onRemoveOption, required = false }: CustomDropdownProps) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      <label className="block text-sm font-medium mb-1 text-gray-700">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm cursor-pointer bg-white flex justify-between items-center text-left"
+      >
+        <span className={value ? 'text-gray-900' : 'text-gray-500'}>
+          {value || `Select ${label}`}
+        </span>
+        <svg
+          className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+          <div className="py-1">
+            {options.length === 0 && (
+              <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                No options yet. Click &quot;Add Option&quot; to create one.
+              </div>
+            )}
+
+            {options.map(option => (
+              <div
+                key={option}
+                className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center justify-between group"
+                onClick={() => {
+                  onChange({ target: { name, value: option } });
+                  setIsOpen(false);
+                }}
+              >
+                <span className={value === option ? 'text-orange-600 font-medium' : ''}>
+                  {option}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveOption(option);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition-opacity"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ))}
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddOption();
+                setIsOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 hover:bg-orange-50 cursor-pointer flex items-center gap-2 text-orange-600 border-t border-gray-200"
+            >
+              <Plus size={16} />
+              <span className="text-sm font-medium">Add New Option</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientOrderModalProps) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | ''; text: string }>({ type: '', text: '' });
-  
+
   // Step 1: Client Selection
   const [clients, setClients] = useState<Client[]>([]);
   const [clientSearch, setClientSearch] = useState('');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  
+
   // Step 2: Order Details
   const [deliveryDate, setDeliveryDate] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [country, setCountry] = useState('Singapore');
   const [postalCode, setPostalCode] = useState('');
-  
+  const [publishToClient, setPublishToClient] = useState(true);
+
   // Step 3: Product Selection
   const [availableProducts, setAvailableProducts] = useState<ClientProduct[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
-  
+  const [showProductPicker, setShowProductPicker] = useState(false);
+  const [productPickerSearch, setProductPickerSearch] = useState('');
+
+  // Dropdown options for manual items
+  const [productTypeOptions, setProductTypeOptions] = useState<string[]>([]);
+  const [gelatoTypeOptions, setGelatoTypeOptions] = useState<string[]>([]);
+  const [isAddOptionModalOpen, setIsAddOptionModalOpen] = useState(false);
+  const [addOptionType, setAddOptionType] = useState<'product_type' | 'gelato_type' | null>(null);
+  const [addOptionLabel, setAddOptionLabel] = useState('');
+  const [newOptionValue, setNewOptionValue] = useState('');
+
+  // Manual item editor
+  const [showManualItemEditor, setShowManualItemEditor] = useState(false);
+  const [manualItemData, setManualItemData] = useState({
+    product_name: '',
+    product_type: '',
+    gelato_type: '',
+    quantity: 1,
+    weight: 0,
+    unit_price: 0,
+    product_cost: 0,
+    product_milkbase: 0,
+    product_sugarbase: 0,
+    product_ingredient: '',
+    request: ''
+  });
+
   // Success Modal
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [createdOrderId, setCreatedOrderId] = useState('');
 
-  // Fetch clients on mount
+  // Fetch clients and dropdown options on mount
   useEffect(() => {
     if (isOpen) {
       fetchClients();
+      fetchAllProducts();
+      fetchDropdownOptions();
     }
   }, [isOpen]);
 
@@ -93,6 +245,111 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       console.error('Error fetching clients:', error);
       setMessage({ type: 'error', text: 'Failed to load clients' });
       setTimeout(() => setMessage({ type: '', text: '' }), 1000);
+    }
+  };
+
+  const fetchAllProducts = async () => {
+    try {
+      setLoadingProducts(true);
+      console.log('Fetching all products...');
+      const { data, error } = await supabase
+        .from('product_list')
+        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_price, product_cost, product_milkbased, product_sugarbased, product_ingredient, product_image')
+        .order('product_name', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching products:', error);
+        throw error;
+      }
+      console.log('Fetched products:', data?.length || 0);
+      setAllProducts(data || []);
+    } catch (error) {
+      console.error('Error fetching all products:', error);
+      setMessage({ type: 'error', text: 'Failed to load products' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 2000);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const fetchDropdownOptions = async () => {
+    try {
+      const { data: productTypes, error: productTypeError } = await supabase
+        .from('order_dropdown_options')
+        .select('option_value')
+        .eq('option_type', 'product_type');
+
+      const { data: gelatoTypes, error: gelatoTypeError } = await supabase
+        .from('order_dropdown_options')
+        .select('option_value')
+        .eq('option_type', 'gelato_type');
+
+      if (!productTypeError && productTypes) {
+        setProductTypeOptions(productTypes.map(item => item.option_value));
+      }
+
+      if (!gelatoTypeError && gelatoTypes) {
+        setGelatoTypeOptions(gelatoTypes.map(item => item.option_value));
+      }
+    } catch (error) {
+      console.error('Error loading dropdown options:', error);
+    }
+  };
+
+  const handleAddOption = async () => {
+    if (!newOptionValue.trim() || !addOptionType) return;
+
+    const trimmedValue = newOptionValue.trim();
+
+    try {
+      await supabase.from('order_dropdown_options').insert({
+        option_type: addOptionType,
+        option_value: trimmedValue,
+      });
+
+      if (addOptionType === 'product_type') {
+        setProductTypeOptions(prev => [...prev, trimmedValue]);
+      } else if (addOptionType === 'gelato_type') {
+        setGelatoTypeOptions(prev => [...prev, trimmedValue]);
+      }
+
+      setNewOptionValue('');
+      setIsAddOptionModalOpen(false);
+      setAddOptionType(null);
+    } catch (error) {
+      console.error('Error adding option:', error);
+    }
+  };
+
+  const handleRemoveProductType = async (option: string) => {
+    try {
+      const { error } = await supabase
+        .from('order_dropdown_options')
+        .delete()
+        .eq('option_type', 'product_type')
+        .eq('option_value', option);
+
+      if (!error) {
+        setProductTypeOptions(productTypeOptions.filter(opt => opt !== option));
+      }
+    } catch (error) {
+      console.error('Error removing product type:', error);
+    }
+  };
+
+  const handleRemoveGelatoType = async (option: string) => {
+    try {
+      const { error } = await supabase
+        .from('order_dropdown_options')
+        .delete()
+        .eq('option_type', 'gelato_type')
+        .eq('option_value', option);
+
+      if (!error) {
+        setGelatoTypeOptions(gelatoTypeOptions.filter(opt => opt !== option));
+      }
+    } catch (error) {
+      console.error('Error removing gelato type:', error);
     }
   };
 
@@ -201,12 +458,107 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       product_name: clientProduct.product_list.product_name,
       quantity: 1,
       unit_price: clientProduct.custom_price,
-      gelato_type: clientProduct.product_list.product_gelato_type,
-      weight: clientProduct.product_list.product_weight,
+      gelato_type: clientProduct.product_list.product_gelato_type || '',
+      weight: clientProduct.product_list.product_weight || 0,
       request: '',
-      subtotal: clientProduct.custom_price
+      subtotal: clientProduct.custom_price,
+      product_type: clientProduct.product_list.product_type || '',
+      product_cost: clientProduct.product_list.product_cost || 0,
+      product_milkbase: clientProduct.product_list.product_milkbased || 0,
+      product_sugarbase: clientProduct.product_list.product_sugarbased || 0,
+      product_ingredient: clientProduct.product_list.product_ingredient || '',
+      is_manual: false,
+      is_from_product_list: true,
+      publish_to_client: false, // Already assigned to client
+      add_to_product_list: false
     };
     setOrderItems([...orderItems, newItem]);
+  };
+
+  const handleAddProductFromList = (product: Product) => {
+    // Check if product is already assigned to this client
+    const isAlreadyAssigned = availableProducts.some(cp => cp.product_list.id === product.id);
+
+    const newItem: OrderItem = {
+      product_id: product.id,
+      product_name: product.product_name,
+      quantity: 1,
+      unit_price: product.product_price || 0,
+      gelato_type: product.product_gelato_type || '',
+      weight: product.product_weight || 0,
+      request: '',
+      subtotal: product.product_price || 0,
+      product_type: product.product_type || '',
+      product_cost: product.product_cost || 0,
+      product_milkbase: product.product_milkbased || 0,
+      product_sugarbase: product.product_sugarbased || 0,
+      product_ingredient: product.product_ingredient || '',
+      is_manual: false,
+      is_from_product_list: true,
+      publish_to_client: !isAlreadyAssigned, // Default to true if not already assigned
+      add_to_product_list: false
+    };
+    setOrderItems([...orderItems, newItem]);
+    setShowProductPicker(false);
+    setProductPickerSearch('');
+  };
+
+  const handleAddManualItem = () => {
+    if (!manualItemData.product_name.trim()) {
+      setMessage({ type: 'error', text: 'Please enter a product name' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 1000);
+      return;
+    }
+
+    const newItem: OrderItem = {
+      product_id: null,
+      product_name: manualItemData.product_name.trim(),
+      quantity: manualItemData.quantity,
+      unit_price: manualItemData.unit_price,
+      gelato_type: manualItemData.gelato_type,
+      weight: manualItemData.weight,
+      request: manualItemData.request,
+      subtotal: manualItemData.quantity * manualItemData.unit_price,
+      product_type: manualItemData.product_type,
+      product_cost: manualItemData.product_cost,
+      product_milkbase: manualItemData.product_milkbase,
+      product_sugarbase: manualItemData.product_sugarbase,
+      product_ingredient: manualItemData.product_ingredient,
+      is_manual: true,
+      is_from_product_list: false,
+      publish_to_client: true, // Default to true for manual items
+      add_to_product_list: true // Default to true for manual items
+    };
+
+    setOrderItems([...orderItems, newItem]);
+    setShowManualItemEditor(false);
+    resetManualItemData();
+  };
+
+  const resetManualItemData = () => {
+    setManualItemData({
+      product_name: '',
+      product_type: '',
+      gelato_type: '',
+      quantity: 1,
+      weight: 0,
+      unit_price: 0,
+      product_cost: 0,
+      product_milkbase: 0,
+      product_sugarbase: 0,
+      product_ingredient: '',
+      request: ''
+    });
+  };
+
+  const getFilteredAllProducts = () => {
+    const query = productPickerSearch.toLowerCase();
+    if (!query) return allProducts;
+    return allProducts.filter(p =>
+      p.product_name.toLowerCase().includes(query) ||
+      p.product_id.toLowerCase().includes(query) ||
+      p.product_type?.toLowerCase().includes(query)
+    );
   };
 
   // Update handleUpdateQuantity to handle custom price
@@ -225,6 +577,18 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     const newItems = [...orderItems];
     newItems[index].unit_price = price;
     newItems[index].subtotal = newItems[index].quantity * price;
+    setOrderItems(newItems);
+  };
+
+  const handleUpdateItemField = (index: number, field: keyof OrderItem, value: string | number | boolean | null) => {
+    const newItems = [...orderItems];
+    newItems[index] = {
+      ...newItems[index],
+      [field]: value
+    };
+    if (field === 'quantity' || field === 'unit_price') {
+      newItems[index].subtotal = newItems[index].quantity * newItems[index].unit_price;
+    }
     setOrderItems(newItems);
   };
 
@@ -265,12 +629,88 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
         // Generate Order ID
         const orderId = await generateOrderId();
         const totalAmount = calculateGrandTotal();
-        
+
         // Get current timestamp for order_date
         const currentTimestamp = new Date().toISOString();
 
+        // Helper function to generate product ID
+        const generateProductId = async (): Promise<string> => {
+          try {
+            const { data: existingProducts } = await supabase
+              .from('product_list')
+              .select('product_id')
+              .like('product_id', 'GEL-%')
+              .order('product_id', { ascending: false })
+              .limit(1);
+
+            let nextNumber = 1;
+            if (existingProducts && existingProducts.length > 0) {
+              const lastId = existingProducts[0].product_id;
+              const match = lastId.match(/GEL-(\d+)/);
+              if (match) {
+                nextNumber = parseInt(match[1], 10) + 1;
+              }
+            }
+
+            return `GEL-${nextNumber.toString().padStart(4, '0')}`;
+          } catch (error) {
+            console.error('Error generating product ID:', error);
+            return `GEL-${Date.now()}`;
+          }
+        };
+
+        // Step 1: Add manual products to product_list if add_to_product_list is true
+        const manualItemsToAddToList = orderItems.filter(item => item.is_manual && item.add_to_product_list);
+        const productIdMap: Record<string, number> = {}; // Map product name to new product ID
+
+        for (const item of manualItemsToAddToList) {
+          // Check if product already exists by name
+          const { data: existingProduct } = await supabase
+            .from('product_list')
+            .select('id')
+            .eq('product_name', item.product_name.trim())
+            .single();
+
+          if (!existingProduct) {
+            // Generate product ID and add to product_list
+            const productId = await generateProductId();
+
+            const { data: newProduct, error: productError } = await supabase
+              .from('product_list')
+              .insert({
+                product_id: productId,
+                product_name: item.product_name.trim(),
+                product_type: item.product_type || null,
+                product_gelato_type: item.gelato_type || null,
+                product_weight: item.weight || 0,
+                product_milkbased: item.product_milkbase || null,
+                product_sugarbased: item.product_sugarbase || null,
+                product_price: item.unit_price || 0,
+                product_cost: item.product_cost || null,
+                product_ingredient: item.product_ingredient || null,
+                product_created_at: new Date().toISOString()
+              })
+              .select('id')
+              .single();
+
+            if (productError) {
+              console.error('Error adding product to product_list:', productError);
+            } else if (newProduct) {
+              productIdMap[item.product_name] = newProduct.id;
+              console.log(`Added product "${item.product_name}" to product_list with ID: ${newProduct.id}`);
+            }
+          } else {
+            productIdMap[item.product_name] = existingProduct.id;
+          }
+        }
+
         // Insert order with address fields
-        const { data: orderData, error: orderError } = await supabase
+        // Try with published_to_client first, fallback without it if column doesn't exist
+        let orderData = null;
+        let orderError = null;
+
+        // First try with published_to_client column
+        const { data: data1, error: error1 } = await supabase
           .from('client_order')
           .insert({
             order_id: orderId,
@@ -283,10 +723,39 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             ad_postal: postalCode,
             total_amount: totalAmount,
             status: 'Pending',
-            notes: notes || null
+            notes: notes || null,
+            published_to_client: publishToClient
           })
           .select('*')
           .single();
+
+        if (error1 && error1.message?.includes('published_to_client')) {
+          // Column doesn't exist, try without it
+          console.log('published_to_client column not found, inserting without it');
+          const { data: data2, error: error2 } = await supabase
+            .from('client_order')
+            .insert({
+              order_id: orderId,
+              client_auth_id: selectedClient.client_auth_id,
+              order_date: currentTimestamp,
+              delivery_date: deliveryDate,
+              delivery_address: deliveryAddress,
+              ad_streetName: deliveryAddress,
+              ad_country: country,
+              ad_postal: postalCode,
+              total_amount: totalAmount,
+              status: 'Pending',
+              notes: notes || null
+            })
+            .select('*')
+            .single();
+
+          orderData = data2;
+          orderError = error2;
+        } else {
+          orderData = data1;
+          orderError = error1;
+        }
 
         if (orderError) {
           console.error('Order creation error:', orderError);
@@ -299,21 +768,76 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
 
         console.log('Order created successfully:', orderData);
 
-        const orderItemsData = orderItems.map(item => ({
-          order_id: orderData.id,
-          product_id: item.product_id,
-          product_name: item.product_name,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          subtotal: item.subtotal
-        }));
+        // Update product_id for manual items that were added to product_list
+        const orderItemsData = orderItems.map(item => {
+          let productId = item.product_id;
+
+          // If this is a manual item that was added to product list, use the new product ID
+          if (item.is_manual && item.add_to_product_list && productIdMap[item.product_name]) {
+            productId = productIdMap[item.product_name];
+          }
+
+          // Base columns that always exist
+          return {
+            order_id: orderData.id,
+            product_id: productId,
+            product_name: item.product_name,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            subtotal: item.subtotal
+          };
+        });
 
         console.log('Attempting to insert order items:', orderItemsData);
 
-        const { data: insertedItems, error: itemsError } = await supabase
+        // Try inserting with extended columns first, fallback to basic columns
+        let insertedItems = null;
+        let itemsError = null;
+
+        // First try with extended columns
+        const extendedOrderItemsData = orderItems.map(item => {
+          let productId = item.product_id;
+          if (item.is_manual && item.add_to_product_list && productIdMap[item.product_name]) {
+            productId = productIdMap[item.product_name];
+          }
+          return {
+            order_id: orderData.id,
+            product_id: productId,
+            product_name: item.product_name,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            subtotal: item.subtotal,
+            product_type: item.product_type || null,
+            gelato_type: item.gelato_type || null,
+            product_weight: item.weight || 0,
+            calculated_weight: (item.weight || 0) * item.quantity,
+            product_cost: item.product_cost || 0,
+            product_milkbase: item.product_milkbase || 0,
+            product_sugarbase: item.product_sugarbase || 0,
+            product_ingredient: item.product_ingredient || null,
+            product_notes: item.request || null
+          };
+        });
+
+        const { data: itemData1, error: itemError1 } = await supabase
           .from('client_order_item')
-          .insert(orderItemsData)
+          .insert(extendedOrderItemsData)
           .select();
+
+        if (itemError1 && (itemError1.message?.includes('column') || itemError1.message?.includes('schema'))) {
+          // Extended columns don't exist, use basic columns only
+          console.log('Extended columns not found, inserting with basic columns only');
+          const { data: itemData2, error: itemError2 } = await supabase
+            .from('client_order_item')
+            .insert(orderItemsData)
+            .select();
+
+          insertedItems = itemData2;
+          itemsError = itemError2;
+        } else {
+          insertedItems = itemData1;
+          itemsError = itemError1;
+        }
 
         if (itemsError) {
           console.error('Order items creation error:', itemsError);
@@ -321,11 +845,55 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             .from('client_order')
             .delete()
             .eq('id', orderData.id);
-          
+
           throw new Error(`Failed to create order items: ${itemsError.message || 'Unknown error'}`);
         }
 
         console.log('Order items created successfully:', insertedItems);
+
+        // Step 2: Add products to client_product if publish_to_client is true
+        const itemsToPublish = orderItems.filter(item => item.publish_to_client);
+
+        for (const item of itemsToPublish) {
+          let productId = item.product_id;
+
+          // If this is a manual item that was added to product list, use the new product ID
+          if (item.is_manual && productIdMap[item.product_name]) {
+            productId = productIdMap[item.product_name];
+          }
+
+          if (productId) {
+            // Check if product is already assigned to client
+            const { data: existingAssignment } = await supabase
+              .from('client_product')
+              .select('id')
+              .eq('client_auth_id', selectedClient.client_auth_id)
+              .eq('product_id', productId)
+              .single();
+
+            if (!existingAssignment) {
+              // Add to client_product
+              const { error: assignError } = await supabase
+                .from('client_product')
+                .insert({
+                  client_auth_id: selectedClient.client_auth_id,
+                  product_id: productId,
+                  custom_price: item.unit_price,
+                  is_available: true,
+                  is_published: true,
+                  created_at: new Date().toISOString()
+                });
+
+              if (assignError) {
+                console.error('Error assigning product to client:', assignError);
+              } else {
+                console.log(`Assigned product "${item.product_name}" to client with custom price: ${item.unit_price}`);
+              }
+            } else {
+              console.log(`Product "${item.product_name}" is already assigned to client`);
+            }
+          }
+        }
 
         // Success!
         setCreatedOrderId(orderId);
@@ -333,15 +901,15 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
 
       } catch (error) {
         console.error('Error creating order:', error);
-        
+
         let errorMessage = 'Failed to create order';
-        
+
         if (error instanceof Error) {
           errorMessage = error.message;
         } else if (typeof error === 'object' && error !== null) {
           errorMessage = JSON.stringify(error);
         }
-        
+
         setMessage({
           type: 'error',
           text: errorMessage
@@ -360,9 +928,16 @@ const handleClose = () => {
   setCountry('Singapore');
   setPostalCode('');
   setNotes('');
+  setPublishToClient(true);
   setOrderItems([]);
   setClientSearch('');
   setProductSearch('');
+  setShowProductPicker(false);
+  setProductPickerSearch('');
+  setShowManualItemEditor(false);
+  setLoadingProducts(false);
+  setAvailableProducts([]);
+  resetManualItemData();
   setMessage({ type: '', text: '' });
   onClose();
 };
@@ -591,6 +1166,31 @@ const handleClose = () => {
                 />
               </div>
 
+              {/* Publish to Client Toggle */}
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Publish to Client
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Make this order visible in the client&apos;s order history
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPublishToClient(!publishToClient)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    publishToClient ? 'bg-orange-600' : 'bg-gray-300'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      publishToClient ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
               <div className="flex justify-between gap-3 mt-6">
                 <button
                   onClick={() => setStep(1)}
@@ -613,28 +1213,48 @@ const handleClose = () => {
             {/* Step 3: Product Selection */}
             {step === 3 && (
               <div className="space-y-4">
-                {/* Available Products */}
-                <div>
-                  <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
-                    Available Products
-                  </h3>
-                  <div className="relative mb-3">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-                    <input
-                      type="text"
-                      placeholder="Search products..."
-                      value={productSearch}
-                      onChange={(e) => setProductSearch(e.target.value)}
-                      className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    />
-                  </div>
+                {/* Action Buttons */}
+                <div className="flex gap-3 mb-4">
+                  <button
+                    onClick={() => {
+                      setShowProductPicker(true);
+                      // Refetch products if empty
+                      if (allProducts.length === 0) {
+                        fetchAllProducts();
+                      }
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                  >
+                    <Search size={18} />
+                    <span>Select from Product List</span>
+                  </button>
+                  <button
+                    onClick={() => setShowManualItemEditor(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                  >
+                    <Plus size={18} />
+                    <span>Add Manual Item</span>
+                  </button>
+                </div>
 
-                  <div className="border border-gray-200 rounded-lg max-h-64 overflow-y-auto">
-                    {filteredProducts.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500">
-                        No products available for this client
-                      </div>
-                    ) : (
+                {/* Available Client Products (if any) */}
+                {availableProducts.length > 0 && (
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
+                      Client&apos;s Assigned Products
+                    </h3>
+                    <div className="relative mb-3">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                      <input
+                        type="text"
+                        placeholder="Search assigned products..."
+                        value={productSearch}
+                        onChange={(e) => setProductSearch(e.target.value)}
+                        className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+
+                    <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
                       <div className="divide-y divide-gray-200">
                         {filteredProducts.map((cp) => (
                           <div key={cp.id} className="p-3 flex items-center justify-between hover:bg-gray-50">
@@ -673,92 +1293,140 @@ const handleClose = () => {
                           </div>
                         ))}
                       </div>
-                    )}
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Message when no assigned products */}
+                {availableProducts.length === 0 && (
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-blue-700 text-sm">
+                      This client has no assigned products. You can select products from the full product list or add manual items.
+                    </p>
+                  </div>
+                )}
 
                 {/* Order Items */}
                 <div>
                   <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
                     Order Items ({orderItems.length})
                   </h3>
-               
+
                 {orderItems.length === 0 ? (
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500">
                     No products added yet. Add products from the list above.
                   </div>
                 ) : (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="max-h-64 overflow-y-auto">
-                      <table className="w-full">
-                        <thead className="bg-gray-50 sticky top-0">
-                          <tr>
-                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-700">Product</th>
-                            <th className="text-center py-3 px-4 text-xs font-semibold text-gray-700 w-24">Qty</th>
-                            <th className="text-right py-3 px-4 text-xs font-semibold text-gray-700 w-32">Custom Price</th>
-                            <th className="text-right py-3 px-4 text-xs font-semibold text-gray-700 w-28">Subtotal</th>
-                            <th className="text-center py-3 px-4 text-xs font-semibold text-gray-700 w-16">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {orderItems.map((item, index) => (
-                            <tr key={index} className="hover:bg-gray-50">
-                              <td className="py-3 px-4">
-                                <p className="text-sm font-medium">{item.product_name}</p>
-                              </td>
-                              <td className="py-3 px-4 w-24">
-                                <div className="flex justify-center">
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    value={item.quantity}
-                                    onChange={(e) => handleUpdateQuantity(index, parseInt(e.target.value) || 1)}
-                                    className="w-16 px-2 py-1 border border-gray-300 rounded text-center text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                  />
-                                </div>
-                              </td>
-                              <td className="py-3 px-4 w-32">
-                                <div className="flex justify-end items-center gap-1">
-                                  <span className="text-sm text-gray-600">S$</span>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={item.unit_price}
-                                    onChange={(e) => handleUpdatePrice(index, parseFloat(e.target.value) || 0)}
-                                    className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                  />
-                                </div>
-                              </td>
-                              <td className="py-3 px-4 text-right text-sm font-medium w-28">S$ {item.subtotal.toFixed(2)}</td>
-                              <td className="py-3 px-4 text-center w-16">
-                                <button
-                                  onClick={() => handleRemoveItem(index)}
-                                  className="text-red-500 hover:text-red-700 transition-colors inline-flex items-center justify-center"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                  <div className="space-y-3">
+                    {orderItems.map((item, index) => (
+                      <div key={index} className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-sm transition-shadow">
+                        <div className="flex items-start justify-between gap-4">
+                          {/* Product Info */}
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium">{item.product_name}</p>
+                              {item.is_manual && (
+                                <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+                                  Manual
+                                </span>
+                              )}
+                              {item.is_from_product_list && !item.is_manual && (
+                                <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
+                                  From List
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {item.product_type || 'N/A'} • {item.gelato_type || 'N/A'} • {item.weight}kg
+                            </p>
+                          </div>
 
-                    {/* Order Summary */}
-                    <div className="bg-gray-50 p-4 border-t border-gray-200">
-                      <div className="flex justify-between text-sm mb-2">
-                        <span className="text-gray-600">Subtotal:</span>
-                        <span className="font-medium">S$ {calculateTotal().toFixed(2)}</span>
+                          {/* Quantity & Price */}
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-gray-500">Qty:</span>
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.quantity}
+                                onChange={(e) => handleUpdateQuantity(index, parseInt(e.target.value) || 1)}
+                                className="w-14 px-2 py-1 border border-gray-300 rounded text-center text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-gray-500">S$</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={item.unit_price}
+                                onChange={(e) => handleUpdatePrice(index, parseFloat(e.target.value) || 0)}
+                                className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              />
+                            </div>
+                            <div className="text-sm font-medium text-orange-600 w-24 text-right">
+                              S$ {item.subtotal.toFixed(2)}
+                            </div>
+                            <button
+                              onClick={() => handleRemoveItem(index)}
+                              className="text-red-500 hover:text-red-700 transition-colors p-1"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Options Row */}
+                        <div className="flex items-center gap-6 mt-3 pt-3 border-t border-gray-100">
+                          {/* Publish to Client Option */}
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={item.publish_to_client}
+                              onChange={(e) => handleUpdateItemField(index, 'publish_to_client', e.target.checked)}
+                              className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                            />
+                            <span className="text-xs text-gray-600">
+                              Publish to Client
+                              <span className="text-gray-400 ml-1">(Add to client&apos;s assigned products)</span>
+                            </span>
+                          </label>
+
+                          {/* Add to Product List Option (only for manual items) */}
+                          {item.is_manual && (
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={item.add_to_product_list}
+                                onChange={(e) => handleUpdateItemField(index, 'add_to_product_list', e.target.checked)}
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              />
+                              <span className="text-xs text-gray-600">
+                                Add to Product List
+                                <span className="text-gray-400 ml-1">(Save as new product)</span>
+                              </span>
+                            </label>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex justify-between text-sm mb-2">
-                        <span className="text-gray-600">GST (9%):</span>
-                        <span className="font-medium">S$ {calculateGST().toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-lg font-bold border-t pt-2">
-                        <span style={{ color: '#5C2E1F' }}>Total:</span>
-                        <span style={{ color: '#FF5722' }}>S$ {calculateGrandTotal().toFixed(2)}</span>
-                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Order Summary */}
+                {orderItems.length > 0 && (
+                  <div className="mt-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-gray-600">Subtotal:</span>
+                      <span className="font-medium">S$ {calculateTotal().toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-gray-600">GST (9%):</span>
+                      <span className="font-medium">S$ {calculateGST().toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-lg font-bold border-t pt-2">
+                      <span style={{ color: '#5C2E1F' }}>Total:</span>
+                      <span style={{ color: '#FF5722' }}>S$ {calculateGrandTotal().toFixed(2)}</span>
                     </div>
                   </div>
                 )}
@@ -786,6 +1454,398 @@ const handleClose = () => {
         </div>
       </div>
 
+      {/* Product Picker Modal */}
+      {showProductPicker && (
+        <div
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)', zIndex: 9999 }}
+        >
+          <div className="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div className="flex items-center gap-3">
+                <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>
+                  Select Product from List
+                </h3>
+                <span className="text-sm text-gray-500">({allProducts.length} products)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={fetchAllProducts}
+                  disabled={loadingProducts}
+                  className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  {loadingProducts ? 'Loading...' : 'Refresh'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowProductPicker(false);
+                    setProductPickerSearch('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 border-b">
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Search size={16} className="text-gray-400" />
+                </div>
+                <input
+                  type="text"
+                  value={productPickerSearch}
+                  onChange={(e) => setProductPickerSearch(e.target.value)}
+                  placeholder="Search products by name, ID, or type..."
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {loadingProducts ? (
+                <div className="text-center py-8">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-orange-500 border-t-transparent"></div>
+                  <p className="mt-2 text-gray-500">Loading products...</p>
+                </div>
+              ) : getFilteredAllProducts().length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-500 mb-2">Showing {getFilteredAllProducts().length} products</p>
+                  {getFilteredAllProducts().map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() => handleAddProductFromList(product)}
+                      disabled={isProductAdded(product.id)}
+                      className="w-full px-4 py-3 text-left border border-gray-200 rounded-lg hover:bg-orange-50 hover:border-orange-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <div className="flex items-center gap-3">
+                        {product.product_image ? (
+                          <Image
+                            src={`https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${product.product_image}`}
+                            alt={product.product_name}
+                            width={40}
+                            height={40}
+                            className="w-10 h-10 object-cover rounded"
+                            unoptimized
+                          />
+                        ) : (
+                          <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center">
+                            <span className="text-gray-400 text-xs">No img</span>
+                          </div>
+                        )}
+                        <div className="flex-1">
+                          <div className="font-medium text-gray-900">{product.product_name}</div>
+                          <div className="text-sm text-gray-500">
+                            {product.product_id} • {product.product_type || 'N/A'} • S$ {(product.product_price || 0).toFixed(2)}
+                          </div>
+                        </div>
+                        {isProductAdded(product.id) && (
+                          <span className="text-xs text-green-600 font-medium">Added</span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : allProducts.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500 mb-4">No products found in the database</p>
+                  <button
+                    onClick={fetchAllProducts}
+                    className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+                  >
+                    Refresh Products
+                  </button>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  No products found matching your search
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Item Editor Modal */}
+      {showManualItemEditor && (
+        <div
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)', zIndex: 9999 }}
+        >
+          <div className="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-auto shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white">
+              <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>
+                Add Manual Item
+              </h3>
+              <button
+                onClick={() => {
+                  setShowManualItemEditor(false);
+                  resetManualItemData();
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Product Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={manualItemData.product_name}
+                  onChange={(e) => setManualItemData({ ...manualItemData, product_name: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Enter product name"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <CustomDropdown
+                  label="Product Type"
+                  name="product_type"
+                  value={manualItemData.product_type}
+                  options={productTypeOptions}
+                  onChange={(e) => setManualItemData({ ...manualItemData, product_type: e.target.value })}
+                  onAddOption={() => {
+                    setAddOptionType('product_type');
+                    setAddOptionLabel('Product Type');
+                    setIsAddOptionModalOpen(true);
+                  }}
+                  onRemoveOption={handleRemoveProductType}
+                  required={true}
+                />
+
+                <CustomDropdown
+                  label="Gelato Type"
+                  name="gelato_type"
+                  value={manualItemData.gelato_type}
+                  options={gelatoTypeOptions}
+                  onChange={(e) => setManualItemData({ ...manualItemData, gelato_type: e.target.value })}
+                  onAddOption={() => {
+                    setAddOptionType('gelato_type');
+                    setAddOptionLabel('Gelato Type');
+                    setIsAddOptionModalOpen(true);
+                  }}
+                  onRemoveOption={handleRemoveGelatoType}
+                  required={true}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quantity <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={manualItemData.quantity}
+                    onChange={(e) => setManualItemData({ ...manualItemData, quantity: parseInt(e.target.value) || 1 })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Weight (kg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualItemData.weight}
+                    onChange={(e) => setManualItemData({ ...manualItemData, weight: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Price (S$) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualItemData.unit_price}
+                    onChange={(e) => setManualItemData({ ...manualItemData, unit_price: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Cost (S$)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualItemData.product_cost}
+                    onChange={(e) => setManualItemData({ ...manualItemData, product_cost: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Milk Based
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualItemData.product_milkbase}
+                    onChange={(e) => setManualItemData({ ...manualItemData, product_milkbase: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Sugar Based
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualItemData.product_sugarbase}
+                    onChange={(e) => setManualItemData({ ...manualItemData, product_sugarbase: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Ingredients
+                </label>
+                <textarea
+                  value={manualItemData.product_ingredient}
+                  onChange={(e) => setManualItemData({ ...manualItemData, product_ingredient: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Enter ingredients (optional)"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes / Request
+                </label>
+                <textarea
+                  value={manualItemData.request}
+                  onChange={(e) => setManualItemData({ ...manualItemData, request: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Enter any notes or special requests (optional)"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t sticky bottom-0 bg-white">
+              <button
+                onClick={() => {
+                  setShowManualItemEditor(false);
+                  resetManualItemData();
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddManualItem}
+                disabled={!manualItemData.product_name.trim()}
+                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Add Item
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Option Modal */}
+      {isAddOptionModalOpen && (
+        <div
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)', zIndex: 10000 }}
+        >
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>
+                Add New {addOptionLabel}
+              </h3>
+              <button
+                onClick={() => {
+                  setIsAddOptionModalOpen(false);
+                  setAddOptionType(null);
+                  setNewOptionValue('');
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2 text-gray-700">
+                Option Name
+              </label>
+              <input
+                type="text"
+                value={newOptionValue}
+                onChange={(e) => setNewOptionValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddOption();
+                  }
+                }}
+                placeholder="Enter option name"
+                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setIsAddOptionModalOpen(false);
+                  setAddOptionType(null);
+                  setNewOptionValue('');
+                }}
+                className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddOption}
+                disabled={!newOptionValue.trim()}
+                className="px-4 py-2 bg-orange-500 text-white rounded text-sm hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Add Option
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Success Modal */}
       {isSuccessModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-60" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
@@ -801,9 +1861,14 @@ const handleClose = () => {
             <p className="text-gray-600 mb-2">
               Order ID: <span className="font-semibold">{createdOrderId}</span>
             </p>
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 mb-2">
               The order has been created for {selectedClient?.client_businessName}
             </p>
+            {!publishToClient && (
+              <p className="text-sm text-orange-600 mb-4">
+                (This order is not visible to the client)
+              </p>
+            )}
             <button
               onClick={handleSuccessClose}
               className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"

@@ -1,6 +1,6 @@
 'use client';
-import { useState, useEffect} from 'react';
-import { X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Trash2 } from 'lucide-react';
 import supabase from '@/lib/client';
 
 interface EditOrderModalProps {
@@ -25,13 +25,14 @@ interface EditOrderModalProps {
 
 interface OrderItem {
   id: number;
-  product_id: number;
+  product_id: number | null;
   product_name: string;
   quantity: number;
   unit_price: number;
   subtotal: number;
   weight: number;
   request: string | null;
+  isDeleted?: boolean; // Track items to be deleted
 }
 
 export default function EditOrderModal({ isOpen, onClose, onSuccess, order }: EditOrderModalProps) {
@@ -142,92 +143,137 @@ useEffect(() => {
     setOrderItems(updatedItems);
   };
 
+  const handleRemoveItem = (index: number) => {
+    const updatedItems = [...orderItems];
+    // Mark the item as deleted instead of removing it immediately
+    // This way we can delete it from the database when submitting
+    updatedItems[index] = {
+      ...updatedItems[index],
+      isDeleted: true
+    };
+    setOrderItems(updatedItems);
+  };
+
+  const handleRestoreItem = (index: number) => {
+    const updatedItems = [...orderItems];
+    updatedItems[index] = {
+      ...updatedItems[index],
+      isDeleted: false
+    };
+    setOrderItems(updatedItems);
+  };
+
   const calculateTotalAmount = () => {
-    const subtotal = orderItems.reduce((sum, item) => sum + item.subtotal, 0);
+    // Only count items that are not deleted
+    const subtotal = orderItems
+      .filter(item => !item.isDeleted)
+      .reduce((sum, item) => sum + item.subtotal, 0);
     const gst = subtotal * 0.09;
     return subtotal + gst;
   };
 
+  const activeOrderItems = orderItems.filter(item => !item.isDeleted);
+  const deletedOrderItems = orderItems.filter(item => item.isDeleted);
+
 
   const handleSubmit = async () => {
-  try {
-    setLoading(true);
-    console.log('Starting order update...');
-    console.log('Order ID:', order.id);
-    console.log('Form Data:', formData);
-    console.log('Order Items:', orderItems);
+    try {
+      setLoading(true);
+      console.log('Starting order update...');
+      console.log('Order ID:', order.id);
+      console.log('Form Data:', formData);
+      console.log('Order Items:', orderItems);
 
-    // Validate dates
-    if (!formData.order_date || !formData.delivery_date) {
-      alert('Please fill in all required fields');
-      setLoading(false);
-      return;
-    }
-
-    console.log('Calculating total amount...');
-    const totalAmount = calculateTotalAmount();
-    console.log('Total Amount:', totalAmount);
-
-    // Update order (notes is stored here in client_order table)
-    console.log('Updating order in database...');
-    const { data: orderData, error: orderError } = await supabase
-      .from('client_order')
-      .update({
-        order_date: formData.order_date,
-        delivery_date: formData.delivery_date,
-        delivery_address: formData.delivery_address,
-        tracking_no: formData.tracking_no,
-        notes: formData.notes, // Notes stored in client_order
-        status: formData.status,
-        total_amount: totalAmount,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', order.id);
-
-    console.log('Order update response:', { data: orderData, error: orderError });
-
-    if (orderError) {
-      console.error('Order update error details:', orderError);
-      throw new Error(`Order update failed: ${orderError.message}`);
-    }
-
-    // Update order items (without notes - that's in client_order)
-    console.log('Updating order items...');
-    for (let i = 0; i < orderItems.length; i++) {
-      const item = orderItems[i];
-      console.log(`Updating item ${i + 1}/${orderItems.length}:`, item);
-      
-      const { data: itemData, error: itemError } = await supabase
-        .from('client_order_item')
-        .update({
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          subtotal: item.subtotal
-          // Removed: notes: item.request (this column doesn't exist in client_order_item)
-        })
-        .eq('id', item.id);
-
-      console.log(`Item ${i + 1} update response:`, { data: itemData, error: itemError });
-
-      if (itemError) {
-        console.error(`Item ${i + 1} update error:`, itemError);
-        throw new Error(`Item update failed: ${itemError.message}`);
+      // Validate dates
+      if (!formData.order_date || !formData.delivery_date) {
+        alert('Please fill in all required fields');
+        setLoading(false);
+        return;
       }
+
+      // Check if there are any active items left
+      const itemsToKeep = orderItems.filter(item => !item.isDeleted);
+      if (itemsToKeep.length === 0) {
+        alert('Order must have at least one item. Please add items or cancel the order instead.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('Calculating total amount...');
+      const totalAmount = calculateTotalAmount();
+      console.log('Total Amount:', totalAmount);
+
+      // Update order (notes is stored here in client_order table)
+      console.log('Updating order in database...');
+      const { data: orderData, error: orderError } = await supabase
+        .from('client_order')
+        .update({
+          order_date: formData.order_date,
+          delivery_date: formData.delivery_date,
+          delivery_address: formData.delivery_address,
+          tracking_no: formData.tracking_no,
+          notes: formData.notes,
+          status: formData.status,
+          total_amount: totalAmount,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', order.id);
+
+      console.log('Order update response:', { data: orderData, error: orderError });
+
+      if (orderError) {
+        console.error('Order update error details:', orderError);
+        throw new Error(`Order update failed: ${orderError.message}`);
+      }
+
+      // Delete items marked for deletion
+      const itemsToDelete = orderItems.filter(item => item.isDeleted);
+      if (itemsToDelete.length > 0) {
+        console.log('Deleting removed items:', itemsToDelete.map(i => i.id));
+        const { error: deleteError } = await supabase
+          .from('client_order_item')
+          .delete()
+          .in('id', itemsToDelete.map(item => item.id));
+
+        if (deleteError) {
+          console.error('Error deleting items:', deleteError);
+          throw new Error(`Failed to remove items: ${deleteError.message}`);
+        }
+      }
+
+      // Update remaining order items
+      console.log('Updating order items...');
+      for (let i = 0; i < itemsToKeep.length; i++) {
+        const item = itemsToKeep[i];
+        console.log(`Updating item ${i + 1}/${itemsToKeep.length}:`, item);
+
+        const { data: itemData, error: itemError } = await supabase
+          .from('client_order_item')
+          .update({
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            subtotal: item.subtotal
+          })
+          .eq('id', item.id);
+
+        console.log(`Item ${i + 1} update response:`, { data: itemData, error: itemError });
+
+        if (itemError) {
+          console.error(`Item ${i + 1} update error:`, itemError);
+          throw new Error(`Item update failed: ${itemError.message}`);
+        }
+      }
+
+      onSuccess();
+      onClose();
+    } catch (error: unknown) {
+      console.error('Caught error in handleSubmit:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Failed to update order: ${errorMessage}`);
+    } finally {
+      setLoading(false);
     }
-    onSuccess();
-    onClose();
-  } catch (error: unknown) {
-    console.error('Caught error in handleSubmit:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    
-    console.error('Error message:', errorMessage);
-    console.error('Error stack:', errorStack);
-    alert(`Failed to update order: ${errorMessage}`);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   if (!isOpen) return null;
 
@@ -353,43 +399,84 @@ useEffect(() => {
           {/* Order Items */}
           <div>
             <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
-              Order Items
+              Order Items ({activeOrderItems.length})
             </h3>
             <div className="overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
-                    <th className="text-left py-2 px-2 font-bold text-xs w-[25%]">PRODUCT</th>
-                    <th className="text-center py-2 px-2 font-bold text-xs w-[12%]">QUANTITY</th>
-                    <th className="text-right py-2 px-2 font-bold text-xs w-[13%]">UNIT PRICE</th>
-                    <th className="text-right py-2 px-2 font-bold text-xs w-[13%]">SUBTOTAL</th>
+                    <th className="text-left py-2 px-2 font-bold text-xs w-[30%]">PRODUCT</th>
+                    <th className="text-center py-2 px-2 font-bold text-xs w-[15%]">QUANTITY</th>
+                    <th className="text-right py-2 px-2 font-bold text-xs w-[18%]">UNIT PRICE</th>
+                    <th className="text-right py-2 px-2 font-bold text-xs w-[18%]">SUBTOTAL</th>
+                    <th className="text-center py-2 px-2 font-bold text-xs w-[10%]">ACTION</th>
                   </tr>
                 </thead>
                 <tbody>
                   {orderItems.map((item, index) => (
-                    <tr key={item.id} className="border-b border-gray-200">
-                      <td className="py-2 px-2 text-xs">{item.product_name}</td>
+                    <tr
+                      key={item.id}
+                      className={`border-b border-gray-200 ${item.isDeleted ? 'bg-red-50 opacity-50' : ''}`}
+                    >
+                      <td className="py-2 px-2 text-xs">
+                        <span className={item.isDeleted ? 'line-through text-red-500' : ''}>
+                          {item.product_name}
+                        </span>
+                        {item.isDeleted && (
+                          <span className="ml-2 text-red-500 text-xs">(Will be removed)</span>
+                        )}
+                      </td>
                       <td className="py-2 px-2 text-center">
-                        <input
-                          type="number"
-                          value={item.quantity}
-                          onChange={(e) => handleItemChange(index, 'quantity', Number(e.target.value))}
-                          min="1"
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-center text-xs"
-                        />
+                        {item.isDeleted ? (
+                          <span className="text-gray-400">{item.quantity}</span>
+                        ) : (
+                          <input
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => handleItemChange(index, 'quantity', Number(e.target.value))}
+                            min="1"
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-center text-xs"
+                          />
+                        )}
                       </td>
                       <td className="py-2 px-2 text-right">
-                        <input
-                          type="number"
-                          value={item.unit_price}
-                          onChange={(e) => handleItemChange(index, 'unit_price', Number(e.target.value))}
-                          step="0.01"
-                          min="0"
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-right text-xs"
-                        />
+                        {item.isDeleted ? (
+                          <span className="text-gray-400">${item.unit_price.toFixed(2)}</span>
+                        ) : (
+                          <input
+                            type="number"
+                            value={item.unit_price}
+                            onChange={(e) => handleItemChange(index, 'unit_price', Number(e.target.value))}
+                            step="0.01"
+                            min="0"
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-right text-xs"
+                          />
+                        )}
                       </td>
                       <td className="py-2 px-2 text-right text-xs font-medium">
-                        ${item.subtotal.toFixed(2)}
+                        <span className={item.isDeleted ? 'text-gray-400 line-through' : ''}>
+                          ${item.subtotal.toFixed(2)}
+                        </span>
+                      </td>
+                      <td className="py-2 px-2 text-center">
+                        {item.isDeleted ? (
+                          <button
+                            onClick={() => handleRestoreItem(index)}
+                            className="text-green-500 hover:text-green-700 text-xs underline"
+                            title="Restore item"
+                          >
+                            Restore
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleRemoveItem(index)}
+                            className="text-red-500 hover:text-red-700 transition-colors"
+                            title="Remove item"
+                            disabled={activeOrderItems.length <= 1}
+                          >
+                            <Trash2 size={16} className={activeOrderItems.length <= 1 ? 'opacity-30' : ''} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -397,16 +484,22 @@ useEffect(() => {
               </table>
             </div>
 
+            {deletedOrderItems.length > 0 && (
+              <p className="text-sm text-red-500 mt-2">
+                {deletedOrderItems.length} item(s) will be removed when you save
+              </p>
+            )}
+
             {/* Order Summary */}
             <div className="mt-4 flex justify-end">
               <div className="w-64 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Subtotal:</span>
-                  <span>${orderItems.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2)}</span>
+                  <span>${activeOrderItems.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>GST (9%):</span>
-                  <span>${(orderItems.reduce((sum, item) => sum + item.subtotal, 0) * 0.09).toFixed(2)}</span>
+                  <span>${(activeOrderItems.reduce((sum, item) => sum + item.subtotal, 0) * 0.09).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-lg font-bold border-t pt-2" style={{ color: '#5C2E1F' }}>
                   <span>Total:</span>

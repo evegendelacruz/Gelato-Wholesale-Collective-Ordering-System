@@ -585,10 +585,29 @@ export default function ProductPage() {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      // Fetch products, filtering out soft-deleted ones
+      // Use .neq or .is to filter - try both approaches for compatibility
+      let data, error;
+
+      // Try fetching with is_deleted filter first
+      const result1 = await supabase
         .from("product_list")
         .select("*")
+        .or("is_deleted.is.null,is_deleted.eq.false")
         .order("id", { ascending: false });
+
+      if (result1.error && result1.error.message?.includes("is_deleted")) {
+        // is_deleted column doesn't exist, fetch all
+        const result2 = await supabase
+          .from("product_list")
+          .select("*")
+          .order("id", { ascending: false });
+        data = result2.data;
+        error = result2.error;
+      } else {
+        data = result1.data;
+        error = result1.error;
+      }
 
       if (error) {
         console.error("Supabase error:", error);
@@ -996,7 +1015,39 @@ export default function ProductPage() {
         idsToDelete.includes(p.id)
       );
 
-      // Delete product images
+      // Step 1: Remove from client_product (assigned products)
+      await supabase
+        .from("client_product")
+        .delete()
+        .in("product_id", idsToDelete);
+
+      // Step 2: Remove from client_basket
+      await supabase
+        .from("client_basket")
+        .delete()
+        .in("product_id", idsToDelete);
+
+      // Step 3: Soft delete - mark products as deleted instead of hard delete
+      // This preserves order history and references
+      const { error } = await supabase
+        .from("product_list")
+        .update({ is_deleted: true })
+        .in("id", idsToDelete);
+
+      if (error) {
+        const errorMsg = error.message || "";
+
+        // If is_deleted column doesn't exist, show helpful message
+        if (errorMsg.includes("is_deleted") || errorMsg.includes("column")) {
+          throw new Error(
+            "Please run the database migration first. Go to Supabase SQL Editor and run:\n\n" +
+            "ALTER TABLE product_list ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false;"
+          );
+        }
+        throw new Error(errorMsg || "Failed to delete product(s)");
+      }
+
+      // Delete product images after successful soft delete
       const imagesToDelete = productsToDelete
         .filter((p) => p.product_image)
         .map((p) => p.product_image as string);
@@ -1004,14 +1055,6 @@ export default function ProductPage() {
       if (imagesToDelete.length > 0) {
         await supabase.storage.from("gwc_files").remove(imagesToDelete);
       }
-
-      // Delete from database
-      const { error } = await supabase
-        .from("product_list")
-        .delete()
-        .in("id", idsToDelete);
-
-      if (error) throw error;
 
       // Refresh products list
       await fetchProducts();
@@ -1021,11 +1064,12 @@ export default function ProductPage() {
       setIsDeleteSuccessOpen(true);
     } catch (error) {
       console.error("Error deleting products:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error) || "Unknown error";
       setMessage({
         type: "error",
-        text: "Failed to delete product(s). Please try again.",
+        text: errorMessage,
       });
-      setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+      setTimeout(() => setMessage({ type: "", text: "" }), 10000);
     } finally {
       setLoading(false);
     }

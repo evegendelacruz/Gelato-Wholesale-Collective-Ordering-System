@@ -86,6 +86,7 @@ model ProductList {
   product_description String?
   product_cost        Float?
   product_modified_at DateTime?
+  is_deleted          Boolean   @default(false)
 
   // Sticker codes
   sticker_bbd_code    String?   // BBD code for old sticker (e.g., 30302026)
@@ -159,23 +160,24 @@ model ClientBasket {
 }
 
 model ClientOrder {
-  id               Int       @id @default(autoincrement())
-  order_id         String    @unique
-  client_auth_id   String
-  order_date       String
-  delivery_date    String
-  delivery_address String?
-  total_amount     Float
-  status           String    @default("Pending")
-  notes            String?
-  invoice_id       String?
-  tracking_no      String?
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
-  company_name     String?
-  statement_id     String?
-  pdf_generated    Boolean   @default(false)
-  pdf_generated_at DateTime?
+  id                  Int       @id @default(autoincrement())
+  order_id            String    @unique
+  client_auth_id      String
+  order_date          String
+  delivery_date       String
+  delivery_address    String?
+  total_amount        Float
+  status              String    @default("Pending")
+  notes               String?
+  invoice_id          String?
+  tracking_no         String?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+  company_name        String?
+  statement_id        String?
+  pdf_generated       Boolean   @default(false)
+  pdf_generated_at    DateTime?
+  published_to_client Boolean   @default(true)
 
   // Relations
   client    ClientUser       @relation(fields: [client_auth_id], references: [client_auth_id], onDelete: Cascade)
@@ -190,17 +192,26 @@ model ClientOrder {
 }
 
 model ClientOrderItem {
-  id           Int    @id @default(autoincrement())
-  order_id     Int
-  product_id   Int
-  product_name String
-  quantity     Int
-  unit_price   Float
-  subtotal     Float
+  id                Int     @id @default(autoincrement())
+  order_id          Int
+  product_id        Int?
+  product_name      String
+  quantity          Int
+  unit_price        Float
+  subtotal          Float
+  product_type      String?
+  gelato_type       String?
+  product_weight    Float?
+  calculated_weight Float?
+  product_cost      Float?
+  product_milkbase  Float?
+  product_sugarbase Float?
+  product_ingredient String?
+  product_notes     String?
 
   // Relations
-  order   ClientOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  product ProductList @relation(fields: [product_id], references: [id], onDelete: Restrict)
+  order   ClientOrder  @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product ProductList? @relation(fields: [product_id], references: [id], onDelete: SetNull)
 
   @@index([order_id])
   @@map("client_order_item")
@@ -232,7 +243,7 @@ model CustomerOrder {
 model CustomerOrderItem {
   id                Int     @id @default(autoincrement())
   order_id          Int
-  product_id        String
+  product_id        String?
   product_name      String
   quantity          Int
   calculated_weight String?
@@ -247,7 +258,7 @@ model CustomerOrderItem {
 
   // Relations
   order   CustomerOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  product ProductList?  @relation(fields: [product_id], references: [product_id], onDelete: Restrict)
+  product ProductList?  @relation(fields: [product_id], references: [product_id], onDelete: SetNull)
 
   @@index([order_id])
   @@map("customer_order_item")
