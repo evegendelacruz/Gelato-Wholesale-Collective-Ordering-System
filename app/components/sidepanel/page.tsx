@@ -44,7 +44,8 @@ export default function Sidepanel() {
       icon: User,
       submenu: [
         { id: 'client', label: 'Client Account', path: '/admin/dashboard/client' },
-        { id: 'statement', label: 'Client Statement', path: '/admin/dashboard/client/statement' }
+        { id: 'statement', label: 'Client Statement', path: '/admin/dashboard/client/statement' },
+        { id: 'quotation', label: 'Client Quotation', path: '/admin/dashboard/client/quotation' }
       ]
     },
     {

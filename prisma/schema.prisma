@@ -55,10 +55,11 @@ model ClientUser {
   ad_billing_postal        String?
 
   // Relations
-  clientProducts  ClientProduct[]
-  clientOrders    ClientOrder[]
-  clientBasket    ClientBasket[]
+  clientProducts   ClientProduct[]
+  clientOrders     ClientOrder[]
+  clientBasket     ClientBasket[]
   clientStatements ClientStatement[]
+  clientQuotations ClientQuotation[]
 
   @@map("client_user")
 }
@@ -96,10 +97,11 @@ model ProductList {
   sticker_gpbn_code   String?   // GPBN code (e.g., GPBN3000)
 
   // Relations
-  clientProducts     ClientProduct[]
-  clientOrderItems   ClientOrderItem[]
-  customerOrderItems CustomerOrderItem[]
-  clientBasketItems  ClientBasket[]
+  clientProducts      ClientProduct[]
+  clientOrderItems    ClientOrderItem[]
+  customerOrderItems  CustomerOrderItem[]
+  clientBasketItems   ClientBasket[]
+  quotationItems      ClientQuotationItem[]
 
   @@map("product_list")
 }
@@ -300,6 +302,53 @@ model DeliveryReport {
 
   @@index([delivery_date])
   @@map("delivery_reports")
+}
+
+// ============================================
+// QUOTATION TABLES
+// ============================================
+
+model ClientQuotation {
+  id               Int       @id @default(autoincrement())
+  quotation_id     String    @unique
+  client_auth_id   String?
+  company_name     String?
+  business_address String?
+  date_created     DateTime  @default(now())
+  valid_until      DateTime
+  total_amount     Float     @default(0)
+  status           String    @default("Pending")
+  notes            String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  // Relations
+  client ClientUser?           @relation(fields: [client_auth_id], references: [client_auth_id], onDelete: Cascade)
+  items  ClientQuotationItem[]
+
+  @@index([client_auth_id])
+  @@index([date_created])
+  @@index([status])
+  @@map("client_quotation")
+}
+
+model ClientQuotationItem {
+  id           Int     @id @default(autoincrement())
+  quotation_id Int
+  product_id   Int?
+  product_name String
+  quantity     Int     @default(1)
+  unit_price   Float   @default(0)
+  subtotal     Float   @default(0)
+  description  String?
+  created_at   DateTime @default(now())
+
+  // Relations
+  quotation ClientQuotation @relation(fields: [quotation_id], references: [id], onDelete: Cascade)
+  product   ProductList?    @relation(fields: [product_id], references: [id], onDelete: SetNull)
+
+  @@index([quotation_id])
+  @@map("client_quotation_item")
 }
 
 // ============================================
