@@ -198,8 +198,8 @@ export default function OrderPage() {
   // Use ref for GPBN to avoid closure issues - this stores the starting code for current order
   const gpbnStartCodeRef = useRef<string | null>(null);
 
-  // GPBN ranges pre-assigned to each order (key = order.id, value = { start, end, itemCount })
-  const [orderGpbnRanges, setOrderGpbnRanges] = useState<Record<number, { start: number; end: number; itemCount: number }>>({});
+  // GPBN codes by delivery date (key = delivery_date string, value = GPBN number)
+  const [deliveryDateGpbn, setDeliveryDateGpbn] = useState<Record<string, number>>({});
 
   // Refs for dropdown positioning
   const sortButtonRef = useRef<HTMLButtonElement>(null);
@@ -353,46 +353,37 @@ useEffect(() => {
         });
         setOrders(ordersWithCompany);
 
-        // Calculate GPBN ranges for each order
-        // First, get item counts for all orders
-        const orderIds = ordersWithCompany.map((o: Order) => o.id);
-        if (orderIds.length > 0) {
-          const { data: itemCounts } = await supabase
-            .from('client_order_item')
-            .select('order_id, quantity')
-            .in('order_id', orderIds);
+        // Calculate GPBN by order date - all orders placed on the same day get the same GPBN
+        // Fetch order dates from BOTH client orders AND online orders to ensure synchronized GPBN
+        // GPBN is sequential: earliest date = 3000, next date = 3001, etc.
 
-          // Sum quantities per order
-          const quantityByOrder: Record<number, number> = {};
-          if (itemCounts) {
-            itemCounts.forEach((item: { order_id: number; quantity: number }) => {
-              quantityByOrder[item.order_id] = (quantityByOrder[item.order_id] || 0) + item.quantity;
-            });
-          }
+        // Get client order dates
+        const clientOrderDates = ordersWithCompany.map((o: Order) => {
+          const date = new Date(o.order_date);
+          return date.toISOString().split('T')[0];
+        });
 
-          // Sort orders chronologically (oldest first) to assign GPBN in order
-          const sortedOrders = [...ordersWithCompany].sort((a: Order, b: Order) =>
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-          );
+        // Also fetch online order dates to ensure GPBN is synchronized
+        const { data: onlineOrders } = await supabase
+          .from('customer_order')
+          .select('order_date');
 
-          // Calculate cumulative GPBN ranges starting from 3000
-          let currentGpbn = 2999; // First GPBN will be 3000
-          const gpbnRanges: Record<number, { start: number; end: number; itemCount: number }> = {};
+        const onlineOrderDates = (onlineOrders || []).map((o: { order_date: string }) => {
+          const date = new Date(o.order_date);
+          return date.toISOString().split('T')[0];
+        });
 
-          sortedOrders.forEach((order: Order) => {
-            const itemCount = quantityByOrder[order.id] || 0;
-            if (itemCount > 0) {
-              const startGpbn = currentGpbn + 1;
-              const endGpbn = currentGpbn + itemCount;
-              gpbnRanges[order.id] = { start: startGpbn, end: endGpbn, itemCount };
-              currentGpbn = endGpbn;
-            } else {
-              gpbnRanges[order.id] = { start: 0, end: 0, itemCount: 0 };
-            }
-          });
+        // Combine all dates and get unique sorted dates
+        const allOrderDates = [...clientOrderDates, ...onlineOrderDates];
+        const uniqueOrderDates = [...new Set(allOrderDates)].sort();
 
-          setOrderGpbnRanges(gpbnRanges);
-        }
+        const gpbnByDate: Record<string, number> = {};
+        uniqueOrderDates.forEach((dateStr, index) => {
+          // GPBN = 3000 + sequential index (earliest date = 3000)
+          gpbnByDate[dateStr] = 3000 + index;
+        });
+
+        setDeliveryDateGpbn(gpbnByDate);
       }
 
       setError(null);
@@ -956,138 +947,30 @@ const handleDelete = async () => {
 
     // Fetch order items if not already fetched
     if (!rowOrderItems[order.id]) {
-      try {
-        // Simple query first - no joins for faster response
-        const { data: items, error } = await supabase
-          .from('client_order_item')
-          .select('*')
-          .eq('order_id', order.id);
+      // Fetch order items (product_type is stored directly in order item)
+      const { data: items } = await supabase
+        .from('client_order_item')
+        .select('*')
+        .eq('order_id', order.id);
 
-        if (error) throw error;
-
-        // Set items immediately with basic data
-        const basicItems = (items || []).map(item => ({
-          ...item,
-          product_type: item.product_type || 'N/A',
-          display_product_name: item.product_name || 'Unknown Product',
-          calculated_weight: item.calculated_weight || '-',
-          sticker_bbd_code: null,
-          sticker_pbn_code: null,
-          sticker_barcode: null,
-          product_ingredient: item.product_ingredient || null
-        }));
-
-        setRowOrderItems(prev => ({
-          ...prev,
-          [order.id]: basicItems
-        }));
-
-        // Then fetch product details in background for sticker codes and ingredients
-        if (items && items.length > 0) {
-          // Fetch all products to enable flexible matching
-          const { data: products } = await supabase
-            .from('product_list')
-            .select('id, product_id, product_type, product_name, product_weight, product_ingredient, sticker_bbd_code, sticker_pbn_code, sticker_barcode');
-
-          if (products) {
-            const allProductsList = products;
-
-            // Create maps for flexible lookup
-            const productMapById = new Map(products.map(p => [p.id, p]));
-            const productMapByProductId = new Map(products.map(p => [p.product_id, p]));
-            const productMapByName = new Map(products.map(p => [p.product_name?.toLowerCase().trim(), p]));
-
-            // Helper function to normalize string for comparison
-            const normalizeForMatch = (str: string): string => {
-              return str.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
-            };
-
-            // Helper function to get words from a string
-            const getWords = (str: string): string[] => {
-              return normalizeForMatch(str).split(' ').filter(w => w.length > 2);
-            };
-
-            const enrichedItems = items.map(item => {
-              // Try to find product by numeric id first, then string product_id, then by name
-              let productData = productMapById.get(item.product_id);
-              if (!productData && item.product_id) {
-                productData = productMapByProductId.get(item.product_id);
-              }
-              if (!productData && item.product_name) {
-                const normalizedName = item.product_name.toLowerCase().trim();
-                productData = productMapByName.get(normalizedName);
-
-                // Try normalized match (without special chars)
-                if (!productData) {
-                  const cleanName = normalizeForMatch(item.product_name);
-                  for (const [pName, p] of productMapByName.entries()) {
-                    if (pName && normalizeForMatch(pName) === cleanName) {
-                      productData = p;
-                      break;
-                    }
-                  }
-                }
-
-                // Try partial match if exact match fails
-                if (!productData) {
-                  for (const [pName, p] of productMapByName.entries()) {
-                    if (pName && (pName.includes(normalizedName) || normalizedName.includes(pName))) {
-                      productData = p;
-                      break;
-                    }
-                  }
-                }
-
-                // Try word-based matching
-                if (!productData) {
-                  const itemWords = getWords(item.product_name);
-                  if (itemWords.length > 0) {
-                    let bestMatch = null;
-                    let bestScore = 0;
-
-                    for (const product of allProductsList) {
-                      if (!product.product_name) continue;
-                      const productWords = getWords(product.product_name);
-                      const matchingWords = itemWords.filter(w => productWords.includes(w));
-                      const score = matchingWords.length / Math.max(itemWords.length, productWords.length);
-
-                      if (score > bestScore && score >= 0.5) {
-                        bestScore = score;
-                        bestMatch = product;
-                      }
-                    }
-
-                    productData = bestMatch;
-                  }
-                }
-              }
-
-              console.log('Row expand - Item:', item.product_name, '-> Product:', productData?.product_name, '| Ingredient:', productData?.product_ingredient?.substring(0, 30));
-
-              return {
-                ...item,
-                product_type: productData?.product_type || item.product_type || 'N/A',
-                display_product_name: productData?.product_name || item.product_name || 'Unknown Product',
-                calculated_weight: item.calculated_weight ||
-                  (productData?.product_weight ?
-                    (Number(productData.product_weight) * Number(item.quantity)).toFixed(2) :
-                    '-'),
-                sticker_bbd_code: productData?.sticker_bbd_code || null,
-                sticker_pbn_code: productData?.sticker_pbn_code || null,
-                sticker_barcode: productData?.sticker_barcode || null,
-                product_ingredient: productData?.product_ingredient || item.product_ingredient || null
-              };
-            });
-
-            setRowOrderItems(prev => ({
-              ...prev,
-              [order.id]: enrichedItems
-            }));
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching order items:', error);
+      if (!items || items.length === 0) {
+        setRowOrderItems(prev => ({ ...prev, [order.id]: [] }));
+        return;
       }
+
+      // Map items - product_type comes directly from the order item
+      const enrichedItems = items.map(item => ({
+        ...item,
+        product_type: item.product_type || 'N/A',
+        gelato_type: item.gelato_type || 'Dairy',
+        display_product_name: item.product_name || 'Unknown Product',
+        calculated_weight: item.calculated_weight || '-'
+      }));
+
+      setRowOrderItems(prev => ({
+        ...prev,
+        [order.id]: enrichedItems
+      }));
     }
   };
 
@@ -1250,20 +1133,22 @@ const handleDelete = async () => {
     setNewStickerItems(stickerItems);
     setTotalStickerCount(item.quantity);
 
-    // Use the pre-assigned GPBN range for this order
-    const gpbnRange = orderGpbnRanges[orderId];
-    const lastGpbnNumber = gpbnRange?.start ? gpbnRange.start - 1 : 2999;
-    const startCode = `GPBN${lastGpbnNumber}`;
-    gpbnStartCodeRef.current = startCode;
+    // Get GPBN based on order date - all orders placed on same day get same GPBN
+    const orderDateStr = new Date(order.order_date).toISOString().split('T')[0];
+    const gpbnNumber = deliveryDateGpbn[orderDateStr] || 3000;
+
+    // Store the fixed GPBN code for use by preview and download functions
+    const gpbnCode = `GPBN${gpbnNumber}`;
+    gpbnStartCodeRef.current = gpbnCode;
 
     // Generate previews
     if (stickerType === "barcode") {
       const previewUrl = generateOrderBarcodeStickersPreview(stickerItems);
       setBarcodeStickerPreviewUrl(previewUrl);
     } else {
-      const { previewUrl, lastGpbnCode: newGpbn } = generateOrderProductStickersPreview(stickerItems, orderDate, startCode);
+      const { previewUrl } = generateOrderProductStickersPreview(stickerItems, orderDate, gpbnCode, true);
       setProductStickerPreviewUrl(previewUrl);
-      setLastGpbnCode(newGpbn);
+      setLastGpbnCode(gpbnCode);
     }
 
     setIsGeneratingNewSticker(false);
@@ -1488,23 +1373,22 @@ const handleDelete = async () => {
     const totalCount = stickerItems.reduce((sum, item) => sum + item.quantity, 0);
     setTotalStickerCount(totalCount);
 
-    // Use the pre-assigned GPBN range for this order
-    const gpbnRange = orderGpbnRanges[orderId];
-    // The start code should be one less than the assigned start (because the generator increments first)
-    const lastGpbnNumber = gpbnRange?.start ? gpbnRange.start - 1 : 2999;
+    // Get GPBN based on order date - all orders placed on same day get same GPBN
+    const orderDateStr = new Date(order.order_date).toISOString().split('T')[0];
+    const gpbnNumber = deliveryDateGpbn[orderDateStr] || 3000;
 
-    // Store in ref for use by preview and download functions
-    const startCode = `GPBN${lastGpbnNumber}`;
-    gpbnStartCodeRef.current = startCode;
+    // Store the fixed GPBN code for use by preview and download functions
+    const gpbnCode = `GPBN${gpbnNumber}`;
+    gpbnStartCodeRef.current = gpbnCode;
 
     // Generate previews
     if (stickerType === "barcode") {
       const previewUrl = generateOrderBarcodeStickersPreview(stickerItems);
       setBarcodeStickerPreviewUrl(previewUrl);
     } else {
-      const { previewUrl, lastGpbnCode: newGpbn } = generateOrderProductStickersPreview(stickerItems, order.order_date, startCode);
+      const { previewUrl } = generateOrderProductStickersPreview(stickerItems, order.order_date, gpbnCode, true);
       setProductStickerPreviewUrl(previewUrl);
-      setLastGpbnCode(newGpbn);
+      setLastGpbnCode(gpbnCode);
     }
 
     setIsGeneratingNewSticker(false);
@@ -1532,12 +1416,12 @@ const handleDelete = async () => {
   const regenerateProductStickerPreview = () => {
     if (productStickerPreviewUrl) URL.revokeObjectURL(productStickerPreviewUrl);
 
-    // Use the ref value (set when modal opened)
-    const currentStartCode = gpbnStartCodeRef.current;
+    // Use the ref value (set when modal opened) - fixed GPBN for all stickers
+    const currentGpbnCode = gpbnStartCodeRef.current;
 
-    const { previewUrl, lastGpbnCode: newGpbn } = generateOrderProductStickersPreview(newStickerItems, newStickerOrderDate, currentStartCode);
+    const { previewUrl } = generateOrderProductStickersPreview(newStickerItems, newStickerOrderDate, currentGpbnCode, true);
     setProductStickerPreviewUrl(previewUrl);
-    setLastGpbnCode(newGpbn);
+    setLastGpbnCode(currentGpbnCode);
   };
 
   // Download barcode stickers
@@ -1546,14 +1430,14 @@ const handleDelete = async () => {
     downloadOrderBarcodeStickers(newStickerItems, filename);
   };
 
-  // Download product stickers (GPBN is pre-assigned based on order sequence)
+  // Download product stickers (GPBN is based on delivery date - same for all stickers)
   const handleDownloadProductStickers = () => {
     const filename = `product-stickers-${newStickerOrderId}.pdf`;
 
-    // Use the ref value (same as preview)
-    const currentStartCode = gpbnStartCodeRef.current;
+    // Use the ref value (same as preview) - fixed GPBN for all stickers
+    const currentGpbnCode = gpbnStartCodeRef.current;
 
-    downloadOrderProductStickers(newStickerItems, newStickerOrderDate, filename, currentStartCode);
+    downloadOrderProductStickers(newStickerItems, newStickerOrderDate, filename, currentGpbnCode, true);
   };
 
   const handleStatusUpdate = async (orderId, newStatus) => {

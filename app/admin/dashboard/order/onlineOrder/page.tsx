@@ -233,8 +233,8 @@ export default function OnlineOrderPage() {
   // Use ref for GPBN to avoid closure issues - this stores the starting code for current order
   const gpbnStartCodeRef = useRef<string | null>(null);
 
-  // GPBN ranges pre-assigned to each order (key = order.id, value = { start, end, itemCount })
-  const [orderGpbnRanges, setOrderGpbnRanges] = useState<Record<number, { start: number; end: number; itemCount: number }>>({});
+  // GPBN codes by delivery date (key = delivery_date string, value = GPBN number)
+  const [deliveryDateGpbn, setDeliveryDateGpbn] = useState<Record<string, number>>({});
 
   // Refs for syncing horizontal scroll between header, scrollbar, and body
   const headerScrollRef = useRef<HTMLDivElement>(null);
@@ -1029,23 +1029,22 @@ export default function OnlineOrderPage() {
     const totalCount = stickerItems.reduce((sum, item) => sum + item.quantity, 0);
     setTotalStickerCount(totalCount);
 
-    // Use the pre-assigned GPBN range for this order
-    const gpbnRange = orderGpbnRanges[orderId];
-    // The start code should be one less than the assigned start (because the generator increments first)
-    const lastGpbnNumber = gpbnRange?.start ? gpbnRange.start - 1 : 2999;
+    // Get GPBN based on order date - all orders placed on same day get same GPBN
+    const orderDateStr = new Date(order.order_date).toISOString().split('T')[0];
+    const gpbnNumber = deliveryDateGpbn[orderDateStr] || 3000;
 
-    // Store in ref for use by preview and download functions
-    const startCode = `GPBN${lastGpbnNumber}`;
-    gpbnStartCodeRef.current = startCode;
+    // Store the fixed GPBN code for use by preview and download functions
+    const gpbnCode = `GPBN${gpbnNumber}`;
+    gpbnStartCodeRef.current = gpbnCode;
 
     // Generate previews
     if (stickerType === "barcode") {
       const previewUrl = generateOrderBarcodeStickersPreview(stickerItems);
       setBarcodeStickerPreviewUrl(previewUrl);
     } else {
-      const { previewUrl, lastGpbnCode: newGpbn } = generateOrderProductStickersPreview(stickerItems, order.order_date, startCode);
+      const { previewUrl } = generateOrderProductStickersPreview(stickerItems, order.order_date, gpbnCode, true);
       setProductStickerPreviewUrl(previewUrl);
-      setLastGpbnCode(newGpbn);
+      setLastGpbnCode(gpbnCode);
     }
 
     setIsGeneratingNewSticker(false);
@@ -1073,12 +1072,12 @@ export default function OnlineOrderPage() {
   const regenerateProductStickerPreview = () => {
     if (productStickerPreviewUrl) URL.revokeObjectURL(productStickerPreviewUrl);
 
-    // Use the ref value (set when modal opened)
-    const currentStartCode = gpbnStartCodeRef.current;
+    // Use the ref value (set when modal opened) - fixed GPBN for all stickers
+    const currentGpbnCode = gpbnStartCodeRef.current;
 
-    const { previewUrl, lastGpbnCode: newGpbn } = generateOrderProductStickersPreview(newStickerItems, newStickerOrderDate, currentStartCode);
+    const { previewUrl } = generateOrderProductStickersPreview(newStickerItems, newStickerOrderDate, currentGpbnCode, true);
     setProductStickerPreviewUrl(previewUrl);
-    setLastGpbnCode(newGpbn);
+    setLastGpbnCode(currentGpbnCode);
   };
 
   // Download barcode stickers
@@ -1087,14 +1086,14 @@ export default function OnlineOrderPage() {
     downloadOrderBarcodeStickers(newStickerItems, filename);
   };
 
-  // Download product stickers (GPBN is pre-assigned based on order sequence)
+  // Download product stickers (GPBN is based on delivery date - same for all stickers)
   const handleDownloadProductStickers = () => {
     const filename = `product-stickers-${newStickerOrderId}.pdf`;
 
-    // Use the ref value (same as preview)
-    const currentStartCode = gpbnStartCodeRef.current;
+    // Use the ref value (same as preview) - fixed GPBN for all stickers
+    const currentGpbnCode = gpbnStartCodeRef.current;
 
-    downloadOrderProductStickers(newStickerItems, newStickerOrderDate, filename, currentStartCode);
+    downloadOrderProductStickers(newStickerItems, newStickerOrderDate, filename, currentGpbnCode, true);
   };
 
   // Generate barcode or product sticker for a single item (same modal as order-level)
@@ -1156,20 +1155,22 @@ export default function OnlineOrderPage() {
     setNewStickerItems(stickerItems);
     setTotalStickerCount(item.quantity);
 
-    // Use the pre-assigned GPBN range for this order
-    const gpbnRange = orderGpbnRanges[orderId];
-    const lastGpbnNumber = gpbnRange?.start ? gpbnRange.start - 1 : 2999;
-    const startCode = `GPBN${lastGpbnNumber}`;
-    gpbnStartCodeRef.current = startCode;
+    // Get GPBN based on order date - all orders placed on same day get same GPBN
+    const orderDateStr = new Date(order.order_date).toISOString().split('T')[0];
+    const gpbnNumber = deliveryDateGpbn[orderDateStr] || 3000;
+
+    // Store the fixed GPBN code for use by preview and download functions
+    const gpbnCode = `GPBN${gpbnNumber}`;
+    gpbnStartCodeRef.current = gpbnCode;
 
     // Generate previews
     if (stickerType === "barcode") {
       const previewUrl = generateOrderBarcodeStickersPreview(stickerItems);
       setBarcodeStickerPreviewUrl(previewUrl);
     } else {
-      const { previewUrl, lastGpbnCode: newGpbn } = generateOrderProductStickersPreview(stickerItems, orderDate, startCode);
+      const { previewUrl } = generateOrderProductStickersPreview(stickerItems, orderDate, gpbnCode, true);
       setProductStickerPreviewUrl(previewUrl);
-      setLastGpbnCode(newGpbn);
+      setLastGpbnCode(gpbnCode);
     }
 
     setIsGeneratingNewSticker(false);
@@ -1267,45 +1268,37 @@ export default function OnlineOrderPage() {
 
           setOrders(ordersWithTotals);
 
-          // Calculate GPBN ranges for each order
-          const orderIds = ordersWithTotals.map((o) => o.id);
-          if (orderIds.length > 0) {
-            const { data: itemCounts } = await supabase
-              .from('customer_order_item')
-              .select('order_id, quantity')
-              .in('order_id', orderIds);
+          // Calculate GPBN by order date - all orders placed on the same day get the same GPBN
+          // Fetch order dates from BOTH online orders AND client orders to ensure synchronized GPBN
+          // GPBN is sequential: earliest date = 3000, next date = 3001, etc.
 
-            // Sum quantities per order
-            const quantityByOrder: Record<number, number> = {};
-            if (itemCounts) {
-              itemCounts.forEach((item: { order_id: number; quantity: number }) => {
-                quantityByOrder[item.order_id] = (quantityByOrder[item.order_id] || 0) + item.quantity;
-              });
-            }
+          // Get online order dates
+          const onlineOrderDates = ordersWithTotals.map((o) => {
+            const date = new Date(o.order_date);
+            return date.toISOString().split('T')[0];
+          });
 
-            // Sort orders chronologically (oldest first) to assign GPBN in order
-            const sortedOrders = [...ordersWithTotals].sort((a, b) =>
-              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-            );
+          // Also fetch client order dates to ensure GPBN is synchronized
+          const { data: clientOrders } = await supabase
+            .from('client_order')
+            .select('order_date');
 
-            // Calculate cumulative GPBN ranges starting from 3000
-            let currentGpbn = 2999; // First GPBN will be 3000
-            const gpbnRanges: Record<number, { start: number; end: number; itemCount: number }> = {};
+          const clientOrderDates = (clientOrders || []).map((o: { order_date: string }) => {
+            const date = new Date(o.order_date);
+            return date.toISOString().split('T')[0];
+          });
 
-            sortedOrders.forEach((order) => {
-              const itemCount = quantityByOrder[order.id] || 0;
-              if (itemCount > 0) {
-                const startGpbn = currentGpbn + 1;
-                const endGpbn = currentGpbn + itemCount;
-                gpbnRanges[order.id] = { start: startGpbn, end: endGpbn, itemCount };
-                currentGpbn = endGpbn;
-              } else {
-                gpbnRanges[order.id] = { start: 0, end: 0, itemCount: 0 };
-              }
-            });
+          // Combine all dates and get unique sorted dates
+          const allOrderDates = [...onlineOrderDates, ...clientOrderDates];
+          const uniqueOrderDates = [...new Set(allOrderDates)].sort();
 
-            setOrderGpbnRanges(gpbnRanges);
-          }
+          const gpbnByDate: Record<string, number> = {};
+          uniqueOrderDates.forEach((dateStr, index) => {
+            // GPBN = 3000 + sequential index (earliest date = 3000)
+            gpbnByDate[dateStr] = 3000 + index;
+          });
+
+          setDeliveryDateGpbn(gpbnByDate);
         }
 
         setError(null);

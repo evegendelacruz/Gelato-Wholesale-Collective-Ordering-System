@@ -1026,12 +1026,16 @@ export function generateOrderBarcodeStickers(items: OrderItemForSticker[]): jsPD
 
 /**
  * Generate all Product Stickers for an order (compiled PDF)
- * Each item generates quantity stickers with incrementing GPBN codes
+ * @param items - Order items to generate stickers for
+ * @param orderDate - Order date for calculating BBD
+ * @param gpbnCode - GPBN code to use (if fixedGpbn is true, this is used for all stickers)
+ * @param fixedGpbn - If true, use the same GPBN code for all stickers (based on delivery date)
  */
 export function generateOrderProductStickers(
   items: OrderItemForSticker[],
   orderDate: string | Date,
-  startGpbnCode: string | null = null
+  gpbnCode: string | null = null,
+  fixedGpbn: boolean = false
 ): { doc: jsPDF; lastGpbnCode: string } {
   const widthMm = 30;
   const heightMm = 15;
@@ -1042,7 +1046,9 @@ export function generateOrderProductStickers(
     format: [heightMm, widthMm]
   });
 
-  let currentGpbnCode = startGpbnCode;
+  // If fixed GPBN mode, use the provided code for all stickers
+  // Otherwise, increment for each sticker (legacy mode)
+  let currentGpbnCode = fixedGpbn ? gpbnCode : gpbnCode;
   let isFirstPage = true;
 
   for (const item of items) {
@@ -1055,8 +1061,13 @@ export function generateOrderProductStickers(
       }
       isFirstPage = false;
 
-      // Generate next GPBN code
-      currentGpbnCode = generateNextGpbnCode(currentGpbnCode);
+      // If not fixed mode, generate next GPBN code for each sticker
+      if (!fixedGpbn) {
+        currentGpbnCode = generateNextGpbnCode(currentGpbnCode);
+      } else if (!currentGpbnCode) {
+        // If fixed mode but no code provided, use default
+        currentGpbnCode = 'GPBN3000';
+      }
 
       const data: ProductStickerData = {
         productName: item.productName,
@@ -1222,14 +1233,20 @@ export function downloadOrderBarcodeStickers(items: OrderItemForSticker[], filen
 
 /**
  * Download all Product Stickers for an order
+ * @param items - Order items to generate stickers for
+ * @param orderDate - Order date for calculating BBD
+ * @param filename - Output filename
+ * @param gpbnCode - GPBN code to use
+ * @param fixedGpbn - If true, use the same GPBN code for all stickers (based on delivery date)
  */
 export function downloadOrderProductStickers(
   items: OrderItemForSticker[],
   orderDate: string | Date,
   filename: string,
-  startGpbnCode: string | null = null
+  gpbnCode: string | null = null,
+  fixedGpbn: boolean = false
 ): string {
-  const { doc, lastGpbnCode } = generateOrderProductStickers(items, orderDate, startGpbnCode);
+  const { doc, lastGpbnCode } = generateOrderProductStickers(items, orderDate, gpbnCode, fixedGpbn);
   doc.save(filename);
   return lastGpbnCode;
 }
@@ -1245,13 +1262,18 @@ export function generateOrderBarcodeStickersPreview(items: OrderItemForSticker[]
 
 /**
  * Generate blob URL for order product stickers preview
+ * @param items - Order items to generate stickers for
+ * @param orderDate - Order date for calculating BBD
+ * @param gpbnCode - GPBN code to use
+ * @param fixedGpbn - If true, use the same GPBN code for all stickers (based on delivery date)
  */
 export function generateOrderProductStickersPreview(
   items: OrderItemForSticker[],
   orderDate: string | Date,
-  startGpbnCode: string | null = null
+  gpbnCode: string | null = null,
+  fixedGpbn: boolean = false
 ): { previewUrl: string; lastGpbnCode: string } {
-  const { doc, lastGpbnCode } = generateOrderProductStickers(items, orderDate, startGpbnCode);
+  const { doc, lastGpbnCode } = generateOrderProductStickers(items, orderDate, gpbnCode, fixedGpbn);
   const pdfBlob = doc.output('blob');
   return { previewUrl: URL.createObjectURL(pdfBlob), lastGpbnCode };
 }
