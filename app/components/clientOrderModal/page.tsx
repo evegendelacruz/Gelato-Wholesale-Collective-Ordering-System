@@ -16,8 +16,8 @@ interface Product {
   id: number;
   product_id: string;
   product_name: string;
-  product_type: string;
-  product_gelato_type: string;
+  product_type: string | null;
+  product_gelato_type: string | null;
   product_weight: number;
   product_price: number;
   product_cost: number | null;
@@ -192,7 +192,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
-  const [showProductPicker, setShowProductPicker] = useState(false);
+  const [showProductPicker, setShowProductPicker] = useState<number | null>(null);
   const [productPickerSearch, setProductPickerSearch] = useState('');
 
   // Dropdown options for manual items
@@ -251,17 +251,16 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   const fetchAllProducts = async () => {
     try {
       setLoadingProducts(true);
-      console.log('Fetching all products...');
       const { data, error } = await supabase
         .from('product_list')
         .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_price, product_cost, product_milkbased, product_sugarbased, product_ingredient, product_image')
+        .eq('is_deleted', false)
         .order('product_name', { ascending: true });
 
       if (error) {
         console.error('Error fetching products:', error);
         throw error;
       }
-      console.log('Fetched products:', data?.length || 0);
       setAllProducts(data || []);
     } catch (error) {
       console.error('Error fetching all products:', error);
@@ -274,6 +273,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
 
   const fetchDropdownOptions = async () => {
     try {
+      // Try to get options from order_dropdown_options table
       const { data: productTypes, error: productTypeError } = await supabase
         .from('order_dropdown_options')
         .select('option_value')
@@ -284,13 +284,36 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
         .select('option_value')
         .eq('option_type', 'gelato_type');
 
-      if (!productTypeError && productTypes) {
-        setProductTypeOptions(productTypes.map(item => item.option_value));
+      let productTypeOpts: string[] = [];
+      let gelatoTypeOpts: string[] = [];
+
+      if (!productTypeError && productTypes && productTypes.length > 0) {
+        productTypeOpts = productTypes.map(item => item.option_value);
       }
 
-      if (!gelatoTypeError && gelatoTypes) {
-        setGelatoTypeOptions(gelatoTypes.map(item => item.option_value));
+      if (!gelatoTypeError && gelatoTypes && gelatoTypes.length > 0) {
+        gelatoTypeOpts = gelatoTypes.map(item => item.option_value);
       }
+
+      // Also fetch unique types from product_list to supplement options
+      const { data: products } = await supabase
+        .from('product_list')
+        .select('product_type, product_gelato_type')
+        .eq('is_deleted', false);
+
+      if (products) {
+        products.forEach(p => {
+          if (p.product_type && !productTypeOpts.includes(p.product_type)) {
+            productTypeOpts.push(p.product_type);
+          }
+          if (p.product_gelato_type && !gelatoTypeOpts.includes(p.product_gelato_type)) {
+            gelatoTypeOpts.push(p.product_gelato_type);
+          }
+        });
+      }
+
+      setProductTypeOptions(productTypeOpts);
+      setGelatoTypeOptions(gelatoTypeOpts);
     } catch (error) {
       console.error('Error loading dropdown options:', error);
     }
@@ -358,7 +381,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     try {
       setLoading(true);
       
-      // Fetch client products
+      // Fetch client products with full product details including ingredients
       const { data: productsData, error: productsError } = await supabase
         .from('client_product')
         .select(`
@@ -371,6 +394,10 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             product_gelato_type,
             product_weight,
             product_price,
+            product_cost,
+            product_milkbased,
+            product_sugarbased,
+            product_ingredient,
             product_image
           )
         `)
@@ -475,34 +502,6 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     setOrderItems([...orderItems, newItem]);
   };
 
-  const handleAddProductFromList = (product: Product) => {
-    // Check if product is already assigned to this client
-    const isAlreadyAssigned = availableProducts.some(cp => cp.product_list.id === product.id);
-
-    const newItem: OrderItem = {
-      product_id: product.id,
-      product_name: product.product_name,
-      quantity: 1,
-      unit_price: product.product_price || 0,
-      gelato_type: product.product_gelato_type || '',
-      weight: product.product_weight || 0,
-      request: '',
-      subtotal: product.product_price || 0,
-      product_type: product.product_type || '',
-      product_cost: product.product_cost || 0,
-      product_milkbase: product.product_milkbased || 0,
-      product_sugarbase: product.product_sugarbased || 0,
-      product_ingredient: product.product_ingredient || '',
-      is_manual: false,
-      is_from_product_list: true,
-      publish_to_client: !isAlreadyAssigned, // Default to true if not already assigned
-      add_to_product_list: false
-    };
-    setOrderItems([...orderItems, newItem]);
-    setShowProductPicker(false);
-    setProductPickerSearch('');
-  };
-
   const handleAddManualItem = () => {
     if (!manualItemData.product_name.trim()) {
       setMessage({ type: 'error', text: 'Please enter a product name' });
@@ -595,6 +594,74 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   const handleRemoveItem = (index: number) => {
     const newItems = orderItems.filter((_, i) => i !== index);
     setOrderItems(newItems);
+  };
+
+  // Add a new empty item
+  const handleAddItem = () => {
+    const newItem: OrderItem = {
+      product_id: null,
+      product_name: '',
+      quantity: 1,
+      unit_price: 0,
+      gelato_type: '',
+      weight: 0,
+      request: '',
+      subtotal: 0,
+      product_type: '',
+      product_cost: 0,
+      product_milkbase: 0,
+      product_sugarbase: 0,
+      product_ingredient: '',
+      is_manual: true,
+      is_from_product_list: false,
+      publish_to_client: true,
+      add_to_product_list: false
+    };
+    setOrderItems([...orderItems, newItem]);
+  };
+
+  // Handle selecting a product from the picker for a specific item
+  const handleSelectProductForItem = (index: number, product: Product) => {
+    const newItems = [...orderItems];
+    // Check if product is already assigned to this client
+    const isAlreadyAssigned = availableProducts.some(cp => cp.product_list.id === product.id);
+
+    // Handle null/undefined product_type and gelato_type
+    const productType = product.product_type ?? '';
+    const gelatoType = product.product_gelato_type ?? '';
+
+    // Add product_type to options if not already present
+    if (productType && !productTypeOptions.includes(productType)) {
+      setProductTypeOptions(prev => [...prev, productType]);
+    }
+
+    // Add gelato_type to options if not already present
+    if (gelatoType && !gelatoTypeOptions.includes(gelatoType)) {
+      setGelatoTypeOptions(prev => [...prev, gelatoType]);
+    }
+
+    const updatedItem = {
+      ...newItems[index],
+      product_id: product.id,
+      product_name: product.product_name,
+      product_type: productType,
+      gelato_type: gelatoType,
+      weight: product.product_weight || 0,
+      unit_price: product.product_price || 0,
+      product_cost: product.product_cost || 0,
+      product_milkbase: product.product_milkbased || 0,
+      product_sugarbase: product.product_sugarbased || 0,
+      product_ingredient: product.product_ingredient || '',
+      subtotal: newItems[index].quantity * (product.product_price || 0),
+      is_manual: false,
+      is_from_product_list: true,
+      publish_to_client: !isAlreadyAssigned
+    };
+
+    newItems[index] = updatedItem;
+    setOrderItems(newItems);
+    setShowProductPicker(null);
+    setProductPickerSearch('');
   };
 
   const calculateTotal = () => {
@@ -777,14 +844,16 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             productId = productIdMap[item.product_name];
           }
 
-          // Base columns that always exist
+          // Base columns including product_type and gelato_type
           return {
             order_id: orderData.id,
             product_id: productId,
             product_name: item.product_name,
             quantity: item.quantity,
             unit_price: item.unit_price,
-            subtotal: item.subtotal
+            subtotal: item.subtotal,
+            product_type: item.product_type || null,
+            gelato_type: item.gelato_type || null
           };
         });
 
@@ -794,7 +863,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
         let insertedItems = null;
         let itemsError = null;
 
-        // First try with extended columns
+        // Insert with columns that exist in the database
         const extendedOrderItemsData = orderItems.map(item => {
           let productId = item.product_id;
           if (item.is_manual && item.add_to_product_list && productIdMap[item.product_name]) {
@@ -809,13 +878,8 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             subtotal: item.subtotal,
             product_type: item.product_type || null,
             gelato_type: item.gelato_type || null,
-            product_weight: item.weight || 0,
             calculated_weight: (item.weight || 0) * item.quantity,
-            product_cost: item.product_cost || 0,
-            product_milkbase: item.product_milkbase || 0,
-            product_sugarbase: item.product_sugarbase || 0,
-            product_ingredient: item.product_ingredient || null,
-            product_notes: item.request || null
+            label_ingredients: item.product_ingredient || null
           };
         });
 
@@ -932,7 +996,7 @@ const handleClose = () => {
   setOrderItems([]);
   setClientSearch('');
   setProductSearch('');
-  setShowProductPicker(false);
+  setShowProductPicker(null);
   setProductPickerSearch('');
   setShowManualItemEditor(false);
   setLoadingProducts(false);
@@ -1215,7 +1279,10 @@ const handleClose = () => {
                 <div className="flex gap-3 mb-4">
                   <button
                     onClick={() => {
-                      setShowProductPicker(true);
+                      // Add a new empty item and open picker for it
+                      const newIndex = orderItems.length;
+                      handleAddItem();
+                      setShowProductPicker(newIndex);
                       // Refetch products if empty
                       if (allProducts.length === 0) {
                         fetchAllProducts();
@@ -1227,7 +1294,7 @@ const handleClose = () => {
                     <span>Select from Product List</span>
                   </button>
                   <button
-                    onClick={() => setShowManualItemEditor(true)}
+                    onClick={handleAddItem}
                     className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
                   >
                     <Plus size={18} />
@@ -1305,77 +1372,269 @@ const handleClose = () => {
                 )}
 
                 {/* Order Items */}
-                <div>
-                  <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
-                    Order Items ({orderItems.length})
-                  </h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold" style={{ color: '#5C2E1F' }}>
+                      Order Items ({orderItems.length})
+                    </h3>
+                    <button
+                      onClick={handleAddItem}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                      disabled={loading}
+                    >
+                      <Plus size={20} />
+                      <span>Add More Item</span>
+                    </button>
+                  </div>
+
+                  <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <p className="text-sm text-blue-700">
+                      <strong>Note:</strong> Product details for these orders (milkbase, sugar syrup, etc.) are recorded in the Production Guide. To view or edit these details after order creation, use the Edit Order function.
+                    </p>
+                  </div>
 
                 {orderItems.length === 0 ? (
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500">
-                    No products added yet. Add products from the list above.
+                    No products added yet. Click &quot;Add More Item&quot; to start adding products.
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {orderItems.map((item, index) => (
-                      <div key={index} className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-sm transition-shadow">
-                        <div className="flex items-start justify-between gap-4">
-                          {/* Product Info */}
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-medium">{item.product_name}</p>
-                              {item.is_manual && (
-                                <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
-                                  Manual
-                                </span>
-                              )}
-                              {item.is_from_product_list && !item.is_manual && (
-                                <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
-                                  From List
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {item.product_type || 'N/A'} • {item.gelato_type || 'N/A'} • {item.weight}kg
-                            </p>
+                      <div key={index} className="border border-gray-300 rounded-lg p-4 bg-gray-50">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-medium text-gray-700">Item {index + 1}</h4>
+                            {item.is_manual && (
+                              <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+                                Manual
+                              </span>
+                            )}
+                            {item.is_from_product_list && !item.is_manual && (
+                              <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
+                                From List
+                              </span>
+                            )}
                           </div>
-
-                          {/* Quantity & Price */}
-                          <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs text-gray-500">Qty:</span>
-                              <input
-                                type="number"
-                                min="1"
-                                value={item.quantity}
-                                onChange={(e) => handleUpdateQuantity(index, parseInt(e.target.value) || 1)}
-                                className="w-14 px-2 py-1 border border-gray-300 rounded text-center text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                              />
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs text-gray-500">S$</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={item.unit_price}
-                                onChange={(e) => handleUpdatePrice(index, parseFloat(e.target.value) || 0)}
-                                className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                              />
-                            </div>
-                            <div className="text-sm font-medium text-orange-600 w-24 text-right">
-                              S$ {item.subtotal.toFixed(2)}
-                            </div>
+                          {orderItems.length > 1 && (
                             <button
                               onClick={() => handleRemoveItem(index)}
-                              className="text-red-500 hover:text-red-700 transition-colors p-1"
+                              className="text-red-500 hover:text-red-700"
+                              disabled={loading}
                             >
-                              <Trash2 size={16} />
+                              <Trash2 size={20} />
                             </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          {/* Product Name with Select from List */}
+                          <div className="col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Product Name <span className="text-red-500">*</span>
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={item.product_name}
+                                onChange={(e) => {
+                                  const newItems = [...orderItems];
+                                  newItems[index] = {
+                                    ...newItems[index],
+                                    product_name: e.target.value,
+                                    is_manual: true,
+                                    is_from_product_list: false,
+                                    product_id: null
+                                  };
+                                  setOrderItems(newItems);
+                                }}
+                                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                placeholder="Enter product name..."
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowProductPicker(index);
+                                  setProductPickerSearch('');
+                                }}
+                                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2 whitespace-nowrap"
+                              >
+                                <Search size={16} />
+                                Select from List
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Product Type */}
+                          <div>
+                            <CustomDropdown
+                              label="Product Type"
+                              name="product_type"
+                              value={item.product_type}
+                              options={productTypeOptions}
+                              onChange={(e) => handleUpdateItemField(index, 'product_type', e.target.value)}
+                              onAddOption={() => {
+                                setAddOptionType('product_type');
+                                setAddOptionLabel('Product Type');
+                                setIsAddOptionModalOpen(true);
+                              }}
+                              onRemoveOption={handleRemoveProductType}
+                              required={true}
+                            />
+                          </div>
+
+                          {/* Gelato Type */}
+                          <div>
+                            <CustomDropdown
+                              label="Gelato Type"
+                              name="gelato_type"
+                              value={item.gelato_type}
+                              options={gelatoTypeOptions}
+                              onChange={(e) => handleUpdateItemField(index, 'gelato_type', e.target.value)}
+                              onAddOption={() => {
+                                setAddOptionType('gelato_type');
+                                setAddOptionLabel('Gelato Type');
+                                setIsAddOptionModalOpen(true);
+                              }}
+                              onRemoveOption={handleRemoveGelatoType}
+                              required={true}
+                            />
+                          </div>
+
+                          {/* Quantity */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Quantity <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => handleUpdateQuantity(index, parseInt(e.target.value) || 1)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            />
+                          </div>
+
+                          {/* Weight */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Weight (kg) <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={item.weight}
+                              onChange={(e) => handleUpdateItemField(index, 'weight', parseFloat(e.target.value) || 0)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              placeholder="0.00"
+                            />
+                          </div>
+
+                          {/* Price */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Price (S$) <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={item.unit_price}
+                              onChange={(e) => handleUpdatePrice(index, parseFloat(e.target.value) || 0)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              placeholder="0.00"
+                            />
+                          </div>
+
+                          {/* Cost */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Cost (S$)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={item.product_cost}
+                              onChange={(e) => handleUpdateItemField(index, 'product_cost', parseFloat(e.target.value) || 0)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              placeholder="0.00"
+                            />
+                          </div>
+
+                          {/* Milk Based */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Milk Based (kg)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.product_milkbase}
+                              onChange={(e) => handleUpdateItemField(index, 'product_milkbase', parseFloat(e.target.value) || 0)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              placeholder="0.00"
+                            />
+                          </div>
+
+                          {/* Sugar Based */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Sugar Based (kg)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.product_sugarbase}
+                              onChange={(e) => handleUpdateItemField(index, 'product_sugarbase', parseFloat(e.target.value) || 0)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              placeholder="0.00"
+                            />
+                          </div>
+
+                          {/* Ingredients */}
+                          <div className="col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Ingredients
+                            </label>
+                            <textarea
+                              value={item.product_ingredient}
+                              onChange={(e) => handleUpdateItemField(index, 'product_ingredient', e.target.value)}
+                              rows={2}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                              placeholder="Enter product ingredients..."
+                            />
+                          </div>
+
+                          {/* Notes/Request */}
+                          <div className="col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Notes / Special Request
+                            </label>
+                            <textarea
+                              value={item.request}
+                              onChange={(e) => handleUpdateItemField(index, 'request', e.target.value)}
+                              rows={2}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                              placeholder="Enter any special requests..."
+                            />
+                          </div>
+                        </div>
+
+                        {/* Subtotal Display */}
+                        <div className="mt-4 pt-3 border-t border-gray-200">
+                          <div className="flex justify-end">
+                            <div className="text-right">
+                              <span className="text-sm text-gray-500">Subtotal: </span>
+                              <span className="text-lg font-bold text-orange-600">S$ {item.subtotal.toFixed(2)}</span>
+                            </div>
                           </div>
                         </div>
 
                         {/* Options Row */}
-                        <div className="flex items-center gap-6 mt-3 pt-3 border-t border-gray-100">
+                        <div className="flex items-center gap-6 mt-3 pt-3 border-t border-gray-200">
                           {/* Publish to Client Option */}
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input
@@ -1390,21 +1649,19 @@ const handleClose = () => {
                             </span>
                           </label>
 
-                          {/* Add to Product List Option (only for manual items) */}
-                          {item.is_manual && (
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={item.add_to_product_list}
-                                onChange={(e) => handleUpdateItemField(index, 'add_to_product_list', e.target.checked)}
-                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                              />
-                              <span className="text-xs text-gray-600">
-                                Add to Product List
-                                <span className="text-gray-400 ml-1">(Save as new product)</span>
-                              </span>
-                            </label>
-                          )}
+                          {/* Add to Product List Option */}
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={item.add_to_product_list}
+                              onChange={(e) => handleUpdateItemField(index, 'add_to_product_list', e.target.checked)}
+                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-gray-600">
+                              Add to Product List
+                              <span className="text-gray-400 ml-1">(Save as new product)</span>
+                            </span>
+                          </label>
                         </div>
                       </div>
                     ))}
@@ -1453,7 +1710,7 @@ const handleClose = () => {
       </div>
 
       {/* Product Picker Modal */}
-      {showProductPicker && (
+      {showProductPicker !== null && (
         <div
           className="fixed inset-0 flex items-center justify-center"
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)', zIndex: 9999 }}
@@ -1476,7 +1733,7 @@ const handleClose = () => {
                 </button>
                 <button
                   onClick={() => {
-                    setShowProductPicker(false);
+                    setShowProductPicker(null);
                     setProductPickerSearch('');
                   }}
                   className="text-gray-400 hover:text-gray-600"
@@ -1515,9 +1772,8 @@ const handleClose = () => {
                     <button
                       key={product.id}
                       type="button"
-                      onClick={() => handleAddProductFromList(product)}
-                      disabled={isProductAdded(product.id)}
-                      className="w-full px-4 py-3 text-left border border-gray-200 rounded-lg hover:bg-orange-50 hover:border-orange-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => handleSelectProductForItem(showProductPicker as number, product)}
+                      className="w-full px-4 py-3 text-left border border-gray-200 rounded-lg hover:bg-orange-50 hover:border-orange-300 transition-colors"
                     >
                       <div className="flex items-center gap-3">
                         {product.product_image ? (
@@ -1540,9 +1796,6 @@ const handleClose = () => {
                             {product.product_id} • {product.product_type || 'N/A'} • S$ {(product.product_price || 0).toFixed(2)}
                           </div>
                         </div>
-                        {isProductAdded(product.id) && (
-                          <span className="text-xs text-green-600 font-medium">Added</span>
-                        )}
                       </div>
                     </button>
                   ))}

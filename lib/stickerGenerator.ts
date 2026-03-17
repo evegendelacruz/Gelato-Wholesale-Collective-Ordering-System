@@ -1040,6 +1040,13 @@ export function generateOrderProductStickers(
   const widthMm = 30;
   const heightMm = 15;
 
+  // DEBUG: Log what items we received
+  console.log('=== STICKER GENERATOR DEBUG ===');
+  console.log('Items received:', items);
+  items.forEach((item, idx) => {
+    console.log(`Item ${idx}: name=${item.productName}, ingredients=${item.ingredients?.substring(0, 50)}`);
+  });
+
   const doc = new jsPDF({
     orientation: 'landscape',
     unit: 'mm',
@@ -1054,6 +1061,9 @@ export function generateOrderProductStickers(
   for (const item of items) {
     // Calculate BBD based on order date and shelf life
     const bbd = calculateBBDFromOrderDate(orderDate, item.shelfLife);
+
+    // DEBUG: Log each item being processed
+    console.log('Processing item for sticker:', item.productName, '| Ingredients:', item.ingredients?.substring(0, 50));
 
     for (let i = 0; i < item.quantity; i++) {
       if (!isFirstPage) {
@@ -1075,6 +1085,8 @@ export function generateOrderProductStickers(
         bbd: bbd,
         gpbnCode: currentGpbnCode
       };
+
+      console.log('Drawing sticker with data:', data.productName, '| Ingredients:', data.ingredients?.substring(0, 50));
 
       drawProductStickerContent(doc, data, widthMm, heightMm);
     }
@@ -1146,6 +1158,13 @@ function drawBarcodeStickerContent(doc: jsPDF, data: BarcodeStickerData, widthMm
  * Helper function to draw product sticker content on a page
  */
 function drawProductStickerContent(doc: jsPDF, data: ProductStickerData, widthMm: number, heightMm: number): void {
+  // DEBUG: Log what we're about to draw
+  console.log('=== DRAW PRODUCT STICKER ===');
+  console.log('Product:', data.productName);
+  console.log('Ingredients to draw:', data.ingredients);
+  console.log('BBD:', data.bbd);
+  console.log('GPBN:', data.gpbnCode);
+
   const marginMm = 1.5;
   const contentWidth = widthMm - (marginMm * 2);
   const contentStartX = marginMm;

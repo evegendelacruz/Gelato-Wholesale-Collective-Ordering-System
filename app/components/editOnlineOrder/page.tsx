@@ -1,6 +1,6 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { X, Trash2 } from 'lucide-react';
+import { useState, useEffect, Fragment } from 'react';
+import { X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import supabase from '@/lib/client';
 
 interface Order {
@@ -29,9 +29,13 @@ interface OrderItem {
   calculated_weight: string | null;
   label_ingredients: string | null;
   label_allergens: string | null;
+  product_ingredient?: string | null;
+  product_allergen?: string | null;
+  product_description?: string | null;
   best_before: string | null;
   batch_number: string | null;
   isDeleted?: boolean;
+  isExpanded?: boolean;
 }
 
 interface EditOnlineOrderModalProps {
@@ -84,13 +88,17 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
           quantity: item.quantity,
           product_price: item.product_price,
           product_cost: item.product_cost,
-          product_type: item.product_type,
-          gelato_type: item.gelato_type,
-          calculated_weight: item.calculated_weight,
+          product_type: item.product_type || '',
+          gelato_type: item.gelato_type || '',
+          calculated_weight: item.calculated_weight || '',
           label_ingredients: item.label_ingredients,
           label_allergens: item.label_allergens,
+          product_ingredient: item.label_ingredients || '',
+          product_allergen: item.label_allergens || '',
+          product_description: '',
           best_before: item.best_before,
-          batch_number: item.batch_number
+          batch_number: item.batch_number,
+          isExpanded: false
         }));
 
         console.log('Mapped order items:', mappedItems);
@@ -147,6 +155,15 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
     updatedItems[index] = {
       ...updatedItems[index],
       isDeleted: false
+    };
+    setOrderItems(updatedItems);
+  };
+
+  const toggleItemExpand = (index: number) => {
+    const updatedItems = [...orderItems];
+    updatedItems[index] = {
+      ...updatedItems[index],
+      isExpanded: !updatedItems[index].isExpanded
     };
     setOrderItems(updatedItems);
   };
@@ -220,8 +237,14 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
         const { error: itemError } = await supabase
           .from('customer_order_item')
           .update({
+            product_name: item.product_name,
+            product_type: item.product_type || null,
+            gelato_type: item.gelato_type || null,
             quantity: item.quantity,
-            product_price: item.product_price
+            product_price: item.product_price,
+            calculated_weight: item.calculated_weight || null,
+            label_ingredients: item.product_ingredient || null,
+            label_allergens: item.product_allergen || null
           })
           .eq('id', item.id);
 
@@ -377,90 +400,201 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
             <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
               Order Items ({activeOrderItems.length})
             </h3>
+            <p className="text-xs text-gray-500 mb-2">Click on a product row to expand and edit product details</p>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm table-fixed">
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
-                    <th className="text-left py-2 px-2 font-bold text-xs w-[30%]">PRODUCT</th>
-                    <th className="text-center py-2 px-2 font-bold text-xs w-[12%]">TYPE</th>
-                    <th className="text-center py-2 px-2 font-bold text-xs w-[12%]">QUANTITY</th>
-                    <th className="text-right py-2 px-2 font-bold text-xs w-[15%]">UNIT PRICE</th>
-                    <th className="text-right py-2 px-2 font-bold text-xs w-[15%]">SUBTOTAL</th>
-                    <th className="text-center py-2 px-2 font-bold text-xs w-[10%]">ACTION</th>
+                    <th className="text-left py-2 px-2 font-bold text-xs w-[5%]"></th>
+                    <th className="text-left py-2 px-2 font-bold text-xs w-[28%]">PRODUCT</th>
+                    <th className="text-center py-2 px-2 font-bold text-xs w-[10%]">TYPE</th>
+                    <th className="text-center py-2 px-2 font-bold text-xs w-[10%]">QUANTITY</th>
+                    <th className="text-right py-2 px-2 font-bold text-xs w-[13%]">UNIT PRICE</th>
+                    <th className="text-right py-2 px-2 font-bold text-xs w-[13%]">SUBTOTAL</th>
+                    <th className="text-center py-2 px-2 font-bold text-xs w-[8%]">ACTION</th>
                   </tr>
                 </thead>
                 <tbody>
                   {orderItems.map((item, index) => (
-                    <tr
-                      key={item.id}
-                      className={`border-b border-gray-200 ${item.isDeleted ? 'bg-red-50 opacity-50' : ''}`}
-                    >
-                      <td className="py-2 px-2 text-xs">
-                        <span className={item.isDeleted ? 'line-through text-red-500' : ''}>
-                          {item.product_name}
-                        </span>
-                        {item.isDeleted && (
-                          <span className="ml-2 text-red-500 text-xs">(Will be removed)</span>
-                        )}
-                      </td>
-                      <td className="py-2 px-2 text-center text-xs">
-                        {item.gelato_type || item.product_type || '-'}
-                      </td>
-                      <td className="py-2 px-2 text-center">
-                        {item.isDeleted ? (
-                          <span className="text-gray-400">{item.quantity}</span>
-                        ) : (
-                          <input
-                            type="number"
-                            value={item.quantity}
-                            onChange={(e) => handleItemChange(index, 'quantity', Number(e.target.value))}
-                            min="1"
-                            className="w-full px-2 py-1 border border-gray-300 rounded text-center text-xs"
-                          />
-                        )}
-                      </td>
-                      <td className="py-2 px-2 text-right">
-                        {item.isDeleted ? (
-                          <span className="text-gray-400">${item.product_price.toFixed(2)}</span>
-                        ) : (
-                          <input
-                            type="number"
-                            value={item.product_price}
-                            onChange={(e) => handleItemChange(index, 'product_price', Number(e.target.value))}
-                            step="0.01"
-                            min="0"
-                            className="w-full px-2 py-1 border border-gray-300 rounded text-right text-xs"
-                          />
-                        )}
-                      </td>
-                      <td className="py-2 px-2 text-right text-xs font-medium">
-                        <span className={item.isDeleted ? 'text-gray-400 line-through' : ''}>
-                          ${(item.product_price * item.quantity).toFixed(2)}
-                        </span>
-                      </td>
-                      <td className="py-2 px-2 text-center">
-                        {item.isDeleted ? (
-                          <button
-                            type="button"
-                            onClick={() => handleRestoreItem(index)}
-                            className="text-green-500 hover:text-green-700 text-xs underline"
-                            title="Restore item"
-                          >
-                            Restore
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveItem(index)}
-                            className="text-red-500 hover:text-red-700 transition-colors"
-                            title="Remove item"
-                            disabled={activeOrderItems.length <= 1}
-                          >
-                            <Trash2 size={16} className={activeOrderItems.length <= 1 ? 'opacity-30' : ''} />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                    <Fragment key={item.id}>
+                      <tr
+                        className={`border-b border-gray-200 ${item.isDeleted ? 'bg-red-50 opacity-50' : 'hover:bg-gray-50 cursor-pointer'}`}
+                        onClick={() => !item.isDeleted && toggleItemExpand(index)}
+                      >
+                        <td className="py-2 px-2 text-center">
+                          {!item.isDeleted && (
+                            <button type="button" className="text-gray-500 hover:text-gray-700">
+                              {item.isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </button>
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-xs">
+                          <span className={item.isDeleted ? 'line-through text-red-500' : ''}>
+                            {item.product_name}
+                          </span>
+                          {item.isDeleted && (
+                            <span className="ml-2 text-red-500 text-xs">(Will be removed)</span>
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-center text-xs">
+                          {item.gelato_type || item.product_type || '-'}
+                        </td>
+                        <td className="py-2 px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                          {item.isDeleted ? (
+                            <span className="text-gray-400">{item.quantity}</span>
+                          ) : (
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => handleItemChange(index, 'quantity', Number(e.target.value))}
+                              min="1"
+                              className="w-full px-2 py-1 border border-gray-300 rounded text-center text-xs"
+                            />
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-right" onClick={(e) => e.stopPropagation()}>
+                          {item.isDeleted ? (
+                            <span className="text-gray-400">${item.product_price.toFixed(2)}</span>
+                          ) : (
+                            <input
+                              type="number"
+                              value={item.product_price}
+                              onChange={(e) => handleItemChange(index, 'product_price', Number(e.target.value))}
+                              step="0.01"
+                              min="0"
+                              className="w-full px-2 py-1 border border-gray-300 rounded text-right text-xs"
+                            />
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-right text-xs font-medium">
+                          <span className={item.isDeleted ? 'text-gray-400 line-through' : ''}>
+                            ${(item.product_price * item.quantity).toFixed(2)}
+                          </span>
+                        </td>
+                        <td className="py-2 px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                          {item.isDeleted ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRestoreItem(index)}
+                              className="text-green-500 hover:text-green-700 text-xs underline"
+                              title="Restore item"
+                            >
+                              Restore
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(index)}
+                              className="text-red-500 hover:text-red-700 transition-colors"
+                              title="Remove item"
+                              disabled={activeOrderItems.length <= 1}
+                            >
+                              <Trash2 size={16} className={activeOrderItems.length <= 1 ? 'opacity-30' : ''} />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {/* Expanded Product Details */}
+                      {item.isExpanded && !item.isDeleted && (
+                        <tr key={`${item.id}-expanded`} className="bg-gray-50 border-b border-gray-200">
+                          <td colSpan={7} className="py-4 px-4">
+                            <div className="bg-white border border-gray-200 rounded-lg p-4">
+                              <h4 className="text-sm font-semibold mb-3" style={{ color: '#5C2E1F' }}>
+                                Edit Product Details
+                              </h4>
+                              <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Product Name
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={item.product_name}
+                                    onChange={(e) => handleItemChange(index, 'product_name', e.target.value)}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Type
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={item.product_type || ''}
+                                    onChange={(e) => handleItemChange(index, 'product_type', e.target.value)}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Gelato Type
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={item.gelato_type || ''}
+                                    onChange={(e) => handleItemChange(index, 'gelato_type', e.target.value)}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Weight (kg)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={item.calculated_weight || ''}
+                                    onChange={(e) => handleItemChange(index, 'calculated_weight', e.target.value)}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                  />
+                                </div>
+                                <div className="col-span-2">
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Description
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={item.product_description || ''}
+                                    onChange={(e) => handleItemChange(index, 'product_description', e.target.value)}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                  />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 mt-3">
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Ingredients
+                                  </label>
+                                  <textarea
+                                    value={item.product_ingredient || ''}
+                                    onChange={(e) => handleItemChange(index, 'product_ingredient', e.target.value)}
+                                    rows={2}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="Enter ingredients..."
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Allergen Information
+                                  </label>
+                                  <textarea
+                                    value={item.product_allergen || ''}
+                                    onChange={(e) => handleItemChange(index, 'product_allergen', e.target.value)}
+                                    rows={2}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="Enter allergen information..."
+                                  />
+                                </div>
+                              </div>
+                              <div className="mt-3 bg-yellow-50 border border-yellow-200 rounded p-2">
+                                <p className="text-xs text-yellow-800">
+                                  <strong>Note:</strong> Changes made here only affect this order item. The original product in your product list will not be modified.
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

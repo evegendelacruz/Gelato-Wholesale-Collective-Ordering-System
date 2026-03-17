@@ -162,9 +162,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         ),
         client_order_item(
           quantity,
-          product_list(
-            product_type
-          )
+          product_type
         )
       `)
       .eq('delivery_date', deliveryDate)
@@ -266,18 +264,12 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         ? addressParts.join(', ')
         : clientData?.client_delivery_address || 'N/A';
 
-      // Extract order items with product type from product_list
+      // Extract order items with product type directly from client_order_item
       const orderItems: OrderItem[] = Array.isArray(order.client_order_item)
-        ? order.client_order_item.map((item: { quantity: number; product_list: { product_type: string }[] | { product_type: string } | null }) => {
-            const productList = item.product_list;
-            const productType = Array.isArray(productList)
-              ? productList[0]?.product_type
-              : productList?.product_type;
-            return {
-              product_type: productType || 'Unknown',
-              quantity: item.quantity
-            };
-          })
+        ? order.client_order_item.map((item: { quantity: number; product_type: string | null }) => ({
+            product_type: item.product_type || 'Unknown',
+            quantity: item.quantity
+          }))
         : [];
 
       return {

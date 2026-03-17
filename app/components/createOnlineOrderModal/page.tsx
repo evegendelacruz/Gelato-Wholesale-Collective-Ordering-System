@@ -4,6 +4,7 @@ import { X, Plus, Trash2, ArrowLeft, Check, Search } from 'lucide-react';
 import supabase from '@/lib/client';
 
 interface OrderItem {
+  product_id: string | null;
   product_name: string;
   product_type: string;
   gelato_type: string;
@@ -121,6 +122,7 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
   // Step 2: Order Items
   const [orderItems, setOrderItems] = useState<OrderItem[]>([
     {
+      product_id: null,
       product_name: '',
       product_type: '',
       gelato_type: '',
@@ -140,6 +142,7 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
     setOrderItems([
       ...orderItems,
       {
+        product_id: null,
         product_name: '',
         product_type: '',
         gelato_type: '',
@@ -161,6 +164,7 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
     const updatedItems = [...orderItems];
     updatedItems[index] = {
       ...updatedItems[index],
+      product_id: product.product_id || null,
       product_name: product.product_name,
       product_type: product.product_type || '',
       gelato_type: product.product_gelato_type || '',
@@ -529,6 +533,7 @@ const handleRemoveGelatoType = async (option: string) => {
       // Insert order items - database will auto-generate id and product_id
       const itemsToInsert = orderItems.map(item => ({
         order_id: orderData.id,
+        product_id: item.product_id || null,
         product_name: item.product_name.trim(),
         product_type: item.product_type,
         quantity: item.quantity,
@@ -539,7 +544,8 @@ const handleRemoveGelatoType = async (option: string) => {
         product_sugarbase: item.product_sugarbase,
         product_notes: item.product_notes.trim() || null,
         product_price: item.product_price,
-        product_cost: item.product_cost
+        product_cost: item.product_cost,
+        label_ingredients: item.product_ingredient || null
       }));
 
       const { error: itemsError } = await supabase
@@ -587,6 +593,7 @@ const handleRemoveGelatoType = async (option: string) => {
     setNotes('');
     setOrderItems([
       {
+        product_id: null,
         product_name: '',
         product_type: '',
         gelato_type: '',

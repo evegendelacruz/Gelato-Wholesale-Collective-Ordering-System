@@ -65,14 +65,17 @@ interface Order {
 interface OrderItem {
   id: number;
   order_id: number;
-  product_id: string;
+  product_id: number;
   product_name: string;
   product_type: string;
   quantity: number;
   product_gelato_type: string;
+  gelato_type: string;
   weight: number;
   unit_price: number;
   subtotal: number;
+  product_milkbase?: number;
+  product_sugarbase?: number;
 }
 
 interface Report {
@@ -213,10 +216,13 @@ export default function ReportPage() {
     }
 
     await fetchReports();
-    setShowSuccessModal(true); 
-  } catch (err) {
-    console.error('Error generating reports:', err);
-    setShowErrorModal(true); 
+    setShowSuccessModal(true);
+  } catch (err: unknown) {
+    const error = err as Error;
+    console.error('Error generating reports:', error);
+    console.error('Error message:', error?.message);
+    console.error('Error stack:', error?.stack);
+    setShowErrorModal(true);
   } finally {
     setGenerating(false);
   }
@@ -286,22 +292,28 @@ export default function ReportPage() {
         if (clientItemsError) throw clientItemsError;
 
         if (clientOrderItems && clientOrderItems.length > 0) {
-          const productIds = [...new Set(clientOrderItems.map((item: OrderItem) => item.product_id))];
-          
-          const { data: products, error: productsError } = await supabase
-            .from('product_list')
-            .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased, product_cost, product_price')
-            .in('id', productIds);
+          // Filter out null product_ids (manual items)
+          const productIds = [...new Set(clientOrderItems.map((item: OrderItem) => item.product_id).filter((id): id is number => id !== null && id !== undefined))];
 
-          if (productsError) throw productsError;
+          let products: { id: number; product_type: string; product_weight: number; product_gelato_type: string; product_milkbased: number; product_sugarbased: number; product_cost: number; product_price: number }[] = [];
 
-          const productTypeMap = new Map(products?.map(p => [p.id, p.product_type]) || []);
-          const productWeightMap = new Map(products?.map(p => [p.id, p.product_weight]) || []);
-          const productGelatoTypeMap = new Map(products?.map(p => [p.id, p.product_gelato_type]) || []);
-          const productMilkBasedMap = new Map(products?.map(p => [p.id, p.product_milkbased]) || []);
-          const productSugarBasedMap = new Map(products?.map(p => [p.id, p.product_sugarbased]) || []);
-          const productCostMap = new Map(products?.map(p => [p.id, p.product_cost]) || []);
-          const productPriceMap = new Map(products?.map(p => [p.id, p.product_price]) || []);
+          if (productIds.length > 0) {
+            const { data: productsData, error: productsError } = await supabase
+              .from('product_list')
+              .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased, product_cost, product_price')
+              .in('id', productIds);
+
+            if (productsError) throw productsError;
+            products = productsData || [];
+          }
+
+          const productTypeMap = new Map(products.map(p => [p.id, p.product_type]));
+          const productWeightMap = new Map(products.map(p => [p.id, p.product_weight]));
+          const productGelatoTypeMap = new Map(products.map(p => [p.id, p.product_gelato_type]));
+          const productMilkBasedMap = new Map(products.map(p => [p.id, p.product_milkbased]));
+          const productSugarBasedMap = new Map(products.map(p => [p.id, p.product_sugarbased]));
+          const productCostMap = new Map(products.map(p => [p.id, p.product_cost]));
+          const productPriceMap = new Map(products.map(p => [p.id, p.product_price]));
 
           clientOrders.forEach((order: Order) => {
             const companyName = Array.isArray(order.client_user) 
@@ -313,18 +325,20 @@ export default function ReportPage() {
             orderItemsList.forEach((item: OrderItem) => {
               const productWeight = productWeightMap.get(item.product_id) || 0;
               const calculatedWeightNum = productWeight * item.quantity;
-              const productType = productTypeMap.get(item.product_id) || item.product_type || 'N/A';
-              const productGelatoType = productGelatoTypeMap.get(item.product_id) || 'Dairy';
+              // Prioritize order item values (from edit) over product_list values
+              const productType = item.product_type || productTypeMap.get(item.product_id) || 'N/A';
+              const productGelatoType = item.gelato_type || productGelatoTypeMap.get(item.product_id) || 'Dairy';
               const productCost = productCostMap.get(item.product_id) || 0;
               const productPrice = productPriceMap.get(item.product_id) || 0;
-              
+
               totalItems += item.quantity;
-              
+
+              // Prioritize order item's milkbase/sugarbase values over product_list values
               if (productGelatoType === 'Dairy') {
-                const milkBased = productMilkBasedMap.get(item.product_id) || 0;
+                const milkBased = item.product_milkbase ?? productMilkBasedMap.get(item.product_id) ?? 0;
                 milkProduction += milkBased * item.quantity;
               } else if (productGelatoType === 'Sorbet') {
-                const sugarBased = productSugarBasedMap.get(item.product_id) || 0;
+                const sugarBased = item.product_sugarbase ?? productSugarBasedMap.get(item.product_id) ?? 0;
                 sugarSyrupProduction += sugarBased * item.quantity;
               }
 
@@ -490,8 +504,8 @@ export default function ReportPage() {
     });
 
     const summaryId = `PROD-${year}`;
-    
-    await supabase
+
+    const { error: upsertError } = await supabase
       .from('reports')
       .upsert({
         summary_id: summaryId,
@@ -502,8 +516,19 @@ export default function ReportPage() {
         onConflict: 'year'
       });
 
-  } catch (err) {
-    console.error(`Error generating report for ${year}:`, err);
+    if (upsertError) {
+      console.error('Supabase upsert error:', upsertError);
+      console.error('Upsert error details:', JSON.stringify(upsertError, null, 2));
+      throw new Error(`Failed to save report: ${upsertError.message}`);
+    }
+
+    console.log(`Successfully saved report for year ${year}`);
+
+  } catch (err: unknown) {
+    const error = err as Error;
+    console.error(`Error generating report for ${year}:`, error);
+    console.error('Error message:', error?.message);
+    console.error('Full error:', JSON.stringify(err, null, 2));
     throw err;
   }
 };

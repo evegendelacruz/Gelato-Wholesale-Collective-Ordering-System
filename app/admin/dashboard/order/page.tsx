@@ -953,7 +953,7 @@ const handleDelete = async () => {
 
     // Fetch order items if not already fetched
     if (!rowOrderItems[order.id]) {
-      // Fetch order items (product_type is stored directly in order item)
+      // Fetch order items
       const { data: items } = await supabase
         .from('client_order_item')
         .select('*')
@@ -964,14 +964,52 @@ const handleDelete = async () => {
         return;
       }
 
-      // Map items - product_type comes directly from the order item
-      const enrichedItems = items.map(item => ({
-        ...item,
-        product_type: item.product_type || 'N/A',
-        gelato_type: item.gelato_type || 'Dairy',
-        display_product_name: item.product_name || 'Unknown Product',
-        calculated_weight: item.calculated_weight || '-'
-      }));
+      // Fetch ALL products for matching (same approach as Labels and online orders)
+      const { data: allProducts } = await supabase
+        .from('product_list')
+        .select('id, product_id, product_name, product_ingredient, product_shelflife');
+
+      // Create lookup maps for flexible matching
+      const productMapById = new Map();
+      const productMapByName = new Map();
+
+      (allProducts || []).forEach(p => {
+        productMapById.set(p.id, p);
+        if (p.product_name) {
+          productMapByName.set(p.product_name.toLowerCase().trim(), p);
+        }
+      });
+
+      // Map items - find product and extract ingredient for sticker use
+      const enrichedItems = items.map(item => {
+        // Try to find product by id first, then by name
+        let productData = null;
+
+        if (item.product_id) {
+          productData = productMapById.get(item.product_id);
+        }
+
+        // Try by name if id didn't match
+        if (!productData && item.product_name) {
+          productData = productMapByName.get(item.product_name.toLowerCase().trim());
+        }
+
+        const productIngredient = productData?.product_ingredient || null;
+        const productShelflife = productData?.product_shelflife || '3 months';
+
+        console.log('Row expand - Item:', item.product_name, '| product_id:', item.product_id, '| Found product:', productData?.product_name, '| Ingredient:', productIngredient?.substring(0, 30));
+
+        return {
+          ...item,
+          product_type: item.product_type || 'N/A',
+          gelato_type: item.gelato_type || 'Dairy',
+          display_product_name: item.product_name || 'Unknown Product',
+          calculated_weight: item.calculated_weight || '-',
+          // Use label_ingredients if saved, otherwise use product_list ingredient
+          label_ingredients: item.label_ingredients || productIngredient,
+          product_shelflife: productShelflife
+        };
+      });
 
       setRowOrderItems(prev => ({
         ...prev,
@@ -1076,13 +1114,17 @@ const handleDelete = async () => {
   };
 
   // Generate barcode or product sticker for a single item (same modal as order-level)
+  // Uses THE EXACT SAME approach as handleGenerateLabels
   const handleItemStickerModal = async (
     item: {
+      id?: number;
       display_product_name: string;
       product_name?: string;
       product_id?: number;
       quantity: number;
       product_ingredient?: string | null;
+      label_ingredients?: string | null;
+      product_shelflife?: string | null;
     },
     orderId: number,
     orderDate: string,
@@ -1106,24 +1148,54 @@ const handleDelete = async () => {
 
     const productName = item.display_product_name || item.product_name || 'Unknown Product';
 
-    // Fetch product data
+    // ===== USE THE EXACT SAME APPROACH AS LABELS =====
+    // Fetch this specific order item WITH product_list JOIN (same query as handleGenerateLabels)
+    const { data: freshItems } = await supabase
+      .from('client_order_item')
+      .select(`
+        *,
+        product_list(
+          product_ingredient,
+          product_shelflife
+        )
+      `)
+      .eq('order_id', orderId);
+
+    // Find the matching item by product_name or id
+    const matchedItem = freshItems?.find(fi =>
+      fi.product_name === (item.product_name || item.display_product_name) ||
+      fi.id === item.id
+    );
+
+    // Extract ingredients THE SAME WAY as Labels does
     let ingredients = 'No ingredients listed';
     let shelfLife = '3 months';
-    let productId = item.product_id?.toString() || '0';
 
-    if (item.product_id) {
-      const { data: product } = await supabase
-        .from('product_list')
-        .select('product_id, product_ingredient, product_shelflife')
-        .eq('id', item.product_id)
-        .single();
-
-      if (product) {
-        ingredients = product.product_ingredient || ingredients;
-        shelfLife = product.product_shelflife || shelfLife;
-        productId = product.product_id || productId;
+    if (matchedItem) {
+      // First check label_ingredients (same as Labels line 907)
+      if (matchedItem.label_ingredients) {
+        ingredients = matchedItem.label_ingredients;
+      }
+      // Then check product_list JOIN (same as Labels lines 894-902)
+      else if (matchedItem.product_list) {
+        if (Array.isArray(matchedItem.product_list)) {
+          ingredients = matchedItem.product_list[0]?.product_ingredient || ingredients;
+          shelfLife = matchedItem.product_list[0]?.product_shelflife || shelfLife;
+        } else {
+          ingredients = (matchedItem.product_list as { product_ingredient?: string }).product_ingredient || ingredients;
+          shelfLife = (matchedItem.product_list as { product_shelflife?: string }).product_shelflife || shelfLife;
+        }
       }
     }
+
+    console.log('=== STICKER INGREDIENTS (same as Labels) ===');
+    console.log('Product:', productName);
+    console.log('Matched item:', matchedItem?.product_name);
+    console.log('label_ingredients:', matchedItem?.label_ingredients?.substring(0, 30));
+    console.log('product_list:', matchedItem?.product_list);
+    console.log('Final ingredients:', ingredients.substring(0, 50));
+
+    const productId = item.product_id?.toString() || '0';
 
     // Generate 13-digit barcode from product_id
     const barcode13 = '3' + productId.replace(/\D/g, '').padStart(12, '0').slice(-12);
@@ -1148,6 +1220,9 @@ const handleDelete = async () => {
     gpbnStartCodeRef.current = gpbnCode;
 
     // Generate previews
+    console.log('=== CALLING STICKER PREVIEW ===');
+    console.log('stickerItems being passed:', JSON.stringify(stickerItems, null, 2));
+
     if (stickerType === "barcode") {
       const previewUrl = generateOrderBarcodeStickersPreview(stickerItems);
       setBarcodeStickerPreviewUrl(previewUrl);
@@ -1204,11 +1279,13 @@ const handleDelete = async () => {
         }
       }
 
-      console.log('Item:', item.product_name, '| Ingredient from JOIN:', productIngredients?.substring(0, 50));
+      // Prioritize label_ingredients from order item, fallback to product_list
+      const finalIngredients = item.label_ingredients || productIngredients;
+      console.log('Item:', item.product_name, '| label_ingredients:', item.label_ingredients?.substring(0, 30), '| product_list:', productIngredients?.substring(0, 30), '| Using:', finalIngredients?.substring(0, 30));
 
       return {
         productName: item.product_name || 'Unknown Product',
-        ingredients: productIngredients,
+        ingredients: finalIngredients,
         quantity: item.quantity,
         existingBarcode: null
       };
@@ -1350,18 +1427,24 @@ const handleDelete = async () => {
       return;
     }
 
-    // Map items to sticker format
+    // Map items to sticker format - USE SAME APPROACH AS LABELS
     const stickerItems: OrderItemForSticker[] = items.map((item) => {
-      let ingredients = 'No ingredients listed';
+      // Get ingredients from product_list JOIN (same as Labels lines 894-902)
+      let productIngredients = 'No ingredients listed';
       let shelfLife = '3 months';
       let productId = item.product_id?.toString() || '0';
 
       if (item.product_list) {
         const productData = Array.isArray(item.product_list) ? item.product_list[0] : item.product_list;
-        ingredients = productData?.product_ingredient || ingredients;
+        productIngredients = productData?.product_ingredient || productIngredients;
         shelfLife = productData?.product_shelflife || shelfLife;
         productId = productData?.product_id || productId;
       }
+
+      // Prioritize label_ingredients (same as Labels line 907)
+      const ingredients = item.label_ingredients || productIngredients;
+
+      console.log('Compiled sticker item:', item.product_name, '| label_ingredients:', item.label_ingredients?.substring(0, 30), '| product_list:', productIngredients?.substring(0, 30), '| Final:', ingredients?.substring(0, 30));
 
       // Generate 13-digit barcode from product_id (3 + padded product_id)
       const barcode13 = '3' + productId.replace(/\D/g, '').padStart(12, '0').slice(-12);
@@ -1906,24 +1989,70 @@ const handleViewInvoice = async (order) => {
       .eq('client_auth_id', order.client_auth_id)
       .single();
 
-    // Fetch order items with product type and billing name
-    const { data: items } = await supabase
+    // Fetch order items - explicitly select all needed columns including product_type and gelato_type
+    const { data: items, error: itemsError } = await supabase
       .from('client_order_item')
-      .select(`
-         *,
-        product_list!client_order_item_product_id_fkey(
-          product_type,
-          product_billingName
-        )
-      `)
+      .select('id, order_id, product_id, product_name, product_type, gelato_type, quantity, unit_price, subtotal, calculated_weight')
       .eq('order_id', order.id);
 
-    // Map the items to include product_type and product_billingName at the root level
-    const itemsWithDetails = items?.map(item => ({
-      ...item,
-      product_type: item.product_list?.product_type || item.product_list?.[0]?.product_type || item.product_name,
-      product_billingName: item.product_list?.product_billingName || item.product_list?.[0]?.product_billingName || item.product_name
-    })) || [];
+    if (itemsError) {
+      console.error('Error fetching order items:', itemsError);
+      throw itemsError;
+    }
+
+    console.log('Fetched order items for invoice:', items);
+
+    // Map items - use order item values directly (these are the edited values)
+    const itemsWithDetails = await Promise.all((items || []).map(async (item) => {
+      // Default fallbacks
+      let fallbackProductType = item.product_name;
+      let fallbackGelatoType = 'Dairy';
+
+      // Only fetch from product_list for fallback values if product_type/gelato_type are not set
+      if (item.product_id && (!item.product_type || !item.gelato_type)) {
+        const { data: productData } = await supabase
+          .from('product_list')
+          .select('product_type, product_gelato_type')
+          .eq('id', item.product_id)
+          .single();
+
+        if (productData) {
+          fallbackProductType = productData.product_type || item.product_name;
+          fallbackGelatoType = productData.product_gelato_type || 'Dairy';
+        }
+      }
+
+      // IMPORTANT: Use order item values directly - these are the edited values
+      const itemProductType = item.product_type;
+      const itemGelatoType = item.gelato_type;
+      const itemProductName = item.product_name;
+
+      // Only use fallback if order item value is null/undefined/empty
+      const finalProductType = (itemProductType !== null && itemProductType !== undefined && itemProductType !== '')
+        ? itemProductType
+        : fallbackProductType;
+      const finalGelatoType = (itemGelatoType !== null && itemGelatoType !== undefined && itemGelatoType !== '')
+        ? itemGelatoType
+        : fallbackGelatoType;
+
+      console.log(`Item ${item.id}: product_name="${itemProductName}", product_type="${finalProductType}"`);
+
+      return {
+        id: item.id,
+        product_id: item.product_id,
+        product_name: itemProductName,
+        product_type: finalProductType,
+        gelato_type: finalGelatoType,
+        // Use the order item's product_name for billing name display (this is the edited value)
+        product_billingName: itemProductName,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.subtotal,
+        calculated_weight: item.calculated_weight
+      };
+    }));
+
+    console.log('Final items with details for invoice:', itemsWithDetails);
 
     // Combine client data - keep all address fields from client_user
     const combinedClientData = {
@@ -2248,75 +2377,80 @@ const handleViewInvoice = async (order) => {
             )}
 
             {/* Table Container */}
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              {/* Header Table */}
-              <div
-                ref={headerScrollRef}
-                className="overflow-x-auto overflow-y-hidden"
-                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-                onScroll={() => syncScroll('header')}
-              >
-                <table className="w-full table-fixed min-w-[1400px]">
-                  <thead className="bg-white">
-                    <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
-                      <th className="text-left py-3 px-2 w-[40px]">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 cursor-pointer"
-                          checked={selectedRows.size === currentOrders.length && currentOrders.length > 0}
-                          onChange={(e) => handleSelectAll(e.target.checked)}
-                        />
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[180px]" style={{ color: '#5C2E1F' }}>
-                        COMPANY NAME
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
-                        ORDER DATE
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
-                        DELIVERY DATE
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[200px]" style={{ color: '#5C2E1F' }}>
-                        DELIVERY ADDRESS
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: '#5C2E1F' }}>
-                        AMOUNT ($)
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
-                        STATUS
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
-                        TRACKING NO
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
-                        INVOICE
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[70px]" style={{ color: '#5C2E1F' }}>
-                        LABEL
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: '#5C2E1F' }}>
-                        STICKER
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[50px]" style={{ color: '#5C2E1F' }}>
-                        ACTIONS
-                      </th>
-                    </tr>
-                  </thead>
-                </table>
-              </div>
+            <div className="border border-gray-200 rounded-lg">
+              {/* Sticky Header + Scrollbar Container */}
+              <div style={{ position: 'sticky', top: 0, zIndex: 20, backgroundColor: '#ffffff' }}>
+                {/* Header Table */}
+                <div
+                  ref={headerScrollRef}
+                  className="overflow-x-auto overflow-y-hidden"
+                  style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                  onScroll={() => syncScroll('header')}
+                >
+                  <table className="w-full table-fixed min-w-[1400px]">
+                    <thead className="bg-white">
+                      <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
+                        <th className="text-left py-3 px-2 w-[40px]">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 cursor-pointer"
+                            checked={selectedRows.size === currentOrders.length && currentOrders.length > 0}
+                            onChange={(e) => handleSelectAll(e.target.checked)}
+                          />
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[180px]" style={{ color: '#5C2E1F' }}>
+                          COMPANY NAME
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
+                          ORDER DATE
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
+                          DELIVERY DATE
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[200px]" style={{ color: '#5C2E1F' }}>
+                          DELIVERY ADDRESS
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: '#5C2E1F' }}>
+                          AMOUNT ($)
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
+                          STATUS
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
+                          TRACKING NO
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: '#5C2E1F' }}>
+                          INVOICE
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[70px]" style={{ color: '#5C2E1F' }}>
+                          LABEL
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: '#5C2E1F' }}>
+                          STICKER
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[50px]" style={{ color: '#5C2E1F' }}>
+                          ACTIONS
+                        </th>
+                      </tr>
+                    </thead>
+                  </table>
+                </div>
 
-              {/* Horizontal Scrollbar - Under Header */}
-              <div
-                ref={scrollbarRef}
-                className="overflow-x-auto overflow-y-hidden"
-                style={{
-                  height: '14px',
-                  scrollbarWidth: 'auto',
-                  scrollbarColor: '#5C2E1F #f1f1f1'
-                }}
-                onScroll={() => syncScroll('scrollbar')}
-              >
-                <div style={{ width: '1400px', height: '1px' }}></div>
+                {/* Horizontal Scrollbar */}
+                <div
+                  ref={scrollbarRef}
+                  className="overflow-x-auto overflow-y-hidden"
+                  style={{
+                    height: '16px',
+                    scrollbarWidth: 'auto',
+                    scrollbarColor: '#5C2E1F #f1f1f1',
+                    backgroundColor: '#f9fafb',
+                    borderBottom: '1px solid #e5e7eb'
+                  }}
+                  onScroll={() => syncScroll('scrollbar')}
+                >
+                  <div style={{ width: '1400px', height: '1px' }}></div>
+                </div>
               </div>
 
               {/* Body Table */}
@@ -2531,23 +2665,21 @@ const handleViewInvoice = async (order) => {
                                 )}
                               </div>
                             </td>
-                            <td className="py-2 px-2"></td>
                           </tr>
                         ))
                       ) : expandedRows[order.id] ? (
                         <tr className="bg-white border-b border-gray-200">
                           <td className="py-2 px-2"></td>
-                          <td colSpan={10} className="text-center py-4 text-gray-500 text-xs border-l border-gray-400">
+                          <td colSpan={11} className="text-center py-4 text-gray-500 text-xs border-l border-gray-400">
                             Loading order items...
                           </td>
-                          <td className="py-2 px-2"></td>
                         </tr>
                       ) : null}
                       {/* Notes Row */}
                       {expandedRows[order.id] && (
                         <tr className="bg-blue-50 border-b border-gray-200">
                           <td className="py-3 px-2"></td>
-                          <td colSpan={10} className="py-3 px-2 border-l border-gray-400">
+                          <td colSpan={11} className="py-3 px-2 border-l border-gray-400">
                             <div className="flex items-start gap-2">
                               <span className="text-xs font-bold text-gray-700">NOTES:</span>
                               <span className="text-xs text-gray-600 flex-1">
@@ -2555,7 +2687,6 @@ const handleViewInvoice = async (order) => {
                               </span>
                             </div>
                           </td>
-                          <td className="py-3 px-2"></td>
                         </tr>
                       )}
                       </Fragment>
@@ -2874,8 +3005,20 @@ const handleViewInvoice = async (order) => {
                 {/* Invoice Content */}
                 <div className="flex-1 overflow-auto p-6 bg-gray-100">
                   <div className="bg-white shadow-lg rounded-lg">
-                    <ClientInvoice 
-                        order={{...selectedOrder, items: orderItems}}
+                    <ClientInvoice
+                        key={`invoice-${selectedOrder.id}-${orderItems.length}-${Date.now()}`}
+                        order={{
+                          ...selectedOrder,
+                          items: orderItems.map(item => ({
+                            id: item.id,
+                            product_name: item.product_name,
+                            product_type: item.product_type,
+                            product_billingName: item.product_billingName,
+                            quantity: item.quantity,
+                            unit_price: item.unit_price,
+                            subtotal: item.subtotal
+                          }))
+                        }}
                         clientData={clientData}
                         formatDate={formatDate}
                         getSubtotal={() => getSubtotal(orderItems)}
@@ -3128,7 +3271,11 @@ const handleViewInvoice = async (order) => {
               setSelectedOrder(null);
               setSelectedRows(new Set());
               setIsEditSuccessOpen(true);
-              
+
+              // Clear cached order items to force re-fetch with updated data
+              setRowOrderItems({});
+              setExpandedRows({});
+
               // Refresh orders after successful update
               const fetchOrders = async () => {
                 try {
@@ -3278,9 +3425,10 @@ const handleViewInvoice = async (order) => {
               </div>
             </div>
           )}
+
           {/* Success Modal */}
           {showSuccessModal && (
-            <div 
+            <div
               className="fixed inset-0 flex items-center justify-center z-50 p-4"
               style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
               onClick={() => setShowSuccessModal(false)}

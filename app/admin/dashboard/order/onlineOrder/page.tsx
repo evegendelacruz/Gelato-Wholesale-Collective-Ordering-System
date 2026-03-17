@@ -4,7 +4,7 @@ import Header from "@/app/components/header/page";
 import supabase from "@/lib/client";
 import Image from "next/image";
 import { useState, useEffect, Fragment, useCallback, useRef } from "react";
-import { Search, Filter, Plus, X, Check, ChevronDown, Tag } from "lucide-react";
+import { Search, Filter, Plus, X, Check, ChevronDown, Tag, Pencil } from "lucide-react";
 import {
   downloadMultiStickerPDF,
   downloadAllOrderStickersPDF,
@@ -57,6 +57,7 @@ interface OrderItem {
   batch_number?: string;
   product_ingredient?: string;
   product_allergen?: string;
+  product_shelflife?: string;
   sticker_bbd_code?: string | null;
   sticker_pbn_code?: string | null;
   sticker_barcode?: string | null;
@@ -229,6 +230,7 @@ export default function OnlineOrderPage() {
   const [totalStickerCount, setTotalStickerCount] = useState(0);
   const [showStickerDropdown, setShowStickerDropdown] = useState<number | null>(null);
   const [showItemStickerDropdown, setShowItemStickerDropdown] = useState<string | null>(null); // format: "orderId-itemIndex"
+
 
   // Use ref for GPBN to avoid closure issues - this stores the starting code for current order
   const gpbnStartCodeRef = useRef<string | null>(null);
@@ -544,7 +546,7 @@ export default function OnlineOrderPage() {
         // Fetch ALL products once for efficient matching
         const { data: allProducts } = await supabase
           .from("product_list")
-          .select("id, product_id, product_name, sticker_bbd_code, sticker_pbn_code, sticker_barcode, product_ingredient");
+          .select("id, product_id, product_name, sticker_bbd_code, sticker_pbn_code, sticker_barcode, product_ingredient, product_shelflife");
 
         const allProductsList = allProducts || [];
 
@@ -636,14 +638,19 @@ export default function OnlineOrderPage() {
             }
           }
 
-          console.log('Row expand - Item:', item.product_name, '-> Product:', productData?.product_name, '| Ingredient:', productData?.product_ingredient?.substring(0, 30));
+          // Prioritize label_ingredients, then product_list, then item.product_ingredient
+          const finalIngredient = item.label_ingredients || productData?.product_ingredient || item.product_ingredient || null;
+          console.log('Row expand - Item:', item.product_name, '-> Product:', productData?.product_name, '| label_ingredients:', item.label_ingredients?.substring(0, 20), '| product_ingredient:', finalIngredient?.substring(0, 30));
 
           return {
             ...item,
             sticker_bbd_code: productData?.sticker_bbd_code || null,
             sticker_pbn_code: productData?.sticker_pbn_code || null,
             sticker_barcode: productData?.sticker_barcode || null,
-            product_ingredient: productData?.product_ingredient || item.product_ingredient || null
+            product_ingredient: finalIngredient,
+            // Store label_ingredients with the prioritized value for sticker use
+            label_ingredients: finalIngredient,
+            product_shelflife: productData?.product_shelflife || '3 months'
           };
         });
 
@@ -860,8 +867,9 @@ export default function OnlineOrderPage() {
         }
       }
 
-      const finalIngredients = productIngredient || item.product_ingredient || 'No ingredients listed';
-      console.log('Final ingredients for', item.product_name, ':', finalIngredients.substring(0, 50));
+      // Prioritize label_ingredients from order item, then item.product_ingredient, then product list
+      const finalIngredients = item.label_ingredients || item.product_ingredient || productIngredient || 'No ingredients listed';
+      console.log('Final ingredients for', item.product_name, '| label_ingredients:', item.label_ingredients?.substring(0, 30), '| Using:', finalIngredients.substring(0, 50));
 
       return {
         productName: item.product_name || 'Unknown Product',
@@ -1018,7 +1026,8 @@ export default function OnlineOrderPage() {
 
       return {
         productName: item.product_name || 'Unknown Product',
-        ingredients: productData?.product_ingredient || item.label_ingredients || 'No ingredients listed',
+        // Prioritize label_ingredients from order item, then fallback to product_list
+        ingredients: item.label_ingredients || productData?.product_ingredient || 'No ingredients listed',
         quantity: item.quantity,
         barcode13,
         shelfLife: productData?.product_shelflife || '3 months'
@@ -1121,25 +1130,10 @@ export default function OnlineOrderPage() {
 
     const productName = item.product_name || 'Unknown Product';
 
-    // Fetch product data
-    let ingredients = item.product_ingredient || 'No ingredients listed';
-    let shelfLife = '3 months';
-    let productId = item.product_id || '0';
-
-    // Try to fetch from product_list for more accurate data
-    if (item.product_id) {
-      const { data: product } = await supabase
-        .from('product_list')
-        .select('product_id, product_ingredient, product_shelflife')
-        .eq('product_id', item.product_id)
-        .single();
-
-      if (product) {
-        ingredients = product.product_ingredient || ingredients;
-        shelfLife = product.product_shelflife || shelfLife;
-        productId = product.product_id || productId;
-      }
-    }
+    // Use ingredients from the enriched item (already includes label_ingredients or product_list fallback)
+    const ingredients = item.label_ingredients || item.product_ingredient || 'No ingredients listed';
+    const shelfLife = item.product_shelflife || '3 months';
+    const productId = item.product_id || '0';
 
     // Generate 13-digit barcode from product_id
     const barcode13 = '3' + productId.replace(/\D/g, '').padStart(12, '0').slice(-12);
@@ -2558,78 +2552,83 @@ export default function OnlineOrderPage() {
             )}
 
             {/* Table Container */}
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              {/* Header Table */}
-              <div
-                ref={headerScrollRef}
-                className="overflow-x-auto overflow-y-hidden"
-                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-                onScroll={() => syncScroll('header')}
-              >
-                <table className="w-full table-fixed min-w-[1400px]">
-                  <thead className="bg-white">
-                    <tr className="border-b-2" style={{ borderColor: "#5C2E1F" }}>
-                      <th className="text-left py-3 px-2 w-[40px]">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 cursor-pointer"
-                          checked={
-                            selectedRows.size === currentOrders.length &&
-                            currentOrders.length > 0
-                          }
-                          onChange={(e) => handleSelectAll(e.target.checked)}
-                        />
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[180px]" style={{ color: "#5C2E1F" }}>
-                        CUSTOMER NAME
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
-                        ORDER DATE
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
-                        DELIVERY DATE
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[200px]" style={{ color: "#5C2E1F" }}>
-                        DELIVERY ADDRESS
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: "#5C2E1F" }}>
-                        AMOUNT ($)
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
-                        STATUS
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
-                        TRACKING NO
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
-                        INVOICE
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[70px]" style={{ color: "#5C2E1F" }}>
-                        LABEL
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: "#5C2E1F" }}>
-                        STICKER
-                      </th>
-                      <th className="text-left py-3 px-2 font-bold text-xs w-[50px]" style={{ color: "#5C2E1F" }}>
-                        ACTIONS
-                      </th>
-                    </tr>
-                  </thead>
-                </table>
-              </div>
+            <div className="border border-gray-200 rounded-lg">
+              {/* Sticky Header + Scrollbar Container */}
+              <div style={{ position: 'sticky', top: 0, zIndex: 20, backgroundColor: '#ffffff' }}>
+                {/* Header Table */}
+                <div
+                  ref={headerScrollRef}
+                  className="overflow-x-auto overflow-y-hidden"
+                  style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                  onScroll={() => syncScroll('header')}
+                >
+                  <table className="w-full table-fixed min-w-[1400px]">
+                    <thead className="bg-white">
+                      <tr className="border-b-2" style={{ borderColor: "#5C2E1F" }}>
+                        <th className="text-left py-3 px-2 w-[40px]">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 cursor-pointer"
+                            checked={
+                              selectedRows.size === currentOrders.length &&
+                              currentOrders.length > 0
+                            }
+                            onChange={(e) => handleSelectAll(e.target.checked)}
+                          />
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[180px]" style={{ color: "#5C2E1F" }}>
+                          CUSTOMER NAME
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
+                          ORDER DATE
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
+                          DELIVERY DATE
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[200px]" style={{ color: "#5C2E1F" }}>
+                          DELIVERY ADDRESS
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: "#5C2E1F" }}>
+                          AMOUNT ($)
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
+                          STATUS
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
+                          TRACKING NO
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[100px]" style={{ color: "#5C2E1F" }}>
+                          INVOICE
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[70px]" style={{ color: "#5C2E1F" }}>
+                          LABEL
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: "#5C2E1F" }}>
+                          STICKER
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[50px]" style={{ color: "#5C2E1F" }}>
+                          ACTIONS
+                        </th>
+                      </tr>
+                    </thead>
+                  </table>
+                </div>
 
-              {/* Horizontal Scrollbar - Under Header */}
-              <div
-                ref={scrollbarRef}
-                className="overflow-x-auto overflow-y-hidden"
-                style={{
-                  height: '14px',
-                  scrollbarWidth: 'auto',
-                  scrollbarColor: '#5C2E1F #f1f1f1'
-                }}
-                onScroll={() => syncScroll('scrollbar')}
-              >
-                <div style={{ width: '1400px', height: '1px' }}></div>
+                {/* Horizontal Scrollbar */}
+                <div
+                  ref={scrollbarRef}
+                  className="overflow-x-auto overflow-y-hidden"
+                  style={{
+                    height: '16px',
+                    scrollbarWidth: 'auto',
+                    scrollbarColor: '#5C2E1F #f1f1f1',
+                    backgroundColor: '#f9fafb',
+                    borderBottom: '1px solid #e5e7eb'
+                  }}
+                  onScroll={() => syncScroll('scrollbar')}
+                >
+                  <div style={{ width: '1400px', height: '1px' }}></div>
+                </div>
               </div>
 
               {/* Body Table */}
@@ -2872,7 +2871,6 @@ export default function OnlineOrderPage() {
                                 STICKER
                               </td>
                               <td className="py-2 px-2"></td>
-                              <td className="py-2 px-2"></td>
                             </tr>
                           )}
 
@@ -2940,14 +2938,13 @@ export default function OnlineOrderPage() {
                                   </div>
                                 </td>
                                 <td className="py-2 px-2"></td>
-                                <td className="py-2 px-2"></td>
                               </tr>
                             ))
                           ) : expandedRows[order.id] ? (
                             <tr className="bg-white border-b border-gray-200">
                               <td className="py-2 px-2"></td>
                               <td
-                                colSpan={11}
+                                colSpan={10}
                                 className="text-center py-4 text-gray-500 text-xs border-l border-gray-400"
                               >
                                 Loading order items...
@@ -2960,7 +2957,7 @@ export default function OnlineOrderPage() {
                             <tr className="bg-blue-50 border-b border-gray-200">
                               <td className="py-3 px-2"></td>
                               <td
-                                colSpan={11}
+                                colSpan={10}
                                 className="py-3 px-2 border-l border-gray-400"
                               >
                                 <div className="flex items-start gap-2">
@@ -3162,6 +3159,7 @@ export default function OnlineOrderPage() {
             </div>
           )}
         </main>
+
         {/* Success Modal */}
         {showSuccessModal && (
           <div

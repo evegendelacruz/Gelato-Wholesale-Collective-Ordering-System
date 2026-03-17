@@ -21,8 +21,8 @@ const robotoCondensed = Roboto_Condensed({
 });
 
 export const metadata: Metadata = {
-  title: "Gelato Collective Wholesale",
-  description: "Momolato Ordering System built with Next.js",
+  title: "Gelato Wholesale Collective",
+  description: "Gelato Wholesale Collective Ordering System built with Next.js",
 };
 
 export default function RootLayout({

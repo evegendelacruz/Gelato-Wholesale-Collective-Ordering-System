@@ -15,7 +15,10 @@
       "Bash(do sleep 5)",
       "Bash(done)",
       "Bash(npx prisma migrate dev:*)",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(timeout 45 npm run dev:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npx next build:*)"
     ]
   }
 }

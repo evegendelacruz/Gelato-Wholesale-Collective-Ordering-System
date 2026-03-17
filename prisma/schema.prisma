@@ -304,6 +304,18 @@ model DeliveryReport {
   @@map("delivery_reports")
 }
 
+model Report {
+  id          Int      @id @default(autoincrement())
+  summary_id  String   @unique
+  year        Int      @unique
+  created_by  String?  @default("System")
+  created_at  DateTime @default(now())
+  report_data Json?
+
+  @@index([year])
+  @@map("reports")
+}
+
 // ============================================
 // QUOTATION TABLES
 // ============================================

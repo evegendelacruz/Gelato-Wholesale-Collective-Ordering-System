@@ -49,14 +49,17 @@ interface Order {
 interface OrderItem {
   id: number;
   order_id: number;
-  product_id: string;
+  product_id: number;
   product_name: string;
   product_type: string;
+  gelato_type: string;
   quantity: number;
   product_gelato_type: string;
   weight: number;
   unit_price: number;
   subtotal: number;
+  product_milkbase?: number;
+  product_sugarbase?: number;
 }
 
 interface Report {
@@ -250,21 +253,28 @@ export default function ReportClientPage() {
 
       if (itemsError) throw itemsError;
 
-      const productIds = [...new Set(orderItems?.map((item: OrderItem) => item.product_id) || [])];
-      const { data: products, error: productsError } = await supabase
-        .from('product_list')
-        .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased, product_cost, product_price')
-        .in('id', productIds);
+      // Filter out null product_ids (manual items)
+      const productIds = [...new Set((orderItems || []).map((item: OrderItem) => item.product_id).filter((id): id is number => id !== null && id !== undefined))];
 
-      if (productsError) throw productsError;
+      let products: { id: number; product_type: string; product_weight: number; product_gelato_type: string; product_milkbased: number; product_sugarbased: number; product_cost: number; product_price: number }[] = [];
 
-      const productTypeMap = new Map(products?.map(p => [p.id, p.product_type]) || []);
-      const productWeightMap = new Map(products?.map(p => [p.id, p.product_weight]) || []);
-      const productGelatoTypeMap = new Map(products?.map(p => [p.id, p.product_gelato_type]) || []);
-      const productMilkBasedMap = new Map(products?.map(p => [p.id, p.product_milkbased]) || []);
-      const productSugarBasedMap = new Map(products?.map(p => [p.id, p.product_sugarbased]) || []);
-      const productCostMap = new Map(products?.map(p => [p.id, p.product_cost]) || []);
-      const productPriceMap = new Map(products?.map(p => [p.id, p.product_price]) || []);
+      if (productIds.length > 0) {
+        const { data: productsData, error: productsError } = await supabase
+          .from('product_list')
+          .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased, product_cost, product_price')
+          .in('id', productIds);
+
+        if (productsError) throw productsError;
+        products = productsData || [];
+      }
+
+      const productTypeMap = new Map(products.map(p => [p.id, p.product_type]));
+      const productWeightMap = new Map(products.map(p => [p.id, p.product_weight]));
+      const productGelatoTypeMap = new Map(products.map(p => [p.id, p.product_gelato_type]));
+      const productMilkBasedMap = new Map(products.map(p => [p.id, p.product_milkbased]));
+      const productSugarBasedMap = new Map(products.map(p => [p.id, p.product_sugarbased]));
+      const productCostMap = new Map(products.map(p => [p.id, p.product_cost]));
+      const productPriceMap = new Map(products.map(p => [p.id, p.product_price]));
 
       let milkProduction = 0;
       let sugarSyrupProduction = 0;
@@ -281,18 +291,20 @@ export default function ReportClientPage() {
         orderItemsList.forEach((item: OrderItem) => {
           const productWeight = productWeightMap.get(item.product_id) || 0;
           const calculatedWeightNum = productWeight * item.quantity;
-          const productType = productTypeMap.get(item.product_id) || item.product_type || 'N/A';
-          const productGelatoType = productGelatoTypeMap.get(item.product_id) || 'Dairy';
+          // Prioritize order item values (from edit) over product_list values
+          const productType = item.product_type || productTypeMap.get(item.product_id) || 'N/A';
+          const productGelatoType = item.gelato_type || productGelatoTypeMap.get(item.product_id) || 'Dairy';
           const productCost = productCostMap.get(item.product_id) || 0;
           const productPrice = productPriceMap.get(item.product_id) || 0;
-          
+
           totalItems += item.quantity;
-          
+
+          // Prioritize order item's milkbase/sugarbase values over product_list values
           if (productGelatoType === 'Dairy') {
-            const milkBased = productMilkBasedMap.get(item.product_id) || 0;
+            const milkBased = item.product_milkbase ?? productMilkBasedMap.get(item.product_id) ?? 0;
             milkProduction += milkBased * item.quantity;
           } else if (productGelatoType === 'Sorbet') {
-            const sugarBased = productSugarBasedMap.get(item.product_id) || 0;
+            const sugarBased = item.product_sugarbase ?? productSugarBasedMap.get(item.product_id) ?? 0;
             sugarSyrupProduction += sugarBased * item.quantity;
           }
 
