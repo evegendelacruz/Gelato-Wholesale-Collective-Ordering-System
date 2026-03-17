@@ -221,10 +221,18 @@ useEffect(() => {
       console.log('Fetching order items for order ID:', order.id);
       
       // Fetch order items with product details using the foreign key relationship
+      // Include product_list JOIN for ingredient, allergen, milkbase, sugarbase (same as Labels)
       const { data: orderItemsData, error: itemsError } = await supabase
         .from('client_order_item')
         .select(`
-          *`)
+          *,
+          product_list(
+            product_ingredient,
+            product_allergen,
+            product_milkbased,
+            product_sugarbased
+          )
+        `)
         .eq('order_id', order.id);
 
       console.log('Order items response:', { data: orderItemsData, error: itemsError });
@@ -241,25 +249,43 @@ useEffect(() => {
       }
 
       // Map the data to include all product details
-      const itemsWithDetails = orderItemsData.map(item => ({
-        id: item.id,
-        product_id: item.product_id,
-        product_name: item.product_name,
-        product_type: item.product_type || '',
-        gelato_type: item.gelato_type || '',
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        subtotal: item.subtotal,
-        weight: item.calculated_weight || 0,
-        calculated_weight: item.calculated_weight || '',
-        request: item.product_notes || null,
-        product_ingredient: item.label_ingredients || '',
-        product_allergen: item.label_allergens || '',
-        product_description: '',
-        product_milkbase: item.product_milkbase || 0,
-        product_sugarbase: item.product_sugarbase || 0,
-        isExpanded: false
-      }));
+      // Extract ingredient, allergen, milkbase, sugarbase from product_list JOIN
+      const itemsWithDetails = orderItemsData.map(item => {
+        let productIngredient = '';
+        let productAllergen = '';
+        let productMilkbase = 0;
+        let productSugarbase = 0;
+
+        if (item.product_list) {
+          const productData = Array.isArray(item.product_list) ? item.product_list[0] : item.product_list;
+          productIngredient = productData?.product_ingredient || '';
+          productAllergen = productData?.product_allergen || '';
+          productMilkbase = productData?.product_milkbased || 0;
+          productSugarbase = productData?.product_sugarbased || 0;
+        }
+
+        return {
+          id: item.id,
+          product_id: item.product_id,
+          product_name: item.product_name,
+          product_type: item.product_type || '',
+          gelato_type: item.gelato_type || '',
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          subtotal: item.subtotal,
+          weight: item.calculated_weight || 0,
+          calculated_weight: item.calculated_weight || '',
+          request: item.product_notes || null,
+          // Prioritize saved label data, fallback to product_list (same as Labels)
+          product_ingredient: item.label_ingredients || productIngredient,
+          product_allergen: item.label_allergens || productAllergen,
+          product_description: '',
+          // Get milkbase and sugarbase from product_list JOIN
+          product_milkbase: productMilkbase,
+          product_sugarbase: productSugarbase,
+          isExpanded: false
+        };
+      });
 
       console.log('Final items with details:', itemsWithDetails);
       setOrderItems(itemsWithDetails);
@@ -649,8 +675,7 @@ useEffect(() => {
             subtotal: item.subtotal,
             calculated_weight: item.calculated_weight && !isNaN(parseFloat(String(item.calculated_weight))) ? parseFloat(String(item.calculated_weight)) : null,
             label_ingredients: item.product_ingredient || null,
-            product_milkbase: item.product_milkbase || null,
-            product_sugarbase: item.product_sugarbase || null
+            label_allergens: item.product_allergen || null
           })
           .eq('id', item.id);
 
@@ -685,8 +710,7 @@ useEffect(() => {
               subtotal: item.subtotal,
               calculated_weight: item.calculated_weight && !isNaN(parseFloat(String(item.calculated_weight))) ? parseFloat(String(item.calculated_weight)) : null,
               label_ingredients: item.product_ingredient || null,
-              product_milkbase: item.product_milkbase || null,
-              product_sugarbase: item.product_sugarbase || null
+              label_allergens: item.product_allergen || null
             });
 
           if (insertError) {

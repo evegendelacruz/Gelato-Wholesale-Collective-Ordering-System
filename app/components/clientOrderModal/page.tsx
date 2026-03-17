@@ -8,6 +8,7 @@ interface Client {
   client_id: string;
   client_auth_id: string;
   client_businessName: string;
+  client_operationName: string | null;
   client_delivery_address: string;
   client_person_incharge: string;
 }
@@ -236,7 +237,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     try {
       const { data, error } = await supabase
         .from('client_user')
-        .select('client_id, client_auth_id, client_businessName, client_delivery_address, client_person_incharge')
+        .select('client_id, client_auth_id, client_businessName, client_operationName, client_delivery_address, client_person_incharge')
         .order('client_businessName', { ascending: true });
 
       if (error) throw error;
@@ -1124,7 +1125,7 @@ const handleClose = () => {
                           <div className="flex items-center justify-between">
                             <div>
                               <p className="font-medium text-gray-900">{client.client_businessName}</p>
-                              <p className="text-sm text-gray-600">ID: {client.client_id} • {client.client_person_incharge}</p>
+                              <p className="text-sm text-gray-600">{client.client_operationName || 'No Operation Name'} • {client.client_person_incharge}</p>
                               <p className="text-xs text-gray-500 mt-1">{client.client_delivery_address}</p>
                             </div>
                             {selectedClient?.client_id === client.client_id && (
