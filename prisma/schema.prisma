@@ -246,20 +246,23 @@ model CustomerOrder {
 }
 
 model CustomerOrderItem {
-  id                Int     @id @default(autoincrement())
-  order_id          Int
-  product_id        String?
-  product_name      String
-  quantity          Int
-  calculated_weight String?
-  gelato_type       String?
-  product_type      String?
-  product_price     Float
-  product_cost      Float?
-  label_ingredients String?
-  label_allergens   String?
-  best_before       String?
-  batch_number      String?
+  id                  Int     @id @default(autoincrement())
+  order_id            Int
+  product_id          String?
+  product_name        String
+  quantity            Int
+  calculated_weight   String?
+  gelato_type         String?
+  product_type        String?
+  product_price       Float
+  product_cost        Float?
+  label_ingredients   String?
+  label_allergens     String?
+  best_before         String?
+  batch_number        String?
+  product_description String?
+  product_milkbase    Float?
+  product_sugarbase   Float?
 
   // Relations
   order   CustomerOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)

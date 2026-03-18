@@ -1,6 +1,6 @@
 'use client';
-import { useState, useEffect, Fragment } from 'react';
-import { X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState, useEffect, Fragment, useRef } from 'react';
+import { X, Trash2, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import supabase from '@/lib/client';
 
 interface Order {
@@ -26,16 +26,21 @@ interface OrderItem {
   product_cost: number | null;
   product_type: string | null;
   gelato_type: string | null;
+  product_weight: number;
   calculated_weight: string | null;
   label_ingredients: string | null;
   label_allergens: string | null;
   product_ingredient?: string | null;
   product_allergen?: string | null;
   product_description?: string | null;
+  product_milkbase?: number;
+  product_sugarbase?: number;
+  product_notes?: string;
   best_before: string | null;
   batch_number: string | null;
   isDeleted?: boolean;
   isExpanded?: boolean;
+  isNew?: boolean;
 }
 
 interface EditOnlineOrderModalProps {
@@ -57,6 +62,42 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
   });
   const [loading, setLoading] = useState(false);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+
+  // Dropdown options state
+  const [productTypeOptions, setProductTypeOptions] = useState<string[]>([]);
+  const [gelatoTypeOptions, setGelatoTypeOptions] = useState<string[]>([]);
+  const [isAddOptionModalOpen, setIsAddOptionModalOpen] = useState(false);
+  const [addOptionType, setAddOptionType] = useState<'product_type' | 'gelato_type' | null>(null);
+  const [addOptionLabel, setAddOptionLabel] = useState('');
+  const [newOptionValue, setNewOptionValue] = useState('');
+
+  // Load dropdown options
+  useEffect(() => {
+    const loadOptions = async () => {
+      try {
+        const { data: productTypes, error: productTypeError } = await supabase
+          .from('order_dropdown_options')
+          .select('option_value')
+          .eq('option_type', 'product_type');
+
+        const { data: gelatoTypes, error: gelatoTypeError } = await supabase
+          .from('order_dropdown_options')
+          .select('option_value')
+          .eq('option_type', 'gelato_type');
+
+        if (!productTypeError && productTypes) {
+          setProductTypeOptions(productTypes.map(item => item.option_value));
+        }
+
+        if (!gelatoTypeError && gelatoTypes) {
+          setGelatoTypeOptions(gelatoTypes.map(item => item.option_value));
+        }
+      } catch (error) {
+        console.error('Error loading options:', error);
+      }
+    };
+    loadOptions();
+  }, []);
 
   useEffect(() => {
     const fetchOrderItems = async () => {
@@ -81,25 +122,69 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
           return;
         }
 
-        const mappedItems = orderItemsData.map(item => ({
-          id: item.id,
-          product_id: item.product_id,
-          product_name: item.product_name,
-          quantity: item.quantity,
-          product_price: item.product_price,
-          product_cost: item.product_cost,
-          product_type: item.product_type || '',
-          gelato_type: item.gelato_type || '',
-          calculated_weight: item.calculated_weight || '',
-          label_ingredients: item.label_ingredients,
-          label_allergens: item.label_allergens,
-          product_ingredient: item.label_ingredients || '',
-          product_allergen: item.label_allergens || '',
-          product_description: '',
-          best_before: item.best_before,
-          batch_number: item.batch_number,
-          isExpanded: false
-        }));
+        // Fetch ALL products to get milkbase and sugarbase values
+        const { data: allProducts } = await supabase
+          .from('product_list')
+          .select('id, product_id, product_name, product_milkbased, product_sugarbased, product_description');
+
+        // Create lookup maps for flexible matching
+        const productMapById = new Map();
+        const productMapByProductId = new Map();
+        const productMapByName = new Map();
+
+        (allProducts || []).forEach(p => {
+          productMapById.set(p.id, p);
+          if (p.product_id) {
+            productMapByProductId.set(p.product_id, p);
+          }
+          if (p.product_name) {
+            productMapByName.set(p.product_name.toLowerCase().trim(), p);
+          }
+        });
+
+        const mappedItems = orderItemsData.map(item => {
+          // Try to find product by different methods
+          let productData = null;
+
+          // Try by numeric id
+          if (item.product_id && typeof item.product_id === 'number') {
+            productData = productMapById.get(item.product_id);
+          }
+          // Try by string product_id
+          if (!productData && item.product_id) {
+            productData = productMapByProductId.get(item.product_id);
+          }
+          // Try by exact name match
+          if (!productData && item.product_name) {
+            const normalizedName = item.product_name.toLowerCase().trim();
+            productData = productMapByName.get(normalizedName);
+          }
+
+          return {
+            id: item.id,
+            product_id: item.product_id,
+            product_name: item.product_name,
+            quantity: item.quantity,
+            product_price: item.product_price,
+            product_cost: item.product_cost || 0,
+            product_type: item.product_type || '',
+            gelato_type: item.gelato_type || '',
+            product_weight: item.calculated_weight ? parseFloat(item.calculated_weight) / (item.quantity || 1) : 0,
+            calculated_weight: item.calculated_weight || '',
+            label_ingredients: item.label_ingredients,
+            label_allergens: item.label_allergens,
+            product_ingredient: item.label_ingredients || '',
+            product_allergen: item.label_allergens || '',
+            product_description: item.product_description || productData?.product_description || '',
+            // Prioritize order item values (for manually inputted products), then fall back to product_list
+            product_milkbase: item.product_milkbase ?? productData?.product_milkbased ?? 0,
+            product_sugarbase: item.product_sugarbase ?? productData?.product_sugarbased ?? 0,
+            product_notes: '',
+            best_before: item.best_before,
+            batch_number: item.batch_number,
+            isExpanded: false
+          };
+        });
 
         console.log('Mapped order items:', mappedItems);
         setOrderItems(mappedItems);
@@ -132,7 +217,7 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
     }));
   };
 
-  const handleItemChange = (index: number, field: keyof OrderItem, value: string | number) => {
+  const handleItemChange = (index: number, field: keyof OrderItem, value: string | number | boolean) => {
     const updatedItems = [...orderItems];
     updatedItems[index] = {
       ...updatedItems[index],
@@ -141,13 +226,187 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
     setOrderItems(updatedItems);
   };
 
+  // Custom Dropdown Component
+  interface CustomDropdownProps {
+    label: string;
+    name: string;
+    value: string;
+    options: string[];
+    onChange: (e: { target: { name: string; value: string } }) => void;
+    onAddOption: () => void;
+    onRemoveOption: (option: string) => void;
+    required?: boolean;
+  }
+
+  const CustomDropdown = ({ label, name, value, options, onChange, onAddOption, onRemoveOption, required = false }: CustomDropdownProps) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+          setIsOpen(false);
+        }
+      };
+
+      if (isOpen) {
+        document.addEventListener('mousedown', handleClickOutside);
+      }
+
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }, [isOpen]);
+
+    return (
+      <div ref={dropdownRef} className="relative">
+        <label className="block text-xs font-medium mb-1 text-gray-700">
+          {label} {required && <span className="text-red-500">*</span>}
+        </label>
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-xs cursor-pointer bg-white flex justify-between items-center text-left"
+        >
+          <span className={value ? 'text-gray-900' : 'text-gray-500'}>
+            {value || `Select ${label}`}
+          </span>
+          <svg
+            className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {isOpen && (
+          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+            <div className="py-1">
+              {options.length === 0 && (
+                <div className="px-3 py-2 text-xs text-gray-500 text-center">
+                  No options yet. Click &quot;Add Option&quot; to create one.
+                </div>
+              )}
+
+              {options.map(option => (
+                <div
+                  key={option}
+                  className="px-3 py-1.5 hover:bg-gray-50 cursor-pointer flex items-center justify-between group text-xs"
+                  onClick={() => {
+                    onChange({ target: { name, value: option } });
+                    setIsOpen(false);
+                  }}
+                >
+                  <span className={value === option ? 'text-orange-600 font-medium' : ''}>
+                    {option}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveOption(option);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition-opacity"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddOption();
+                  setIsOpen(false);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-orange-50 cursor-pointer flex items-center gap-2 text-orange-600 border-t border-gray-200 text-xs"
+              >
+                <Plus size={12} />
+                <span className="font-medium">Add New Option</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const handleAddOption = async () => {
+    if (!newOptionValue.trim() || !addOptionType) return;
+
+    const trimmedValue = newOptionValue.trim();
+
+    try {
+      await supabase.from('order_dropdown_options').insert({
+        option_type: addOptionType,
+        option_value: trimmedValue,
+      });
+
+      if (addOptionType === 'product_type') {
+        setProductTypeOptions(prev => [...prev, trimmedValue]);
+      } else if (addOptionType === 'gelato_type') {
+        setGelatoTypeOptions(prev => [...prev, trimmedValue]);
+      }
+
+      setNewOptionValue('');
+      setIsAddOptionModalOpen(false);
+      setAddOptionType(null);
+    } catch (error) {
+      console.error('Error adding option:', error);
+      alert('Failed to add option');
+    }
+  };
+
+  const handleRemoveProductType = async (option: string) => {
+    try {
+      const { error } = await supabase
+        .from('order_dropdown_options')
+        .delete()
+        .eq('option_type', 'product_type')
+        .eq('option_value', option);
+
+      if (!error) {
+        setProductTypeOptions(productTypeOptions.filter(opt => opt !== option));
+      }
+    } catch (error) {
+      console.error('Error removing product type:', error);
+    }
+  };
+
+  const handleRemoveGelatoType = async (option: string) => {
+    try {
+      const { error } = await supabase
+        .from('order_dropdown_options')
+        .delete()
+        .eq('option_type', 'gelato_type')
+        .eq('option_value', option);
+
+      if (!error) {
+        setGelatoTypeOptions(gelatoTypeOptions.filter(opt => opt !== option));
+      }
+    } catch (error) {
+      console.error('Error removing gelato type:', error);
+    }
+  };
+
   const handleRemoveItem = (index: number) => {
-    const updatedItems = [...orderItems];
-    updatedItems[index] = {
-      ...updatedItems[index],
-      isDeleted: true
-    };
-    setOrderItems(updatedItems);
+    const item = orderItems[index];
+
+    // If it's a new item, completely remove it from the list
+    if (item.isNew) {
+      setOrderItems(orderItems.filter((_, i) => i !== index));
+    } else {
+      // For existing items, mark as deleted (will be deleted from database on save)
+      const updatedItems = [...orderItems];
+      updatedItems[index] = {
+        ...updatedItems[index],
+        isDeleted: true
+      };
+      setOrderItems(updatedItems);
+    }
   };
 
   const handleRestoreItem = (index: number) => {
@@ -166,6 +425,36 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
       isExpanded: !updatedItems[index].isExpanded
     };
     setOrderItems(updatedItems);
+  };
+
+  // Add new order item
+  const handleAddItem = () => {
+    const newItem: OrderItem = {
+      id: Date.now(), // Temporary ID for new items
+      product_id: null,
+      product_name: '',
+      quantity: 1,
+      product_price: 0,
+      product_cost: 0,
+      product_type: '',
+      gelato_type: '',
+      product_weight: 0,
+      calculated_weight: null,
+      label_ingredients: null,
+      label_allergens: null,
+      product_ingredient: '',
+      product_allergen: '',
+      product_description: '',
+      product_milkbase: 0,
+      product_sugarbase: 0,
+      product_notes: '',
+      best_before: null,
+      batch_number: null,
+      isDeleted: false,
+      isExpanded: true,
+      isNew: true
+    };
+    setOrderItems([...orderItems, newItem]);
   };
 
   const calculateTotalAmount = () => {
@@ -197,6 +486,26 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
         return;
       }
 
+      // Validate all items have required fields
+      for (let i = 0; i < itemsToKeep.length; i++) {
+        const item = itemsToKeep[i];
+        if (!item.product_name.trim()) {
+          alert(`Please enter a product name for item ${i + 1}`);
+          setLoading(false);
+          return;
+        }
+        if (!item.product_type) {
+          alert(`Please select a product type for "${item.product_name}"`);
+          setLoading(false);
+          return;
+        }
+        if (item.quantity < 1) {
+          alert(`Please enter a valid quantity for "${item.product_name}"`);
+          setLoading(false);
+          return;
+        }
+      }
+
       const totalAmount = calculateTotalAmount();
 
       // Update order
@@ -217,8 +526,8 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
 
       if (orderError) throw orderError;
 
-      // Delete items marked for deletion
-      const itemsToDelete = orderItems.filter(item => item.isDeleted);
+      // Delete items marked for deletion (only existing items, not new ones)
+      const itemsToDelete = orderItems.filter(item => item.isDeleted && !item.isNew);
       if (itemsToDelete.length > 0) {
         console.log('Deleting removed items:', itemsToDelete.map(i => i.id));
         const { error: deleteError } = await supabase
@@ -232,19 +541,60 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
         }
       }
 
-      // Update remaining order items
-      for (const item of itemsToKeep) {
+      // Separate new items from existing items
+      const newItems = itemsToKeep.filter(item => item.isNew);
+      const existingItems = itemsToKeep.filter(item => !item.isNew);
+
+      // Insert new items
+      if (newItems.length > 0) {
+        // Use ?? to properly handle 0 values when inserting new items
+        const itemsToInsert = newItems.map(item => ({
+          order_id: order.id,
+          product_id: item.product_id ?? null,
+          product_name: item.product_name.trim(),
+          product_type: item.product_type ?? null,
+          quantity: item.quantity,
+          gelato_type: item.gelato_type ?? null,
+          product_weight: item.product_weight ?? 0,
+          calculated_weight: item.product_weight ? (item.product_weight * item.quantity).toFixed(2) : null,
+          product_price: item.product_price ?? 0,
+          product_cost: item.product_cost ?? 0,
+          label_ingredients: item.product_ingredient ?? null,
+          label_allergens: item.product_allergen ?? null,
+          product_description: item.product_description ?? null,
+          product_milkbase: item.product_milkbase ?? 0,
+          product_sugarbase: item.product_sugarbase ?? 0
+        }));
+
+        const { error: insertError } = await supabase
+          .from('customer_order_item')
+          .insert(itemsToInsert);
+
+        if (insertError) {
+          console.error('Error inserting new items:', insertError);
+          throw new Error(`Failed to add new items: ${insertError.message}`);
+        }
+      }
+
+      // Update existing order items - use ?? to properly handle 0 values
+      for (const item of existingItems) {
+        const calculatedWeight = item.product_weight ? (item.product_weight * item.quantity).toFixed(2) : item.calculated_weight ?? null;
         const { error: itemError } = await supabase
           .from('customer_order_item')
           .update({
             product_name: item.product_name,
-            product_type: item.product_type || null,
-            gelato_type: item.gelato_type || null,
+            product_type: item.product_type ?? null,
+            gelato_type: item.gelato_type ?? null,
             quantity: item.quantity,
-            product_price: item.product_price,
-            calculated_weight: item.calculated_weight || null,
-            label_ingredients: item.product_ingredient || null,
-            label_allergens: item.product_allergen || null
+            product_weight: item.product_weight ?? 0,
+            product_price: item.product_price ?? 0,
+            product_cost: item.product_cost ?? 0,
+            calculated_weight: calculatedWeight,
+            label_ingredients: item.product_ingredient ?? null,
+            label_allergens: item.product_allergen ?? null,
+            product_description: item.product_description ?? null,
+            product_milkbase: item.product_milkbase ?? 0,
+            product_sugarbase: item.product_sugarbase ?? 0
           })
           .eq('id', item.id);
 
@@ -397,10 +747,23 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
 
           {/* Order Items */}
           <div>
-            <h3 className="text-lg font-semibold mb-3" style={{ color: '#5C2E1F' }}>
-              Order Items ({activeOrderItems.length})
-            </h3>
-            <p className="text-xs text-gray-500 mb-2">Click on a product row to expand and edit product details</p>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-lg font-semibold" style={{ color: '#5C2E1F' }}>
+                  Order Items ({activeOrderItems.length})
+                </h3>
+                <p className="text-xs text-gray-500">Click on a product row to expand and edit product details</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddItem}
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                disabled={loading}
+              >
+                <Plus size={20} />
+                <span>Add More Item</span>
+              </button>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -416,7 +779,7 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
                 </thead>
                 <tbody>
                   {orderItems.map((item, index) => (
-                    <Fragment key={item.id}>
+                    <Fragment key={item.isNew ? `new-${item.id}` : item.id}>
                       <tr
                         className={`border-b border-gray-200 ${item.isDeleted ? 'bg-red-50 opacity-50' : 'hover:bg-gray-50 cursor-pointer'}`}
                         onClick={() => !item.isDeleted && toggleItemExpand(index)}
@@ -430,8 +793,11 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
                         </td>
                         <td className="py-2 px-2 text-xs">
                           <span className={item.isDeleted ? 'line-through text-red-500' : ''}>
-                            {item.product_name}
+                            {item.product_name || (item.isNew ? 'New Item - Click to expand' : '')}
                           </span>
+                          {item.isNew && !item.isDeleted && (
+                            <span className="ml-2 text-green-600 text-xs font-medium">(New)</span>
+                          )}
                           {item.isDeleted && (
                             <span className="ml-2 text-red-500 text-xs">(Will be removed)</span>
                           )}
@@ -502,10 +868,10 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
                               <h4 className="text-sm font-semibold mb-3" style={{ color: '#5C2E1F' }}>
                                 Edit Product Details
                               </h4>
-                              <div className="grid grid-cols-3 gap-3">
-                                <div>
+                              <div className="grid grid-cols-4 gap-3">
+                                <div className="col-span-2">
                                   <label className="block text-xs font-medium mb-1 text-gray-700">
-                                    Product Name
+                                    Product Name <span className="text-red-500">*</span>
                                   </label>
                                   <input
                                     type="text"
@@ -515,25 +881,35 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
                                   />
                                 </div>
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-gray-700">
-                                    Type
-                                  </label>
-                                  <input
-                                    type="text"
+                                  <CustomDropdown
+                                    label="Product Type"
+                                    name="product_type"
                                     value={item.product_type || ''}
+                                    options={productTypeOptions}
                                     onChange={(e) => handleItemChange(index, 'product_type', e.target.value)}
-                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    onAddOption={() => {
+                                      setAddOptionType('product_type');
+                                      setAddOptionLabel('Product Type');
+                                      setIsAddOptionModalOpen(true);
+                                    }}
+                                    onRemoveOption={handleRemoveProductType}
+                                    required={true}
                                   />
                                 </div>
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-gray-700">
-                                    Gelato Type
-                                  </label>
-                                  <input
-                                    type="text"
+                                  <CustomDropdown
+                                    label="Gelato Type"
+                                    name="gelato_type"
                                     value={item.gelato_type || ''}
+                                    options={gelatoTypeOptions}
                                     onChange={(e) => handleItemChange(index, 'gelato_type', e.target.value)}
-                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    onAddOption={() => {
+                                      setAddOptionType('gelato_type');
+                                      setAddOptionLabel('Gelato Type');
+                                      setIsAddOptionModalOpen(true);
+                                    }}
+                                    onRemoveOption={handleRemoveGelatoType}
+                                    required={true}
                                   />
                                 </div>
                                 <div>
@@ -541,21 +917,69 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
                                     Weight (kg)
                                   </label>
                                   <input
-                                    type="text"
-                                    value={item.calculated_weight || ''}
-                                    onChange={(e) => handleItemChange(index, 'calculated_weight', e.target.value)}
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={item.product_weight || ''}
+                                    onChange={(e) => handleItemChange(index, 'product_weight', parseFloat(e.target.value) || 0)}
                                     className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="0.00"
                                   />
                                 </div>
-                                <div className="col-span-2">
+                                <div>
                                   <label className="block text-xs font-medium mb-1 text-gray-700">
-                                    Description
+                                    Price ($) <span className="text-red-500">*</span>
                                   </label>
                                   <input
-                                    type="text"
-                                    value={item.product_description || ''}
-                                    onChange={(e) => handleItemChange(index, 'product_description', e.target.value)}
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={item.product_price}
+                                    onChange={(e) => handleItemChange(index, 'product_price', parseFloat(e.target.value) || 0)}
                                     className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Cost ($)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={item.product_cost || ''}
+                                    onChange={(e) => handleItemChange(index, 'product_cost', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Milk Based
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={item.product_milkbase || ''}
+                                    onChange={(e) => handleItemChange(index, 'product_milkbase', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Sugar Based
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={item.product_sugarbase || ''}
+                                    onChange={(e) => handleItemChange(index, 'product_sugarbase', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="0.00"
                                   />
                                 </div>
                               </div>
@@ -582,6 +1006,20 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
                                     rows={2}
                                     className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="Enter allergen information..."
+                                  />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 gap-3 mt-3">
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Description <span className="text-gray-400 font-normal">(Shows in report instead of product name if provided)</span>
+                                  </label>
+                                  <textarea
+                                    value={item.product_description || ''}
+                                    onChange={(e) => handleItemChange(index, 'product_description', e.target.value)}
+                                    rows={2}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="Enter description for report (optional - defaults to product name)..."
                                   />
                                 </div>
                               </div>
@@ -638,6 +1076,72 @@ export default function EditOnlineOrderModal({ isOpen, onClose, onSuccess, order
           </div>
         </form>
       </div>
+
+      {/* Add Option Modal */}
+      {isAddOptionModalOpen && (
+        <div
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)', zIndex: 9999 }}
+        >
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>
+                Add New {addOptionLabel}
+              </h3>
+              <button
+                onClick={() => {
+                  setIsAddOptionModalOpen(false);
+                  setAddOptionType(null);
+                  setNewOptionValue('');
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2 text-gray-700">
+                Option Name
+              </label>
+              <input
+                type="text"
+                value={newOptionValue}
+                onChange={(e) => setNewOptionValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddOption();
+                  }
+                }}
+                placeholder="Enter option name"
+                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setIsAddOptionModalOpen(false);
+                  setAddOptionType(null);
+                  setNewOptionValue('');
+                }}
+                className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddOption}
+                disabled={!newOptionValue.trim()}
+                className="px-4 py-2 bg-orange-500 text-white rounded text-sm hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Add Option
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

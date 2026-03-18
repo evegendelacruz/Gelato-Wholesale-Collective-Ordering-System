@@ -1,10 +1,10 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { X, Plus, Trash2, ArrowLeft, Check, Search } from 'lucide-react';
+import { X, Plus, Trash2, Check, Search } from 'lucide-react';
 import supabase from '@/lib/client';
 
 interface OrderItem {
-  product_id: string | null;
+  product_id: number | null;
   product_name: string;
   product_type: string;
   gelato_type: string;
@@ -16,6 +16,9 @@ interface OrderItem {
   product_price: number;
   product_cost: number;
   product_ingredient: string;
+  product_allergen: string;
+  product_description: string;
+  add_to_product_list: boolean;
   is_from_product_list?: boolean;
   product_list_id?: number;
 }
@@ -32,6 +35,8 @@ interface Product {
   product_price: number;
   product_cost: number | null;
   product_ingredient: string | null;
+  product_allergen: string | null;
+  product_description: string | null;
 }
 
 interface CreateOnlineOrderModalProps {
@@ -70,7 +75,7 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
     try {
       const { data, error } = await supabase
         .from('product_list')
-        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_milkbased, product_sugarbased, product_price, product_cost, product_ingredient')
+        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_milkbased, product_sugarbased, product_price, product_cost, product_ingredient, product_allergen, product_description')
         .order('product_name', { ascending: true });
 
       if (error) {
@@ -134,6 +139,9 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
       product_price: 0,
       product_cost: 0,
       product_ingredient: '',
+      product_allergen: '',
+      product_description: '',
+      add_to_product_list: false,
       is_from_product_list: false
     }
   ]);
@@ -154,6 +162,9 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
         product_price: 0,
         product_cost: 0,
         product_ingredient: '',
+        product_allergen: '',
+        product_description: '',
+        add_to_product_list: false,
         is_from_product_list: false
       }
     ]);
@@ -161,19 +172,23 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
 
   // Handle selecting a product from the product list
   const handleSelectProduct = (index: number, product: Product) => {
+    // Use ?? instead of || to properly handle 0 values (e.g., product_milkbased of 0 should remain 0)
     const updatedItems = [...orderItems];
     updatedItems[index] = {
       ...updatedItems[index],
-      product_id: product.product_id || null,
+      product_id: product.id ?? null,
       product_name: product.product_name,
-      product_type: product.product_type || '',
-      gelato_type: product.product_gelato_type || '',
-      product_weight: product.product_weight || 0,
-      product_milkbase: product.product_milkbased || 0,
-      product_sugarbase: product.product_sugarbased || 0,
-      product_price: product.product_price || 0,
-      product_cost: product.product_cost || 0,
-      product_ingredient: product.product_ingredient || '',
+      product_type: product.product_type ?? '',
+      gelato_type: product.product_gelato_type ?? '',
+      product_weight: product.product_weight ?? 0,
+      product_milkbase: product.product_milkbased ?? 0,
+      product_sugarbase: product.product_sugarbased ?? 0,
+      product_price: product.product_price ?? 0,
+      product_cost: product.product_cost ?? 0,
+      product_ingredient: product.product_ingredient ?? '',
+      product_allergen: product.product_allergen ?? '',
+      product_description: product.product_description ?? '',
+      add_to_product_list: false,
       is_from_product_list: true,
       product_list_id: product.id
     };
@@ -452,8 +467,8 @@ const handleRemoveGelatoType = async (option: string) => {
     try {
       setLoading(true);
 
-      // First, add new products to product_list (those not from existing product list)
-      const newProducts = orderItems.filter(item => !item.is_from_product_list && item.product_name.trim());
+      // First, add new products to product_list (only those with add_to_product_list checked)
+      const newProducts = orderItems.filter(item => item.add_to_product_list && !item.is_from_product_list && item.product_name.trim());
 
       for (const item of newProducts) {
         // Check if product already exists by name
@@ -468,19 +483,22 @@ const handleRemoveGelatoType = async (option: string) => {
           const productId = await generateProductId();
 
           // Add to product_list
+          // Use ?? to properly handle 0 values when saving to product_list
           const { error: productError } = await supabase
             .from('product_list')
             .insert({
               product_id: productId,
               product_name: item.product_name.trim(),
-              product_type: item.product_type || null,
-              product_gelato_type: item.gelato_type || null,
-              product_weight: item.product_weight || 0,
-              product_milkbased: item.product_milkbase || null,
-              product_sugarbased: item.product_sugarbase || null,
-              product_price: item.product_price || 0,
-              product_cost: item.product_cost || null,
-              product_ingredient: item.product_ingredient || null,
+              product_type: item.product_type ?? null,
+              product_gelato_type: item.gelato_type ?? null,
+              product_weight: item.product_weight ?? 0,
+              product_milkbased: item.product_milkbase ?? null,
+              product_sugarbased: item.product_sugarbase ?? null,
+              product_price: item.product_price ?? 0,
+              product_cost: item.product_cost ?? null,
+              product_ingredient: item.product_ingredient ?? null,
+              product_allergen: item.product_allergen ?? null,
+              product_description: item.product_description ?? null,
               product_created_at: new Date().toISOString()
             });
 
@@ -530,22 +548,25 @@ const handleRemoveGelatoType = async (option: string) => {
         throw new Error('No order data returned after insert');
       }
 
-      // Insert order items - database will auto-generate id and product_id
+      // Insert order items - database will auto-generate id
+      // Save all product details to customer_order_item so they are preserved
+      // even if the product is later edited in product_list
       const itemsToInsert = orderItems.map(item => ({
         order_id: orderData.id,
-        product_id: item.product_id || null,
+        product_id: item.product_list_id || null,  // Store reference to product_list if from there
         product_name: item.product_name.trim(),
-        product_type: item.product_type,
+        product_type: item.product_type ?? null,
         quantity: item.quantity,
-        gelato_type: item.gelato_type,
-        product_weight: item.product_weight,
-        calculated_weight: parseFloat((item.product_weight * item.quantity).toFixed(2)),
-        product_milkbase: item.product_milkbase,
-        product_sugarbase: item.product_sugarbase,
-        product_notes: item.product_notes.trim() || null,
-        product_price: item.product_price,
-        product_cost: item.product_cost,
-        label_ingredients: item.product_ingredient || null
+        gelato_type: item.gelato_type ?? null,
+        product_weight: item.product_weight ?? 0,
+        calculated_weight: (item.product_weight * item.quantity).toFixed(2),
+        product_price: item.product_price ?? 0,
+        product_cost: item.product_cost ?? 0,
+        label_ingredients: item.product_ingredient ?? null,
+        label_allergens: item.product_allergen ?? null,
+        product_description: item.product_description ?? null,
+        product_milkbase: item.product_milkbase ?? 0,
+        product_sugarbase: item.product_sugarbase ?? 0
       }));
 
       const { error: itemsError } = await supabase
@@ -553,14 +574,13 @@ const handleRemoveGelatoType = async (option: string) => {
         .insert(itemsToInsert);
 
       if (itemsError) {
-        console.error('Items insert error details:', {
-          error: itemsError,
-          message: itemsError.message,
-          details: itemsError.details,
-          hint: itemsError.hint,
-          code: itemsError.code
-        });
-        alert(`Failed to create order items: ${itemsError.message || 'Unknown error'}`);
+        console.error('Items insert error - Full error:', JSON.stringify(itemsError, null, 2));
+        console.error('Items insert error - Message:', itemsError.message);
+        console.error('Items insert error - Details:', itemsError.details);
+        console.error('Items insert error - Hint:', itemsError.hint);
+        console.error('Items insert error - Code:', itemsError.code);
+        console.error('Items being inserted:', JSON.stringify(itemsToInsert, null, 2));
+        alert(`Failed to create order items: ${itemsError.message || JSON.stringify(itemsError) || 'Unknown error'}`);
         throw itemsError;
       }
 
@@ -605,6 +625,9 @@ const handleRemoveGelatoType = async (option: string) => {
         product_price: 0,
         product_cost: 0,
         product_ingredient: '',
+        product_allergen: '',
+        product_description: '',
+        add_to_product_list: false,
         is_from_product_list: false
       }
     ]);
@@ -651,47 +674,45 @@ const handleRemoveGelatoType = async (option: string) => {
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-      <div className="bg-white rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b">
-          <div className="flex items-center gap-4">
-            {step === 2 && (
-              <button
-                onClick={() => setStep(1)}
-                className="text-gray-600 hover:text-gray-900"
-                disabled={loading}
-              >
-                <ArrowLeft size={24} />
-              </button>
-            )}
-            <h2 className="text-2xl font-bold" style={{ color: '#5C2E1F' }}>
-              {step === 1 ? 'Create Online Order - Order Details' : 'Create Online Order - Order Items'}
-            </h2>
-          </div>
-          <button
-            onClick={handleClose}
-            className="text-gray-400 hover:text-gray-600"
-            disabled={loading}
-          >
-            <X size={24} />
-          </button>
-        </div>
-
-        {/* Progress Indicator */}
-        <div className="flex items-center px-6 py-4 bg-gray-50">
-          <div className="flex items-center flex-1">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${step >= 1 ? 'bg-orange-500 text-white' : 'bg-gray-300 text-gray-600'}`}>
-              1
+      <div className="bg-white rounded-lg w-full max-w-5xl mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="p-6">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-bold" style={{ color: '#5C2E1F' }}>
+                Create Online Order
+              </h2>
+              <p className="text-gray-500 mt-1">
+                {step === 1 && 'Enter customer details'}
+                {step === 2 && 'Add products to the order'}
+              </p>
             </div>
-            <div className={`flex-1 h-1 mx-2 ${step >= 2 ? 'bg-orange-500' : 'bg-gray-300'}`}></div>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${step >= 2 ? 'bg-orange-500 text-white' : 'bg-gray-300 text-gray-600'}`}>
-              2
+            <button onClick={handleClose} disabled={loading} className="text-gray-400 hover:text-gray-600 disabled:cursor-not-allowed">
+              <X size={24} />
+            </button>
+          </div>
+
+          {/* Progress Steps */}
+          <div className="flex items-center justify-center mb-6">
+            <div className="flex items-center gap-4">
+              <div className={`flex items-center gap-2 ${step >= 1 ? 'text-orange-600' : 'text-gray-400'}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step >= 1 ? 'bg-orange-600 text-white' : 'bg-gray-300'}`}>
+                  1
+                </div>
+                <span className="text-sm font-medium">Customer</span>
+              </div>
+              <div className={`w-16 h-0.5 ${step >= 2 ? 'bg-orange-600' : 'bg-gray-300'}`}></div>
+              <div className={`flex items-center gap-2 ${step >= 2 ? 'text-orange-600' : 'text-gray-400'}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step >= 2 ? 'bg-orange-600 text-white' : 'bg-gray-300'}`}>
+                  2
+                </div>
+                <span className="text-sm font-medium">Product Details</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+          {/* Content */}
+          <div>
           {step === 1 ? (
             <div className="space-y-4">
               <div>
@@ -714,28 +735,9 @@ const handleRemoveGelatoType = async (option: string) => {
                 <input
                   type="date"
                   value={deliveryDate}
-                  onChange={(e) => {
-                    const selectedDate = new Date(e.target.value);
-                    // Check if selected date is a Sunday (0 = Sunday)
-                    if (selectedDate.getDay() === 0) {
-                      alert('Sundays are not available for delivery. Please select another date.');
-                      return;
-                    }
-                    setDeliveryDate(e.target.value);
-                  }}
-                  min={(() => {
-                    // Calculate minimum date: 2 days from today (1-day lead time)
-                    const minDate = new Date();
-                    minDate.setDate(minDate.getDate() + 2);
-                    // If the minimum date falls on Sunday, move to Monday
-                    if (minDate.getDay() === 0) {
-                      minDate.setDate(minDate.getDate() + 1);
-                    }
-                    return minDate.toISOString().split('T')[0];
-                  })()}
+                  onChange={(e) => setDeliveryDate(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
-                <p className="text-xs text-gray-500 mt-1">Minimum 1 day lead time. Sundays are not available for delivery.</p>
               </div>
 
               <div>
@@ -762,6 +764,25 @@ const handleRemoveGelatoType = async (option: string) => {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
                   placeholder="Enter any additional notes"
                 />
+              </div>
+
+              {/* Buttons for Step 1 */}
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={handleClose}
+                  className="px-8 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
+                  disabled={loading}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleProceed}
+                  disabled={loading}
+                  className="px-8 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: '#FF5722' }}
+                >
+                  Next
+                </button>
               </div>
             </div>
           ) : (
@@ -963,60 +984,92 @@ const handleRemoveGelatoType = async (option: string) => {
                         onChange={(e) => handleItemChange(index, 'product_ingredient', e.target.value)}
                         rows={2}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
-                        placeholder="Enter ingredients (optional)"
+                        placeholder="Enter product ingredients..."
                         />
                     </div>
 
                     <div className="col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Product Notes
+                        Allergen
+                        </label>
+                        <textarea
+                        value={item.product_allergen}
+                        onChange={(e) => handleItemChange(index, 'product_allergen', e.target.value)}
+                        rows={2}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                        placeholder="Enter product allergens..."
+                        />
+                    </div>
+
+                    <div className="col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Description <span className="text-gray-400 font-normal text-xs">(Shows in report instead of product name if provided)</span>
+                        </label>
+                        <textarea
+                        value={item.product_description}
+                        onChange={(e) => handleItemChange(index, 'product_description', e.target.value)}
+                        rows={2}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                        placeholder="Enter description for report (optional - defaults to product name)..."
+                        />
+                    </div>
+
+                    <div className="col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Notes / Special Request
                         </label>
                         <textarea
                         value={item.product_notes}
                         onChange={(e) => handleItemChange(index, 'product_notes', e.target.value)}
                         rows={2}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
-                        placeholder="Enter any notes (optional)"
+                        placeholder="Enter any special requests..."
                         />
                     </div>
                     </div>
+
+                    {/* Add to Product List Option */}
+                    <div className="flex items-center gap-6 mt-3 pt-3 border-t border-gray-200">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={item.add_to_product_list}
+                          onChange={(e) => handleItemChange(index, 'add_to_product_list', e.target.checked)}
+                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <span className="text-xs text-gray-600">
+                          Add to Product List
+                          <span className="text-gray-400 ml-1">(Save as new product)</span>
+                        </span>
+                      </label>
+                    </div>
                 </div>
               ))}
+              {/* Buttons for Step 2 */}
+              <div className="flex justify-between gap-3 mt-6">
+                <button
+                  onClick={() => setStep(1)}
+                  className="px-8 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
+                  disabled={loading}
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={loading}
+                  className="px-8 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: '#FF5722' }}
+                >
+                  {loading ? 'Creating Order...' : 'Create Order'}
+                </button>
+              </div>
             </div>
           )}
+          </div>
         </div>
+      </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-4 p-6 border-t">
-          <button
-            onClick={handleClose}
-            className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            disabled={loading}
-          >
-            Cancel
-          </button>
-          
-          {step === 1 ? (
-            <button
-              onClick={handleProceed}
-              className="px-6 py-2 text-white rounded-lg hover:opacity-90 transition-opacity"
-              style={{ backgroundColor: '#FF5722' }}
-              disabled={loading}
-            >
-              Proceed to Items
-            </button>
-          ) : (
-            <button
-              onClick={handleSubmit}
-              className="px-6 py-2 text-white rounded-lg hover:opacity-90 transition-opacity"
-              style={{ backgroundColor: '#FF5722' }}
-              disabled={loading}
-            >
-              {loading ? 'Creating Order...' : 'Create Order'}
-            </button>
-          )}
-        </div>
-       {/* Product Editor Modal */}
+      {/* Product Editor Modal */}
         {showProductEditor && (
         <div 
             className="fixed inset-0 flex items-center justify-center z-50 p-4"
@@ -1266,7 +1319,6 @@ const handleRemoveGelatoType = async (option: string) => {
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 }

@@ -22,13 +22,14 @@ interface CustomerOrderItem {
   product_name: string;
   product_type: string;
   quantity: number;
-  gelato_type: string;  
+  gelato_type: string;
   calculated_weight: string;
-  product_weight: number;  
-  product_milkbase: number; 
-  product_sugarbase: number;  
+  product_weight: number;
+  product_milkbase: number;
+  product_sugarbase: number;
   product_price: number;
   product_cost: number;
+  product_description?: string;
 }
 
 interface ConsolidatedItem {
@@ -77,6 +78,9 @@ interface OrderItem {
   subtotal: number;
   product_milkbase?: number;
   product_sugarbase?: number;
+  product_weight?: number;
+  product_cost?: number;
+  calculated_weight?: number;
 }
 
 interface Report {
@@ -325,23 +329,40 @@ export default function ReportPage() {
             const orderItemsList = clientOrderItems.filter((item: OrderItem) => item.order_id === order.id);
 
             orderItemsList.forEach((item: OrderItem) => {
-              const productWeight = productWeightMap.get(item.product_id) || 0;
-              const calculatedWeightNum = productWeight * item.quantity;
-              // Prioritize order item values (from edit) over product_list values
+              // Prioritize order item values (for manually added products) over product_list values
+              // Use item.product_weight first (from order item), then fall back to product_list
+              const productWeight = item.product_weight ?? productWeightMap.get(item.product_id) ?? 0;
+              // Use item.calculated_weight if available, otherwise calculate
+              const calculatedWeightNum = item.calculated_weight ?? (productWeight * item.quantity);
               const productType = item.product_type || productTypeMap.get(item.product_id) || 'N/A';
               const productGelatoType = item.gelato_type || productGelatoTypeMap.get(item.product_id) || 'Dairy';
-              const productCost = productCostMap.get(item.product_id) || 0;
-              const productPrice = productPriceMap.get(item.product_id) || 0;
+              // Use item.product_cost first (for manually added products), then fall back to product_list
+              const productCost = item.product_cost ?? productCostMap.get(item.product_id) ?? 0;
+              // Use item.unit_price first (for manually added products), then fall back to product_list
+              const productPrice = item.unit_price ?? productPriceMap.get(item.product_id) ?? 0;
 
               totalItems += item.quantity;
 
-              // Prioritize order item's milkbase/sugarbase values over product_list values
-              if (productGelatoType === 'Dairy') {
-                const milkBased = item.product_milkbase ?? productMilkBasedMap.get(item.product_id) ?? 0;
+              // Get milkbase and sugarbase values - prioritize order item values over product_list
+              const milkBased = item.product_milkbase ?? productMilkBasedMap.get(item.product_id) ?? 0;
+              const sugarBased = item.product_sugarbase ?? productSugarBasedMap.get(item.product_id) ?? 0;
+
+              // Count production based on gelato type OR if product has milkbase/sugarbase values
+              // Include Dairy, Premix, and any type containing "Dairy" in milk production
+              // Include Sorbet and any type containing "Sorbet" in sugar syrup production
+              const gelatoTypeLower = productGelatoType.toLowerCase();
+              if (gelatoTypeLower.includes('dairy') || gelatoTypeLower.includes('premix') || gelatoTypeLower === 'dairy') {
                 milkProduction += milkBased * item.quantity;
-              } else if (productGelatoType === 'Sorbet') {
-                const sugarBased = item.product_sugarbase ?? productSugarBasedMap.get(item.product_id) ?? 0;
+              } else if (gelatoTypeLower.includes('sorbet') || gelatoTypeLower === 'sorbet') {
                 sugarSyrupProduction += sugarBased * item.quantity;
+              } else {
+                // For any other type, add based on which value is present
+                if (milkBased > 0) {
+                  milkProduction += milkBased * item.quantity;
+                }
+                if (sugarBased > 0) {
+                  sugarSyrupProduction += sugarBased * item.quantity;
+                }
               }
 
               // Prioritize: 1. order item's product_description, 2. product_list's product_description, 3. product_name
@@ -410,42 +431,58 @@ export default function ReportPage() {
 
             orderItemsList.forEach((item: CustomerOrderItem) => {
               // Use data directly from customer_order_item table
-              const productWeight = item.product_weight || 0;
-              const calculatedWeightNum = productWeight * item.quantity;
+              // Parse calculated_weight (stored as string) to get the weight
+              const calculatedWeightNum = item.calculated_weight ? parseFloat(item.calculated_weight) : 0;
               const productType = item.product_type || 'N/A';
               const productGelatoType = item.gelato_type || 'Dairy';
               const productCost = item.product_cost || 0;
               const productPrice = item.product_price || 0;
-              
+
               totalItems += item.quantity;
-              
-              // Calculate production based on gelato type
-              if (productGelatoType === 'Dairy') {
-                const milkBased = item.product_milkbase || 0;
+
+              // Get milkbase and sugarbase values from order item
+              const milkBased = item.product_milkbase || 0;
+              const sugarBased = item.product_sugarbase || 0;
+
+              // Count production based on gelato type OR if product has milkbase/sugarbase values
+              // Include Dairy, Premix, and any type containing "Dairy" in milk production
+              // Include Sorbet and any type containing "Sorbet" in sugar syrup production
+              const gelatoTypeLower = productGelatoType.toLowerCase();
+              if (gelatoTypeLower.includes('dairy') || gelatoTypeLower.includes('premix') || gelatoTypeLower === 'dairy') {
                 milkProduction += milkBased * item.quantity;
-              } else if (productGelatoType === 'Sorbet') {
-                const sugarBased = item.product_sugarbase || 0;
+              } else if (gelatoTypeLower.includes('sorbet') || gelatoTypeLower === 'sorbet') {
                 sugarSyrupProduction += sugarBased * item.quantity;
+              } else {
+                // For any other type, add based on which value is present
+                if (milkBased > 0) {
+                  milkProduction += milkBased * item.quantity;
+                }
+                if (sugarBased > 0) {
+                  sugarSyrupProduction += sugarBased * item.quantity;
+                }
               }
+
+              // Use product_description for display name if available, otherwise use product_name
+              const displayName = item.product_description || item.product_name;
 
               items.push({
                 deliveryDate: order.delivery_date,
                 customerName: order.customer_name,
-                productName: item.product_name,
+                productName: displayName,
                 type: productType,
                 quantity: item.quantity,
                 gelatoType: productGelatoType,
                 weight: parseFloat(calculatedWeightNum.toFixed(1))
               });
 
-              // Aggregate for monthly consolidated view (customer orders don't have product_description yet)
-              const key = `${item.product_name}|${productType}`;
+              // Aggregate for monthly consolidated view using display name
+              const key = `${displayName}|${productType}`;
               if (consolidatedMap.has(key)) {
                 const existing = consolidatedMap.get(key)!;
                 existing.quantity += item.quantity;
               } else {
                 consolidatedMap.set(key, {
-                  productName: item.product_name,
+                  productName: displayName,
                   type: productType,
                   quantity: item.quantity,
                   cost: productCost,

@@ -58,6 +58,9 @@ interface OrderItem {
   product_ingredient?: string;
   product_allergen?: string;
   product_shelflife?: string;
+  product_milkbase?: number;
+  product_sugarbase?: number;
+  product_description?: string;
   sticker_bbd_code?: string | null;
   sticker_pbn_code?: string | null;
   sticker_barcode?: string | null;
@@ -229,7 +232,10 @@ export default function OnlineOrderPage() {
   const [isGeneratingNewSticker, setIsGeneratingNewSticker] = useState(false);
   const [totalStickerCount, setTotalStickerCount] = useState(0);
   const [showStickerDropdown, setShowStickerDropdown] = useState<number | null>(null);
+  const [stickerDropdownPosition, setStickerDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   const [showItemStickerDropdown, setShowItemStickerDropdown] = useState<string | null>(null); // format: "orderId-itemIndex"
+  const [itemStickerDropdownPosition, setItemStickerDropdownPosition] = useState<{ top: number; left: number } | null>(null);
+  const [itemStickerDropdownData, setItemStickerDropdownData] = useState<{ item: OrderItem; orderId: number; orderDate: string } | null>(null);
 
 
   // Use ref for GPBN to avoid closure issues - this stores the starting code for current order
@@ -546,7 +552,7 @@ export default function OnlineOrderPage() {
         // Fetch ALL products once for efficient matching
         const { data: allProducts } = await supabase
           .from("product_list")
-          .select("id, product_id, product_name, sticker_bbd_code, sticker_pbn_code, sticker_barcode, product_ingredient, product_shelflife");
+          .select("id, product_id, product_name, sticker_bbd_code, sticker_pbn_code, sticker_barcode, product_ingredient, product_shelflife, product_milkbased, product_sugarbased, product_description");
 
         const allProductsList = allProducts || [];
 
@@ -650,7 +656,11 @@ export default function OnlineOrderPage() {
             product_ingredient: finalIngredient,
             // Store label_ingredients with the prioritized value for sticker use
             label_ingredients: finalIngredient,
-            product_shelflife: productData?.product_shelflife || '3 months'
+            product_shelflife: productData?.product_shelflife || '3 months',
+            // Prioritize order item values (for manually inputted products), then fall back to product_list
+            product_milkbase: item.product_milkbase ?? productData?.product_milkbased ?? 0,
+            product_sugarbase: item.product_sugarbase ?? productData?.product_sugarbased ?? 0,
+            product_description: item.product_description || productData?.product_description || null
           };
         });
 
@@ -2315,7 +2325,7 @@ export default function OnlineOrderPage() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header />
         <main className="flex-1 p-6 overflow-auto" style={{ backgroundColor: "#FCF0E3" }}>
-          <div className="bg-white rounded-lg shadow-sm p-6 overflow-hidden">
+          <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-3xl font-bold" style={{ color: "#5C2E1F" }}>
                 Online Orders
@@ -2742,10 +2752,22 @@ export default function OnlineOrderPage() {
                                 Labels
                               </button>
                             </td>
-                            <td className="py-3 px-2 w-[90px] relative">
+                            <td className="py-3 px-2 w-[90px]">
                               <div className="relative inline-block">
                                 <button
-                                  onClick={() => setShowStickerDropdown(showStickerDropdown === order.id ? null : order.id)}
+                                  onClick={(e) => {
+                                    if (showStickerDropdown === order.id) {
+                                      setShowStickerDropdown(null);
+                                      setStickerDropdownPosition(null);
+                                    } else {
+                                      const rect = e.currentTarget.getBoundingClientRect();
+                                      setStickerDropdownPosition({
+                                        top: rect.bottom + 4,
+                                        left: rect.left
+                                      });
+                                      setShowStickerDropdown(order.id);
+                                    }
+                                  }}
                                   className="flex items-center gap-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
                                   title="Sticker Options"
                                 >
@@ -2753,28 +2775,6 @@ export default function OnlineOrderPage() {
                                   Sticker
                                   <ChevronDown size={12} />
                                 </button>
-                                {showStickerDropdown === order.id && (
-                                  <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[140px]">
-                                    <button
-                                      onClick={() => {
-                                        handleOpenNewStickerModal(order.id, "barcode");
-                                        setShowStickerDropdown(null);
-                                      }}
-                                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
-                                    >
-                                      Barcode Sticker
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        handleOpenNewStickerModal(order.id, "product");
-                                        setShowStickerDropdown(null);
-                                      }}
-                                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
-                                    >
-                                      Product Sticker
-                                    </button>
-                                  </div>
-                                )}
                               </div>
                             </td>
                             <td className="py-3 px-2 w-[50px]">
@@ -2907,10 +2907,28 @@ export default function OnlineOrderPage() {
                                     item.product_price * item.quantity,
                                   )}
                                 </td>
-                                <td className="py-2 px-2 text-center relative">
+                                <td className="py-2 px-2 text-center">
                                   <div className="relative inline-block">
                                     <button
-                                      onClick={() => setShowItemStickerDropdown(showItemStickerDropdown === `${order.id}-${index}` ? null : `${order.id}-${index}`)}
+                                      onClick={(e) => {
+                                        if (showItemStickerDropdown === `${order.id}-${index}`) {
+                                          setShowItemStickerDropdown(null);
+                                          setItemStickerDropdownPosition(null);
+                                          setItemStickerDropdownData(null);
+                                        } else {
+                                          const rect = e.currentTarget.getBoundingClientRect();
+                                          setItemStickerDropdownPosition({
+                                            top: rect.bottom + 4,
+                                            left: rect.left - 80 // offset to align better
+                                          });
+                                          setShowItemStickerDropdown(`${order.id}-${index}`);
+                                          setItemStickerDropdownData({
+                                            item,
+                                            orderId: order.id,
+                                            orderDate: order.order_date
+                                          });
+                                        }
+                                      }}
                                       className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white rounded hover:opacity-80 transition-opacity"
                                       style={{ backgroundColor: '#10B981' }}
                                       title={`Generate ${item.quantity} sticker(s)`}
@@ -2919,22 +2937,6 @@ export default function OnlineOrderPage() {
                                       <span>x{item.quantity}</span>
                                       <ChevronDown size={10} />
                                     </button>
-                                    {showItemStickerDropdown === `${order.id}-${index}` && (
-                                      <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[140px]">
-                                        <button
-                                          onClick={() => handleItemStickerModal(item, order.id, order.order_date, "barcode")}
-                                          className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
-                                        >
-                                          Barcode Sticker
-                                        </button>
-                                        <button
-                                          onClick={() => handleItemStickerModal(item, order.id, order.order_date, "product")}
-                                          className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
-                                        >
-                                          Product Sticker
-                                        </button>
-                                      </div>
-                                    )}
                                   </div>
                                 </td>
                                 <td className="py-2 px-2"></td>
@@ -3159,6 +3161,103 @@ export default function OnlineOrderPage() {
             </div>
           )}
         </main>
+
+        {/* Fixed Sticker Dropdown - Rendered outside container */}
+        {showStickerDropdown !== null && stickerDropdownPosition && (
+          <>
+            {/* Backdrop to close dropdown when clicking outside */}
+            <div
+              className="fixed inset-0 z-[9998]"
+              onClick={() => {
+                setShowStickerDropdown(null);
+                setStickerDropdownPosition(null);
+              }}
+            />
+            <div
+              className="fixed bg-white border border-gray-200 rounded-lg shadow-xl z-[9999] min-w-[140px]"
+              style={{
+                top: stickerDropdownPosition.top,
+                left: stickerDropdownPosition.left
+              }}
+            >
+              <button
+                onClick={() => {
+                  handleOpenNewStickerModal(showStickerDropdown, "barcode");
+                  setShowStickerDropdown(null);
+                  setStickerDropdownPosition(null);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
+              >
+                Barcode Sticker
+              </button>
+              <button
+                onClick={() => {
+                  handleOpenNewStickerModal(showStickerDropdown, "product");
+                  setShowStickerDropdown(null);
+                  setStickerDropdownPosition(null);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
+              >
+                Product Sticker
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Fixed Item Sticker Dropdown - Rendered outside container */}
+        {showItemStickerDropdown !== null && itemStickerDropdownPosition && itemStickerDropdownData && (
+          <>
+            {/* Backdrop to close dropdown when clicking outside */}
+            <div
+              className="fixed inset-0 z-[9998]"
+              onClick={() => {
+                setShowItemStickerDropdown(null);
+                setItemStickerDropdownPosition(null);
+                setItemStickerDropdownData(null);
+              }}
+            />
+            <div
+              className="fixed bg-white border border-gray-200 rounded-lg shadow-xl z-[9999] min-w-[140px]"
+              style={{
+                top: itemStickerDropdownPosition.top,
+                left: itemStickerDropdownPosition.left
+              }}
+            >
+              <button
+                onClick={() => {
+                  handleItemStickerModal(
+                    itemStickerDropdownData.item,
+                    itemStickerDropdownData.orderId,
+                    itemStickerDropdownData.orderDate,
+                    "barcode"
+                  );
+                  setShowItemStickerDropdown(null);
+                  setItemStickerDropdownPosition(null);
+                  setItemStickerDropdownData(null);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
+              >
+                Barcode Sticker
+              </button>
+              <button
+                onClick={() => {
+                  handleItemStickerModal(
+                    itemStickerDropdownData.item,
+                    itemStickerDropdownData.orderId,
+                    itemStickerDropdownData.orderDate,
+                    "product"
+                  );
+                  setShowItemStickerDropdown(null);
+                  setItemStickerDropdownPosition(null);
+                  setItemStickerDropdownData(null);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
+              >
+                Product Sticker
+              </button>
+            </div>
+          </>
+        )}
 
         {/* Success Modal */}
         {showSuccessModal && (

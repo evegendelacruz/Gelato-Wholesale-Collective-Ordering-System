@@ -967,7 +967,7 @@ const handleDelete = async () => {
       // Fetch ALL products for matching (same approach as Labels and online orders)
       const { data: allProducts } = await supabase
         .from('product_list')
-        .select('id, product_id, product_name, product_ingredient, product_shelflife');
+        .select('id, product_id, product_name, product_ingredient, product_shelflife, product_description');
 
       // Create lookup maps for flexible matching
       const productMapById = new Map();
@@ -996,6 +996,7 @@ const handleDelete = async () => {
 
         const productIngredient = productData?.product_ingredient || null;
         const productShelflife = productData?.product_shelflife || '3 months';
+        const productDescription = productData?.product_description || null;
 
         console.log('Row expand - Item:', item.product_name, '| product_id:', item.product_id, '| Found product:', productData?.product_name, '| Ingredient:', productIngredient?.substring(0, 30));
 
@@ -1007,7 +1008,9 @@ const handleDelete = async () => {
           calculated_weight: item.calculated_weight || '-',
           // Use label_ingredients if saved, otherwise use product_list ingredient
           label_ingredients: item.label_ingredients || productIngredient,
-          product_shelflife: productShelflife
+          product_shelflife: productShelflife,
+          // Use saved product_description if available, otherwise use product_list description
+          product_description: item.product_description || productDescription
         };
       });
 
@@ -3396,29 +3399,19 @@ const handleViewInvoice = async (order) => {
 
           {/* Edit Success Modal */}
           {isEditSuccessOpen && (
-            <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-              <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
-                <button
-                  onClick={() => setIsEditSuccessOpen(false)}
-                  className="float-right text-gray-400 hover:text-gray-600"
-                >
-                  <X size={24} />
-                </button>
-                <div className="flex justify-center mb-4">
-                  <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center">
-                    <Check size={32} className="text-white" />
-                  </div>
+            <div
+              className="fixed inset-0 flex items-center justify-center z-50"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
+              <div className="bg-white rounded-lg p-6 max-w-sm mx-4">
+                <div className="flex items-center gap-3 mb-4">
+                  <Check className="text-green-500" size={24} />
+                  <h3 className="font-bold text-lg">Success</h3>
                 </div>
-                <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
-                  Successfully Updated!
-                </h2>
-                <p className="text-gray-600 mb-6">
-                  Order information has been updated successfully.
-                </p>
+                <p className="text-gray-600 mb-4">Order updated successfully!</p>
                 <button
                   onClick={() => setIsEditSuccessOpen(false)}
-                  className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: '#FF5722' }}
+                  className="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600"
                 >
                   OK
                 </button>
@@ -3573,60 +3566,46 @@ const handleViewInvoice = async (order) => {
           
           {/* Edit Confirmation Modal */}
           {showEditConfirmModal && headerToEdit && (
-            <div 
-              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+            <div
+              className="fixed inset-0 flex items-center justify-center z-50"
               style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
             >
-              <div 
-                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="text-center">
-                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
-                    <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
-                    Edit Header Option
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-6">
-                    Do you want to edit &quot;{headerToEdit.option_name}&quot;?
-                  </p>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => {
-                        setShowEditConfirmModal(false);
-                        setHeaderToEdit(null);
-                      }}
-                      className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
-                      style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingHeaderId(headerToEdit.id);
-                        setHeaderFormData({
-                          option_name: headerToEdit.option_name,
-                          line1: headerToEdit.line1 || '',
-                          line2: headerToEdit.line2 || '',
-                          line3: headerToEdit.line3 || '',
-                          line4: headerToEdit.line4 || '',
-                          line5: headerToEdit.line5 || '',
-                          line6: headerToEdit.line6 || '',
-                          line7: headerToEdit.line7 || '',
-                        });
-                        setShowHeaderEditor(true);
-                        setShowEditConfirmModal(false);
-                        setHeaderToEdit(null);
-                      }}
-                      className="flex-1 px-4 py-2 rounded font-medium text-white hover:opacity-90 transition-opacity"
-                      style={{ backgroundColor: '#FF5722' }}
-                    >
-                      Edit
-                    </button>
-                  </div>
+              <div className="bg-white rounded-lg p-6 max-w-sm mx-4">
+                <h3 className="font-bold text-lg mb-4">Edit Header</h3>
+                <p className="text-gray-600 mb-4">
+                  Do you want to edit &quot;{headerToEdit.option_name}&quot;?
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowEditConfirmModal(false);
+                      setHeaderToEdit(null);
+                    }}
+                    className="flex-1 border border-gray-300 py-2 rounded hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingHeaderId(headerToEdit.id);
+                      setHeaderFormData({
+                        option_name: headerToEdit.option_name,
+                        line1: headerToEdit.line1 || '',
+                        line2: headerToEdit.line2 || '',
+                        line3: headerToEdit.line3 || '',
+                        line4: headerToEdit.line4 || '',
+                        line5: headerToEdit.line5 || '',
+                        line6: headerToEdit.line6 || '',
+                        line7: headerToEdit.line7 || '',
+                      });
+                      setShowHeaderEditor(true);
+                      setShowEditConfirmModal(false);
+                      setHeaderToEdit(null);
+                    }}
+                    className="flex-1 bg-orange-500 text-white py-2 rounded hover:bg-orange-600"
+                  >
+                    Edit
+                  </button>
                 </div>
               </div>
             </div>
@@ -3882,58 +3861,44 @@ const handleViewInvoice = async (order) => {
 
           {/* Footer Edit Confirmation Modal */}
           {showFooterEditConfirmModal && footerToEdit && (
-            <div 
-              className="fixed inset-0 flex items-center justify-center z-50 p-4"
+            <div
+              className="fixed inset-0 flex items-center justify-center z-50"
               style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
             >
-              <div 
-                className="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="text-center">
-                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
-                    <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-medium mb-2" style={{ color: '#5C2E1F' }}>
-                    Edit Footer Option
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-6">
-                    Do you want to edit `&quot;`{footerToEdit.option_name}`&quot;`?
-                  </p>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => {
-                        setShowFooterEditConfirmModal(false);
-                        setFooterToEdit(null);
-                      }}
-                      className="flex-1 px-4 py-2 border-2 rounded font-medium hover:bg-gray-50 transition-colors"
-                      style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingFooterId(footerToEdit.id);
-                        setFooterFormData({
-                          option_name: footerToEdit.option_name,
-                          line1: footerToEdit.line1 || '',
-                          line2: footerToEdit.line2 || '',
-                          line3: footerToEdit.line3 || '',
-                          line4: footerToEdit.line4 || '',
-                          line5: footerToEdit.line5 || '',
-                        });
-                        setShowFooterEditor(true);
-                        setShowFooterEditConfirmModal(false);
-                        setFooterToEdit(null);
-                      }}
-                      className="flex-1 px-4 py-2 rounded font-medium text-white hover:opacity-90 transition-opacity"
-                      style={{ backgroundColor: '#FF5722' }}
-                    >
-                      Edit
-                    </button>
-                  </div>
+              <div className="bg-white rounded-lg p-6 max-w-sm mx-4">
+                <h3 className="font-bold text-lg mb-4">Edit Footer</h3>
+                <p className="text-gray-600 mb-4">
+                  Do you want to edit &quot;{footerToEdit.option_name}&quot;?
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowFooterEditConfirmModal(false);
+                      setFooterToEdit(null);
+                    }}
+                    className="flex-1 border border-gray-300 py-2 rounded hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingFooterId(footerToEdit.id);
+                      setFooterFormData({
+                        option_name: footerToEdit.option_name,
+                        line1: footerToEdit.line1 || '',
+                        line2: footerToEdit.line2 || '',
+                        line3: footerToEdit.line3 || '',
+                        line4: footerToEdit.line4 || '',
+                        line5: footerToEdit.line5 || '',
+                      });
+                      setShowFooterEditor(true);
+                      setShowFooterEditConfirmModal(false);
+                      setFooterToEdit(null);
+                    }}
+                    className="flex-1 bg-orange-500 text-white py-2 rounded hover:bg-orange-600"
+                  >
+                    Edit
+                  </button>
                 </div>
               </div>
             </div>

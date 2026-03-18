@@ -22,6 +22,13 @@ interface BasketItem {
     product_image: string | null;
     product_type: string;
     product_gelato_type: string;
+    product_weight: number;
+    product_cost: number | null;
+    product_milkbased: number | null;
+    product_sugarbased: number | null;
+    product_description: string | null;
+    product_ingredient: string | null;
+    product_allergen: string | null;
   };
 }
 
@@ -150,13 +157,32 @@ export default function BasketPage() {
           product_list (
             product_image,
             product_type,
-            product_gelato_type
+            product_gelato_type,
+            product_weight,
+            product_cost,
+            product_milkbased,
+            product_sugarbased,
+            product_description,
+            product_ingredient,
+            product_allergen
           )
         `)
         .eq('client_auth_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+
+      // Log product_list data for debugging
+      console.log('[BASKET FETCH] Items with product_list data:', data?.map(item => ({
+        product_name: item.product_name,
+        product_id: item.product_id,
+        product_list: item.product_list ? {
+          cost: item.product_list.product_cost,
+          milkbase: item.product_list.product_milkbased,
+          sugarbase: item.product_list.product_sugarbased,
+          weight: item.product_list.product_weight
+        } : 'NO PRODUCT_LIST DATA'
+      })));
 
       setBasketItems(data || []);
 
@@ -341,15 +367,43 @@ const getNextAvailableOrderTime = (): string => {
 
     console.log('Order created successfully:', orderData);
 
-    // Create order items from basket
-    const orderItems = basketItems.map(item => ({
-      order_id: orderData.id,
-      product_id: item.product_id,
-      product_name: item.product_name,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      subtotal: item.subtotal,
-    }));
+    // Create order items from basket - ALWAYS save cost, milkbase, sugarbase to client_order_item
+    // Use ?? instead of || to properly handle 0 values
+    const orderItems = basketItems.map(item => {
+      const orderItem = {
+        order_id: orderData.id,
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.subtotal,
+        product_type: item.product_list?.product_type ?? null,
+        gelato_type: item.product_list?.product_gelato_type ?? null,
+        product_weight: item.product_list?.product_weight ?? null,
+        calculated_weight: item.product_list?.product_weight ? (item.product_list.product_weight * item.quantity) : null,
+        product_cost: item.product_list?.product_cost ?? null,
+        product_milkbase: item.product_list?.product_milkbased ?? 0,
+        product_sugarbase: item.product_list?.product_sugarbased ?? 0,
+        product_description: item.product_list?.product_description ?? null,
+        label_ingredients: item.product_list?.product_ingredient ?? null,
+        label_allergens: item.product_list?.product_allergen ?? null
+      };
+
+      console.log(`[BASKET->ORDER] ${item.product_name}:`, {
+        product_list_data: {
+          cost: item.product_list?.product_cost,
+          milkbase: item.product_list?.product_milkbased,
+          sugarbase: item.product_list?.product_sugarbased
+        },
+        saving_to_order_item: {
+          cost: orderItem.product_cost,
+          milkbase: orderItem.product_milkbase,
+          sugarbase: orderItem.product_sugarbase
+        }
+      });
+
+      return orderItem;
+    });
 
     const { error: itemsError } = await supabase
       .from('client_order_item')

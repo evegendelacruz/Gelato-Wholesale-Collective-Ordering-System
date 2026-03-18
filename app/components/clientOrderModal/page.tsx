@@ -855,6 +855,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
         console.log('Order created successfully:', orderData);
 
         // Update product_id for manual items that were added to product_list
+        // Include ALL product details including cost, milkbase, sugarbase, weight
         const orderItemsData = orderItems.map(item => {
           let productId = item.product_id;
 
@@ -863,7 +864,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             productId = productIdMap[item.product_name];
           }
 
-          // Base columns including product_type and gelato_type
+          // Include all product details for proper reporting
           return {
             order_id: orderData.id,
             product_id: productId,
@@ -872,7 +873,15 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             unit_price: item.unit_price,
             subtotal: item.subtotal,
             product_type: item.product_type || null,
-            gelato_type: item.gelato_type || null
+            gelato_type: item.gelato_type || null,
+            product_weight: item.weight || null,
+            calculated_weight: (item.weight || 0) * item.quantity,
+            product_cost: item.product_cost || null,
+            product_milkbase: item.product_milkbase || 0,
+            product_sugarbase: item.product_sugarbase || 0,
+            label_ingredients: item.product_ingredient || null,
+            label_allergens: item.product_allergen || null,
+            product_description: item.product_description || null
           };
         });
 
@@ -883,6 +892,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
         let itemsError = null;
 
         // Insert with columns that exist in the database
+        // ALWAYS save product_cost, product_milkbase, product_sugarbase, product_weight
         const extendedOrderItemsData = orderItems.map(item => {
           let productId = item.product_id;
           if (item.is_manual && item.add_to_product_list && productIdMap[item.product_name]) {
@@ -897,7 +907,11 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             subtotal: item.subtotal,
             product_type: item.product_type || null,
             gelato_type: item.gelato_type || null,
+            product_weight: item.weight || null,
             calculated_weight: (item.weight || 0) * item.quantity,
+            product_cost: item.product_cost || null,
+            product_milkbase: item.product_milkbase || 0,
+            product_sugarbase: item.product_sugarbase || 0,
             label_ingredients: item.product_ingredient || null,
             label_allergens: item.product_allergen || null,
             product_description: item.product_description || null

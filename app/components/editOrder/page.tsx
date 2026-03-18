@@ -183,9 +183,10 @@ const handleAddNewItem = () => {
 };
 
 // Select product from picker for a specific item
+// Use ?? to properly handle 0 values from product_list (e.g., product_milkbased of 0 should remain 0)
 const handleSelectProductForItem = (index: number, product: Product) => {
-  const productType = product.product_type || '';
-  const gelatoType = product.product_gelato_type || '';
+  const productType = product.product_type ?? '';
+  const gelatoType = product.product_gelato_type ?? '';
 
   // Add to options if not present
   if (productType && !productTypeOptions.includes(productType)) {
@@ -202,16 +203,16 @@ const handleSelectProductForItem = (index: number, product: Product) => {
     product_name: product.product_name,
     product_type: productType,
     gelato_type: gelatoType,
-    weight: product.product_weight || 0,
-    calculated_weight: String((product.product_weight || 0) * updatedItems[index].quantity),
-    unit_price: product.product_price || 0,
-    subtotal: updatedItems[index].quantity * (product.product_price || 0),
-    product_cost: product.product_cost || 0,
-    product_milkbase: product.product_milkbased || 0,
-    product_sugarbase: product.product_sugarbased || 0,
-    product_ingredient: product.product_ingredient || '',
-    product_allergen: product.product_allergen || '',
-    product_description: product.product_description || ''
+    weight: product.product_weight ?? 0,
+    calculated_weight: String((product.product_weight ?? 0) * updatedItems[index].quantity),
+    unit_price: product.product_price ?? 0,
+    subtotal: updatedItems[index].quantity * (product.product_price ?? 0),
+    product_cost: product.product_cost ?? 0,
+    product_milkbase: product.product_milkbased ?? 0,
+    product_sugarbase: product.product_sugarbased ?? 0,
+    product_ingredient: product.product_ingredient ?? '',
+    product_allergen: product.product_allergen ?? '',
+    product_description: product.product_description ?? ''
   };
   setOrderItems(updatedItems);
   setShowProductPicker(null);
@@ -225,7 +226,7 @@ useEffect(() => {
       console.log('Fetching order items for order ID:', order.id);
       
       // Fetch order items with product details using the foreign key relationship
-      // Include product_list JOIN for ingredient, allergen, milkbase, sugarbase, weight, description (same as Labels)
+      // Include product_list JOIN for ingredient, allergen, milkbase, sugarbase, weight, cost, description (same as Labels)
       const { data: orderItemsData, error: itemsError } = await supabase
         .from('client_order_item')
         .select(`
@@ -236,6 +237,7 @@ useEffect(() => {
             product_milkbased,
             product_sugarbased,
             product_weight,
+            product_cost,
             product_description
           )
         `)
@@ -255,46 +257,94 @@ useEffect(() => {
       }
 
       // Map the data to include all product details
-      // Extract ingredient, allergen, milkbase, sugarbase, weight, description from product_list JOIN
+      // ALWAYS store cost, milkbase, sugarbase in client_order_item
       const itemsWithDetails = orderItemsData.map(item => {
+        // Get product_list values
         let productIngredient = '';
         let productAllergen = '';
         let productMilkbase = 0;
         let productSugarbase = 0;
         let productWeight = 0;
         let productDescription = '';
+        let productCost = 0;
+        let hasProductListData = false;
 
         if (item.product_list) {
           const productData = Array.isArray(item.product_list) ? item.product_list[0] : item.product_list;
-          productIngredient = productData?.product_ingredient || '';
-          productAllergen = productData?.product_allergen || '';
-          productMilkbase = productData?.product_milkbased || 0;
-          productSugarbase = productData?.product_sugarbased || 0;
-          productWeight = productData?.product_weight || 0;
-          productDescription = productData?.product_description || '';
+          if (productData) {
+            hasProductListData = true;
+            productIngredient = productData.product_ingredient ?? '';
+            productAllergen = productData.product_allergen ?? '';
+            productMilkbase = productData.product_milkbased ?? 0;
+            productSugarbase = productData.product_sugarbased ?? 0;
+            productWeight = productData.product_weight ?? 0;
+            productDescription = productData.product_description ?? '';
+            productCost = productData.product_cost ?? 0;
+          }
         }
+
+        // Determine final values:
+        // - For products FROM product_list: use product_list values (they have the correct data)
+        // - For manually inputted products (no product_id): use order item values
+        // - If order item has non-zero/non-null values that differ from defaults, use them (user edited)
+
+        let finalWeight: number;
+        let finalMilkbase: number;
+        let finalSugarbase: number;
+        let finalCost: number;
+
+        if (hasProductListData && item.product_id) {
+          // Product from product_list - use product_list values as base
+          // But if order item has explicit non-default values, prefer those (user may have edited)
+          finalWeight = (item.product_weight !== null && item.product_weight > 0)
+            ? item.product_weight
+            : (item.calculated_weight ? parseFloat(item.calculated_weight) / item.quantity : productWeight);
+
+          // For cost/milkbase/sugarbase: if DB value is null or 0 (default), use product_list
+          // Otherwise use the saved value (user explicitly set it)
+          finalCost = (item.product_cost !== null && item.product_cost > 0)
+            ? item.product_cost
+            : productCost;
+          finalMilkbase = (item.product_milkbase !== null && item.product_milkbase > 0)
+            ? item.product_milkbase
+            : productMilkbase;
+          finalSugarbase = (item.product_sugarbase !== null && item.product_sugarbase > 0)
+            ? item.product_sugarbase
+            : productSugarbase;
+        } else {
+          // Manually inputted product - use order item values directly
+          finalWeight = item.product_weight ?? (item.calculated_weight ? parseFloat(item.calculated_weight) / item.quantity : 0);
+          finalCost = item.product_cost ?? 0;
+          finalMilkbase = item.product_milkbase ?? 0;
+          finalSugarbase = item.product_sugarbase ?? 0;
+        }
+
+        console.log(`[fetchOrderItems] ${item.product_name}:`, {
+          product_id: item.product_id,
+          hasProductListData,
+          fromDB: { cost: item.product_cost, milkbase: item.product_milkbase, sugarbase: item.product_sugarbase },
+          fromProductList: { cost: productCost, milkbase: productMilkbase, sugarbase: productSugarbase },
+          final: { cost: finalCost, milkbase: finalMilkbase, sugarbase: finalSugarbase }
+        });
 
         return {
           id: item.id,
           product_id: item.product_id,
           product_name: item.product_name,
-          product_type: item.product_type || '',
-          gelato_type: item.gelato_type || '',
+          product_type: item.product_type ?? '',
+          gelato_type: item.gelato_type ?? '',
           quantity: item.quantity,
           unit_price: item.unit_price,
           subtotal: item.subtotal,
-          // Use calculated_weight from order item, fallback to product_weight from product_list
-          weight: item.calculated_weight ? parseFloat(item.calculated_weight) / item.quantity : productWeight,
-          calculated_weight: item.calculated_weight || String(productWeight * item.quantity),
-          request: item.product_notes || null,
-          // Prioritize saved label data, fallback to product_list (same as Labels)
-          product_ingredient: item.label_ingredients || productIngredient,
-          product_allergen: item.label_allergens || productAllergen,
-          // Prioritize saved product_description, fallback to product_list
-          product_description: item.product_description || productDescription,
-          // Get milkbase and sugarbase from product_list JOIN
-          product_milkbase: item.product_milkbase || productMilkbase,
-          product_sugarbase: item.product_sugarbase || productSugarbase,
+          weight: finalWeight,
+          calculated_weight: item.calculated_weight ?? String(finalWeight * item.quantity),
+          request: item.product_notes ?? null,
+          product_ingredient: item.label_ingredients ?? productIngredient,
+          product_allergen: item.label_allergens ?? productAllergen,
+          product_description: item.product_description ?? productDescription,
+          product_milkbase: finalMilkbase,
+          product_sugarbase: finalSugarbase,
+          product_cost: finalCost,
           isExpanded: false
         };
       });
@@ -343,11 +393,28 @@ useEffect(() => {
       [field]: value
     };
 
+    // Log when cost/milkbase/sugarbase are changed
+    if (field === 'product_cost' || field === 'product_milkbase' || field === 'product_sugarbase') {
+      console.log(`[handleItemChange] ${updatedItems[index].product_name} - ${field} changed to:`, value);
+    }
+
     // Recalculate subtotal if quantity or unit_price changes
     if (field === 'quantity' || field === 'unit_price') {
       const quantity = field === 'quantity' ? Number(value) : updatedItems[index].quantity;
       const unitPrice = field === 'unit_price' ? Number(value) : updatedItems[index].unit_price;
       updatedItems[index].subtotal = quantity * unitPrice;
+
+      // Also recalculate calculated_weight if weight per unit exists
+      if (updatedItems[index].weight) {
+        updatedItems[index].calculated_weight = String(updatedItems[index].weight * quantity);
+      }
+    }
+
+    // Recalculate weight per unit when calculated_weight changes
+    if (field === 'calculated_weight') {
+      const calculatedWeight = parseFloat(String(value)) || 0;
+      const quantity = updatedItems[index].quantity || 1;
+      updatedItems[index].weight = calculatedWeight / quantity;
     }
 
     setOrderItems(updatedItems);
@@ -667,30 +734,47 @@ useEffect(() => {
       const existingItems = itemsToKeep.filter(item => !item.isNew);
       const newItems = itemsToKeep.filter(item => item.isNew);
 
-      // Update existing order items
+      // Update existing order items - ALWAYS save cost, milkbase, sugarbase
       console.log('Updating existing order items...');
       for (let i = 0; i < existingItems.length; i++) {
         const item = existingItems[i];
-        console.log(`Updating item ${i + 1}/${existingItems.length}:`, item);
 
-        const productTypeToSave = item.product_type || null;
-        const gelatoTypeToSave = item.gelato_type || null;
+        // Explicitly convert to numbers to ensure proper database storage
+        const costValue = item.product_cost !== undefined && item.product_cost !== null ? Number(item.product_cost) : null;
+        const milkbaseValue = item.product_milkbase !== undefined && item.product_milkbase !== null ? Number(item.product_milkbase) : 0;
+        const sugarbaseValue = item.product_sugarbase !== undefined && item.product_sugarbase !== null ? Number(item.product_sugarbase) : 0;
+        const weightValue = item.weight !== undefined && item.weight !== null ? Number(item.weight) : null;
+
+        const updateData = {
+          product_name: item.product_name,
+          product_type: item.product_type ?? null,
+          gelato_type: item.gelato_type ?? null,
+          quantity: Number(item.quantity),
+          unit_price: Number(item.unit_price),
+          subtotal: Number(item.subtotal),
+          product_weight: weightValue,
+          calculated_weight: item.calculated_weight && !isNaN(parseFloat(String(item.calculated_weight))) ? parseFloat(String(item.calculated_weight)) : null,
+          product_cost: costValue,
+          product_milkbase: milkbaseValue,
+          product_sugarbase: sugarbaseValue,
+          label_ingredients: item.product_ingredient ?? null,
+          label_allergens: item.product_allergen ?? null,
+          product_description: item.product_description ?? null
+        };
+
+        console.log(`[SAVE UPDATE] Item ${i + 1}/${existingItems.length} - ${item.product_name}:`, {
+          id: item.id,
+          raw_values: { cost: item.product_cost, milkbase: item.product_milkbase, sugarbase: item.product_sugarbase },
+          saving: { cost: costValue, milkbase: milkbaseValue, sugarbase: sugarbaseValue, weight: weightValue }
+        });
 
         const { data: itemData, error: itemError } = await supabase
           .from('client_order_item')
-          .update({
-            product_name: item.product_name,
-            product_type: productTypeToSave,
-            gelato_type: gelatoTypeToSave,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            subtotal: item.subtotal,
-            calculated_weight: item.calculated_weight && !isNaN(parseFloat(String(item.calculated_weight))) ? parseFloat(String(item.calculated_weight)) : null,
-            label_ingredients: item.product_ingredient || null,
-            label_allergens: item.product_allergen || null,
-            product_description: item.product_description || null
-          })
-          .eq('id', item.id);
+          .update(updateData)
+          .eq('id', item.id)
+          .select();
+
+        console.log(`[SAVE UPDATE RESULT] Item ${item.product_name}:`, { data: itemData, error: itemError });
 
         if (itemError) {
           console.error(`Item ${i + 1} update error:`, itemError);
@@ -698,34 +782,53 @@ useEffect(() => {
         }
       }
 
-      // Insert new items
+      // Insert new items - ALWAYS save cost, milkbase, sugarbase
       if (newItems.length > 0) {
         console.log('Inserting new order items...');
         for (let i = 0; i < newItems.length; i++) {
           const item = newItems[i];
-          console.log(`Inserting new item ${i + 1}/${newItems.length}:`, item);
 
           if (!item.product_name.trim()) {
             console.log('Skipping item with empty product name');
             continue;
           }
 
-          const { error: insertError } = await supabase
+          // Explicitly convert to numbers to ensure proper database storage
+          const costValue = item.product_cost !== undefined && item.product_cost !== null ? Number(item.product_cost) : null;
+          const milkbaseValue = item.product_milkbase !== undefined && item.product_milkbase !== null ? Number(item.product_milkbase) : 0;
+          const sugarbaseValue = item.product_sugarbase !== undefined && item.product_sugarbase !== null ? Number(item.product_sugarbase) : 0;
+          const weightValue = item.weight !== undefined && item.weight !== null ? Number(item.weight) : null;
+
+          const insertData = {
+            order_id: order.id,
+            product_id: item.product_id ?? null,
+            product_name: item.product_name,
+            product_type: item.product_type ?? null,
+            gelato_type: item.gelato_type ?? null,
+            quantity: Number(item.quantity),
+            unit_price: Number(item.unit_price),
+            subtotal: Number(item.subtotal),
+            product_weight: weightValue,
+            calculated_weight: item.calculated_weight && !isNaN(parseFloat(String(item.calculated_weight))) ? parseFloat(String(item.calculated_weight)) : null,
+            product_cost: costValue,
+            product_milkbase: milkbaseValue,
+            product_sugarbase: sugarbaseValue,
+            label_ingredients: item.product_ingredient ?? null,
+            label_allergens: item.product_allergen ?? null,
+            product_description: item.product_description ?? null
+          };
+
+          console.log(`[SAVE INSERT] New item ${i + 1}/${newItems.length} - ${item.product_name}:`, {
+            raw_values: { cost: item.product_cost, milkbase: item.product_milkbase, sugarbase: item.product_sugarbase },
+            saving: { cost: costValue, milkbase: milkbaseValue, sugarbase: sugarbaseValue, weight: weightValue }
+          });
+
+          const { data: insertedData, error: insertError } = await supabase
             .from('client_order_item')
-            .insert({
-              order_id: order.id,
-              product_id: item.product_id,
-              product_name: item.product_name,
-              product_type: item.product_type || null,
-              gelato_type: item.gelato_type || null,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              subtotal: item.subtotal,
-              calculated_weight: item.calculated_weight && !isNaN(parseFloat(String(item.calculated_weight))) ? parseFloat(String(item.calculated_weight)) : null,
-              label_ingredients: item.product_ingredient || null,
-              label_allergens: item.product_allergen || null,
-              product_description: item.product_description || null
-            });
+            .insert(insertData)
+            .select();
+
+          console.log(`[SAVE INSERT RESULT] Item ${item.product_name}:`, { data: insertedData, error: insertError });
 
           if (insertError) {
             console.error(`New item ${i + 1} insert error:`, insertError);
@@ -1099,6 +1202,19 @@ useEffect(() => {
                                     min="0"
                                     value={item.product_sugarbase || 0}
                                     onChange={(e) => handleItemChange(index, 'product_sugarbase', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium mb-1 text-gray-700">
+                                    Cost per Tab ($)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={item.product_cost || 0}
+                                    onChange={(e) => handleItemChange(index, 'product_cost', parseFloat(e.target.value) || 0)}
                                     className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
                                   />
                                 </div>
