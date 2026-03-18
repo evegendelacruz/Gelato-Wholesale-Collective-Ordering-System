@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { Search, Filter, X, ChevronDown, RefreshCw } from 'lucide-react';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
+import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import supabase from '@/lib/client';
 
 interface Statement {
@@ -1197,25 +1198,22 @@ const fetchStatements = async () => {
               <table style={{ width: '100%' }}>
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                      STATEMENT ID
-                    </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       COMPANY NAME
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       DATE GENERATED
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       MONTH
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       INVOICES
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       TOTAL
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       STATEMENT
                     </th>
                   </tr>
@@ -1223,31 +1221,31 @@ const fetchStatements = async () => {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-8 text-gray-500">
-                        Loading statements...
+                      <td colSpan={6} className="p-0">
+                        <SkeletonStyles />
+                        <TableSkeleton rows={8} columns={6} />
                       </td>
                     </tr>
                   ) : currentStatements.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-8 text-gray-500">
+                      <td colSpan={6} className="text-center py-8 text-gray-500">
                         {searchQuery ? 'No statements found matching your search.' : 'No statements available.'}
                       </td>
                     </tr>
                   ) : (
                     currentStatements.map((statement) => (
-                      <tr 
-                        key={statement.statement_id} 
+                      <tr
+                        key={statement.statement_id}
                         className="border-b border-gray-200 hover:bg-gray-50"
                       >
-                        <td className="py-3 px-4 text-sm">{statement.statement_id}</td>
-                        <td className="py-3 px-4 text-sm">{statement.company_name}</td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">{statement.company_name}</td>
+                        <td className="py-2 px-3 text-xs">
                           {new Date(statement.date_generated).toLocaleDateString()}
                         </td>
-                        <td className="py-3 px-4 text-sm">{statement.statement_month}</td>
-                        <td className="py-3 px-4 text-sm">{statement.invoice_count}</td>
-                        <td className="py-3 px-4 text-sm">S$ {statement.total_amount.toFixed(2)}</td>
-                        <td className="py-3 px-4">
+                        <td className="py-2 px-3 text-xs">{statement.statement_month}</td>
+                        <td className="py-2 px-3 text-xs">{statement.invoice_count}</td>
+                        <td className="py-2 px-3 text-xs">S$ {statement.total_amount.toFixed(2)}</td>
+                        <td className="py-2 px-3">
                           <button
                             onClick={() => handleViewStatement(statement)}
                             disabled={loading}

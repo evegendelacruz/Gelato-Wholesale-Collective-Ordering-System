@@ -1,6 +1,7 @@
 "use client";
 import Sidepanel from "@/app/components/sidepanel/page";
 import Header from "@/app/components/header/page";
+import { ProductListSkeleton, SkeletonStyles } from "@/app/components/skeletonLoader/page";
 
 import { useState, useEffect, useRef } from "react";
 import {
@@ -1568,17 +1569,29 @@ export default function ProductPage() {
 
       if (!matchesSearch) return false;
 
-      // Product type and gelato type filter
-      if (filterBy === "gelato") return product.product_type === "Gelato";
-      if (filterBy === "sorbet") return product.product_type === "Sorbet";
-      if (filterBy === "ice-cream") return product.product_type === "Ice Cream";
-      if (filterBy === "milk-based")
-        return product.product_gelato_type === "Milk-based";
-      if (filterBy === "sugar-based")
-        return product.product_gelato_type === "Sugar Syrup-based";
-      if (filterBy === "mixed") return product.product_gelato_type === "Mixed";
+      // If "all" filter, show everything
+      if (filterBy === "all") return true;
 
-      return true; // 'all' filter
+      // Helper function to convert string to slug format for comparison
+      const toSlug = (str: string) => str.toLowerCase().replace(/\s+/g, "-");
+
+      // Check if filterBy matches a product type
+      const matchedProductType = productTypeOptions.find(
+        (type) => toSlug(type) === filterBy
+      );
+      if (matchedProductType) {
+        return product.product_type === matchedProductType;
+      }
+
+      // Check if filterBy matches a gelato type
+      const matchedGelatoType = gelatoTypeOptions.find(
+        (type) => toSlug(type) === filterBy
+      );
+      if (matchedGelatoType) {
+        return product.product_gelato_type === matchedGelatoType;
+      }
+
+      return true; // Default: show all
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -1761,7 +1774,7 @@ export default function ProductPage() {
                 </div>
 
                 {/* Sort By Button */}
-                <div className="relative">
+                <div className="relative sort-dropdown">
                   <button
                     onClick={() => {
                       setIsSortDropdownOpen(!isSortDropdownOpen);
@@ -1866,7 +1879,7 @@ export default function ProductPage() {
                 </div>
 
                 {/* Filter Button */}
-                <div className="relative">
+                <div className="relative filter-dropdown">
                   <button
                     onClick={() => {
                       setIsFilterDropdownOpen(!isFilterDropdownOpen);
@@ -1973,7 +1986,7 @@ export default function ProductPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: "#5C2E1F" }}>
-                    <th className="text-left py-3 px-4">
+                    <th className="text-left py-2 px-3">
                       <input
                         type="checkbox"
                         className="w-4 h-4 cursor-pointer"
@@ -1985,87 +1998,79 @@ export default function ProductPage() {
                       />
                     </th>
                     <th
-                      className="text-left py-3 px-4 font-bold text-sm"
-                      style={{ color: "#5C2E1F" }}
-                    >
-                      PRODUCT ID
-                    </th>
-                    <th
-                      className="text-left py-3 px-4 font-bold text-sm"
+                      className="text-left py-2 px-3 font-bold text-xs"
                       style={{ color: "#5C2E1F" }}
                     >
                       NAME
                     </th>
                     <th
-                      className="text-left py-3 px-4 font-bold text-sm"
+                      className="text-left py-2 px-3 font-bold text-xs"
                       style={{ color: "#5C2E1F" }}
                     >
                       BILLING NAME
                     </th>
                     <th
-                      className="text-left py-3 px-4 font-bold text-sm"
+                      className="text-left py-2 px-3 font-bold text-xs"
                       style={{ color: "#5C2E1F" }}
                     >
                       TYPE
                     </th>
                     <th
-                      className="text-left py-3 px-4 font-bold text-sm"
+                      className="text-left py-2 px-3 font-bold text-xs"
                       style={{ color: "#5C2E1F" }}
                     >
                       GELATO TYPE
                     </th>
                     <th
-                      className="text-left py-3 px-4 font-bold text-sm"
+                      className="text-left py-2 px-3 font-bold text-xs"
                       style={{ color: "#5C2E1F" }}
                     >
                       WEIGHT (kg)
                     </th>
                     <th
-                      className="text-left py-3 px-4 font-bold text-sm"
+                      className="text-left py-2 px-3 font-bold text-xs"
                       style={{ color: "#5C2E1F" }}
                     >
                       SHELF LIFE
                     </th>
                     <th
-                      className="text-left py-3 px-4 font-bold text-sm"
+                      className="text-left py-2 px-3 font-bold text-xs"
                       style={{ color: "#5C2E1F" }}
                     >
                       PRICE (S$)
                     </th>
                     <th
-                      className="text-left py-3 px-4 font-bold text-sm"
+                      className="text-left py-2 px-3 font-bold text-xs"
                       style={{ color: "#5C2E1F" }}
                     >
                       COST (S$)
                     </th>
                     <th
-                      className="text-left py-3 px-4 font-bold text-sm"
+                      className="text-left py-2 px-3 font-bold text-xs"
                       style={{ color: "#5C2E1F" }}
                     >
                       STICKER
                     </th>
                     <th
-                      className="text-left py-1 px-4 font-bold text-sm w-1"
+                      className="text-left py-1 px-3 font-bold text-xs w-1"
                       style={{ color: "#5C2E1F", width: "2px", minWidth: "2px", maxWidth: "2px", whiteSpace: "nowrap", }}
                     >
-                 
+
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td
-                        colSpan={11}
-                        className="text-center py-8 text-gray-500"
-                      >
-                        Loading products...
+                      <td colSpan={10} className="p-0">
+                        <SkeletonStyles />
+                        <ProductListSkeleton rows={8} />
                       </td>
                     </tr>
                   ) : currentProducts.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={11}
+                        colSpan={10}
                         className="text-center py-8 text-gray-500"
                       >
                         {searchQuery
@@ -2087,7 +2092,7 @@ export default function ProductPage() {
                         }}
                       >
                         <td
-                          className="py-3 px-4"
+                          className="py-2 px-3"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <input
@@ -2099,54 +2104,53 @@ export default function ProductPage() {
                             }
                           />
                         </td>
-                        <td className="py-3 px-4 text-sm">
-                          {product.product_id}
-                        </td>
-                        <td className="py-3 px-4 text-sm">
-                          <div className="flex items-center gap-3">
+                        <td className="py-2 px-3 text-xs">
+                          <div className="flex items-center gap-2">
                             {product.product_image ? (
-                              <Image
-                                src={`https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${product.product_image}`}
-                                alt={product.product_name}
-                                width={40}
-                                height={40}
-                                className="w-10 h-10 object-cover rounded"
-                                unoptimized
-                              />
+                              <div className="w-8 h-8 min-w-[32px] min-h-[32px] flex-shrink-0">
+                                <Image
+                                  src={`https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${product.product_image}`}
+                                  alt={product.product_name}
+                                  width={32}
+                                  height={32}
+                                  className="w-full h-full object-cover rounded"
+                                  unoptimized
+                                />
+                              </div>
                             ) : (
-                              <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center">
+                              <div className="w-8 h-8 min-w-[32px] min-h-[32px] flex-shrink-0 bg-gray-200 rounded flex items-center justify-center">
                                 <ImageIcon
-                                  size={20}
+                                  size={16}
                                   className="text-gray-400"
                                 />
                               </div>
                             )}
-                            <span>{product.product_name}</span>
+                            <span className="truncate">{product.product_name}</span>
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">
                           {product.product_billingName || '-'}
                         </td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">
                           {product.product_type}
                         </td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">
                           {product.product_gelato_type}
                         </td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">
                           {product.product_weight}
                         </td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">
                           {product.product_shelflife}
                         </td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">
                           {product.product_price}
                         </td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">
                           {product.product_cost || '-'}
                         </td>
                         <td
-                          className="py-3 px-4 text-sm"
+                          className="py-2 px-3 text-xs"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
@@ -2159,7 +2163,7 @@ export default function ProductPage() {
                           </button>
                         </td>
                         <td
-                          className="py-1 px-1 text-sm relative"  style={{ width: "2px", minWidth: "2px", maxWidth: "2px", whiteSpace: "nowrap", }}
+                          className="py-1 px-1 text-xs relative"  style={{ width: "2px", minWidth: "2px", maxWidth: "2px", whiteSpace: "nowrap", }}
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="actions-dropdown">

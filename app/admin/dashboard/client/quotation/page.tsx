@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, Filter, X, ChevronDown, Plus, Trash2, Edit2 } from 'lucide-react';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
+import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import supabase from '@/lib/client';
 import Image from 'next/image';
 
@@ -1410,7 +1411,7 @@ export default function ClientQuotationPage() {
               <table style={{ width: '100%' }}>
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
-                    <th className="py-3 px-2 w-10">
+                    <th className="py-2 px-2 w-10">
                       <input
                         type="checkbox"
                         checked={currentQuotations.length > 0 && selectedQuotationIds.length === currentQuotations.length}
@@ -1418,19 +1419,16 @@ export default function ClientQuotationPage() {
                         className="w-4 h-4 accent-orange-500 cursor-pointer"
                       />
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                      QUOTATION ID
-                    </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       COMPANY NAME
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       DATE CREATED
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       TOTAL
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       QUOTATION
                     </th>
                   </tr>
@@ -1438,13 +1436,14 @@ export default function ClientQuotationPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-8 text-gray-500">
-                        Loading quotations...
+                      <td colSpan={5} className="p-0">
+                        <SkeletonStyles />
+                        <TableSkeleton rows={8} columns={5} />
                       </td>
                     </tr>
                   ) : currentQuotations.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-8 text-gray-500">
+                      <td colSpan={5} className="text-center py-8 text-gray-500">
                         {searchQuery ? 'No quotations found matching your search.' : 'No quotations available.'}
                       </td>
                     </tr>
@@ -1454,7 +1453,7 @@ export default function ClientQuotationPage() {
                         key={quotation.id}
                         className={`border-b border-gray-200 hover:bg-gray-50 ${selectedQuotationIds.includes(quotation.id) ? 'bg-orange-50' : ''}`}
                       >
-                        <td className="py-3 px-2">
+                        <td className="py-2 px-2">
                           <input
                             type="checkbox"
                             checked={selectedQuotationIds.includes(quotation.id)}
@@ -1462,13 +1461,12 @@ export default function ClientQuotationPage() {
                             className="w-4 h-4 accent-orange-500 cursor-pointer"
                           />
                         </td>
-                        <td className="py-3 px-4 text-sm">{quotation.quotation_id}</td>
-                        <td className="py-3 px-4 text-sm">{quotation.company_name}</td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">{quotation.company_name}</td>
+                        <td className="py-2 px-3 text-xs">
                           {new Date(quotation.date_created).toLocaleDateString()}
                         </td>
-                        <td className="py-3 px-4 text-sm">S$ {quotation.total_amount.toFixed(2)}</td>
-                        <td className="py-3 px-4">
+                        <td className="py-2 px-3 text-xs">S$ {quotation.total_amount.toFixed(2)}</td>
+                        <td className="py-2 px-3">
                           <button
                             onClick={() => handleViewQuotation(quotation)}
                             disabled={loading}

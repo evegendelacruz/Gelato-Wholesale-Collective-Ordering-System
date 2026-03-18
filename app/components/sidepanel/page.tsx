@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { 
+import {
   Home,
   User,
   Package,
@@ -18,8 +18,16 @@ import {
 export default function Sidepanel() {
   const pathname = usePathname();
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>(() => {
-  const isProductPage = pathname?.startsWith('/admin/dashboard/product');
-  return isProductPage ? { product: true } : {};
+    const isProductPage = pathname?.startsWith('/admin/dashboard/product');
+    const isClientPage = pathname?.startsWith('/admin/dashboard/client');
+    const isOrderPage = pathname?.startsWith('/admin/dashboard/order');
+    const isReportPage = pathname?.startsWith('/admin/dashboard/report');
+    return {
+      product: isProductPage,
+      client: isClientPage,
+      orders: isOrderPage,
+      report: isReportPage,
+    };
   });
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -79,107 +87,244 @@ export default function Sidepanel() {
   ];
 
   return (
-    <aside 
-      className={`shadow-lg flex flex-col transition-all duration-300 ease-in-out relative ${
-        isCollapsed ? 'w-20' : 'w-64'
-      }`}
-      style={{ backgroundColor: '#7A1F1F', minHeight: '100vh' }}
-    >
-      {/* Header */}
-      <div className="p-4 relative flex items-center justify-center" style={{ borderBottom: '2px solid #FF5226', fontFamily: 'Egyptienne MN, serif', minHeight: '68px' }}>
-        {!isCollapsed ? (
-          <h1 className="text-xl font-bold text-white text-center leading-tight pr-1">
-            Gelato Wholesale Collective
-          </h1>
-        ) : (
-          <h1 className="text-xl font-bold text-white text-center leading-tight">
-            GWC
-          </h1>
-        )}
+    <>
+      {/* Sidebar animations */}
+      <style jsx global>{`
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            max-height: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            max-height: 500px;
+            transform: translateY(0);
+          }
+        }
 
-        <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          className="absolute top-1/2 -translate-y-1/2 text-white rounded-full p-1 shadow-lg hover:opacity-90 transition-all z-10"
-          style={{ backgroundColor: '#FF5226', right: '-12px' }}
-          title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        @keyframes slideUp {
+          from {
+            opacity: 1;
+            max-height: 500px;
+            transform: translateY(0);
+          }
+          to {
+            opacity: 0;
+            max-height: 0;
+            transform: translateY(-10px);
+          }
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateX(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+
+        @keyframes pulse {
+          0%, 100% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(0.97);
+          }
+        }
+
+        .sidebar-link {
+          position: relative;
+          overflow: hidden;
+        }
+
+        .sidebar-link::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: -100%;
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(
+            90deg,
+            transparent,
+            rgba(255, 255, 255, 0.1),
+            transparent
+          );
+          transition: left 0.5s ease;
+        }
+
+        .sidebar-link:hover::before {
+          left: 100%;
+        }
+
+        .sidebar-link:active {
+          animation: pulse 0.2s ease;
+        }
+
+        .submenu-container {
+          animation: slideDown 0.3s ease-out forwards;
+          overflow: hidden;
+        }
+
+        .submenu-item {
+          animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        .submenu-item:nth-child(1) { animation-delay: 0.05s; }
+        .submenu-item:nth-child(2) { animation-delay: 0.1s; }
+        .submenu-item:nth-child(3) { animation-delay: 0.15s; }
+        .submenu-item:nth-child(4) { animation-delay: 0.2s; }
+
+        .active-indicator {
+          position: absolute;
+          left: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 4px;
+          height: 60%;
+          background: #FF5226;
+          border-radius: 0 4px 4px 0;
+          animation: fadeIn 0.3s ease-out;
+        }
+
+        .menu-icon {
+          transition: transform 0.3s ease, color 0.3s ease;
+        }
+
+        .sidebar-link:hover .menu-icon {
+          transform: scale(1.1);
+        }
+
+        .chevron-icon {
+          transition: transform 0.3s ease;
+        }
+
+        .chevron-icon.expanded {
+          transform: rotate(180deg);
+        }
+      `}</style>
+
+      <aside
+        className={`shadow-lg flex flex-col transition-all duration-300 ease-in-out relative ${
+          isCollapsed ? 'w-20' : 'w-64'
+        }`}
+        style={{ backgroundColor: '#7A1F1F', minHeight: '100vh' }}
+      >
+        {/* Header */}
+        <div
+          className="p-4 relative flex items-center justify-center transition-all duration-300"
+          style={{ borderBottom: '2px solid #FF5226', fontFamily: 'Egyptienne MN, serif', minHeight: '68px' }}
         >
-          {isCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-        </button>
-      </div>
+          {!isCollapsed ? (
+            <h1 className="text-xl font-bold text-white text-center leading-tight pr-1 transition-opacity duration-300">
+              Gelato Wholesale Collective
+            </h1>
+          ) : (
+            <h1 className="text-xl font-bold text-white text-center leading-tight transition-opacity duration-300">
+              GWC
+            </h1>
+          )}
 
-      {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-2 overflow-y-auto overflow-x-hidden">
-        {menuItems.map((item) => (
-          <div key={item.id}>
-            {item.submenu ? (
-              <>
-                <button
-                  onClick={() => toggleSubmenu(item.id)}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded transition-colors ${
-                    isCollapsed ? 'justify-center' : ''
-                  } text-white hover:bg-white hover:bg-opacity-60 hover:text-black`}
-                  title={isCollapsed ? item.label : ''}
-                  aria-expanded={!isCollapsed && expandedMenus[item.id]}
-                >
-                  <div className={`flex items-center gap-3 ${isCollapsed ? 'justify-center' : ''}`}>
-                    <item.icon size={20} className="shrink-0" />
-                    {!isCollapsed && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
-                  </div>
-                  {!isCollapsed && (
-                    expandedMenus[item.id] ? 
-                      <ChevronUp size={16} className="shrink-0" /> : 
-                      <ChevronDown size={16} className="shrink-0" />
-                  )}
-                </button>
+          <button
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="absolute top-1/2 -translate-y-1/2 text-white rounded-full p-1 shadow-lg hover:scale-110 active:scale-95 transition-all duration-200 z-10"
+            style={{ backgroundColor: '#FF5226', right: '-12px' }}
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+          </button>
+        </div>
 
-                {expandedMenus[item.id] && !isCollapsed && (
-                  <div className="mt-1 space-y-1 ml-4 overflow-hidden">
-                    {item.submenu.map((subitem) => (
-                     <Link
+        {/* Navigation */}
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto overflow-x-hidden">
+          {menuItems.map((item) => (
+            <div key={item.id}>
+              {item.submenu ? (
+                <>
+                  <button
+                    onClick={() => toggleSubmenu(item.id)}
+                    className={`sidebar-link w-full flex items-center justify-between px-4 py-3 rounded-lg transition-all duration-200 ${
+                      isCollapsed ? 'justify-center' : ''
+                    } text-white hover:bg-white hover:text-gray-800`}
+                    title={isCollapsed ? item.label : ''}
+                    aria-expanded={!isCollapsed && expandedMenus[item.id]}
+                  >
+                    <div className={`flex items-center gap-3 ${isCollapsed ? 'justify-center' : ''}`}>
+                      <item.icon size={20} className="menu-icon shrink-0" />
+                      {!isCollapsed && (
+                        <span className="text-sm font-medium whitespace-nowrap transition-all duration-200">
+                          {item.label}
+                        </span>
+                      )}
+                    </div>
+                    {!isCollapsed && (
+                      <ChevronDown
+                        size={16}
+                        className={`chevron-icon shrink-0 ${expandedMenus[item.id] ? 'expanded' : ''}`}
+                      />
+                    )}
+                  </button>
+
+                  {expandedMenus[item.id] && !isCollapsed && (
+                    <div className="submenu-container mt-1 space-y-1 ml-4">
+                      {item.submenu.map((subitem, index) => (
+                        <Link
                           key={subitem.id}
                           href={subitem.path}
-                          className={`block px-4 py-2.5 rounded text-sm font-medium transition-colors whitespace-nowrap ${
+                          className={`submenu-item sidebar-link relative block px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap ${
                             pathname === subitem.path
-                              ? 'bg-white text-gray-800'
-                              : 'text-white hover:bg-white hover:bg-opacity-60 hover:text-black'
+                              ? 'bg-white text-gray-800 shadow-sm'
+                              : 'text-white hover:bg-white hover:text-gray-800'
                           }`}
+                          style={{ animationDelay: `${index * 0.05}s` }}
                         >
-                        {subitem.label}
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </>
-            ) : (
-              <Link
+                          {pathname === subitem.path && <span className="active-indicator" />}
+                          {subitem.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <Link
                   href={item.path}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded transition-colors ${
+                  className={`sidebar-link relative w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
                     isCollapsed ? 'justify-center' : ''
                   } ${
                     pathname === item.path
-                      ? 'bg-white text-gray-800'
-                      : 'text-white hover:bg-white hover:bg-opacity-60 hover:text-black'
+                      ? 'bg-white text-gray-800 shadow-sm'
+                      : 'text-white hover:bg-white hover:text-gray-800'
                   }`}
                   title={isCollapsed ? item.label : ''}
                 >
-                <item.icon size={20} className="shrink-0" />
-                {!isCollapsed && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
-              </Link>
-            )}
-          </div>
-        ))}
-      </nav>
+                  {pathname === item.path && <span className="active-indicator" />}
+                  <item.icon size={20} className="menu-icon shrink-0" />
+                  {!isCollapsed && (
+                    <span className="text-sm font-medium whitespace-nowrap transition-all duration-200">
+                      {item.label}
+                    </span>
+                  )}
+                </Link>
+              )}
+            </div>
+          ))}
+        </nav>
 
-      {/* Footer */}
-      {!isCollapsed && (
-        <div 
-          className="p-4 text-white text-xs text-center transition-opacity duration-300" 
-          style={{ borderTop: '2px solid #FF5226' }}
+        {/* Footer */}
+        <div
+          className={`p-4 text-white text-xs text-center transition-all duration-300 ${
+            isCollapsed ? 'opacity-0 h-0 p-0 overflow-hidden' : 'opacity-100'
+          }`}
+          style={{ borderTop: isCollapsed ? 'none' : '2px solid #FF5226' }}
         >
           <div className="mt-1">Version 1.0 © 2025 All Rights Reserved</div>
         </div>
-      )}
-    </aside>
+      </aside>
+    </>
   );
 }

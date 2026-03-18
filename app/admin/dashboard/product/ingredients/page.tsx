@@ -1,6 +1,7 @@
 'use client';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
+import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 
 import { useState, useEffect } from 'react';
 import { Search, Filter, X, Image as ImageIcon, ChevronDown } from 'lucide-react';
@@ -385,17 +386,14 @@ export default function IngredientsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
-                    <th className="text-left py-3 px-4 w-12"></th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                      PRODUCT ID
-                    </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 w-12"></th>
+                    <th className="text-left py-2 px-3 font-bold text-xs w-1/5" style={{ color: '#5C2E1F' }}>
                       PRODUCT NAME
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs w-2/5" style={{ color: '#5C2E1F' }}>
                       INGREDIENTS
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs w-1/4" style={{ color: '#5C2E1F' }}>
                       ALLERGEN
                     </th>
                   </tr>
@@ -403,28 +401,29 @@ export default function IngredientsPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={5} className="text-center py-8 text-gray-500">
-                        Loading ingredients...
+                      <td colSpan={4} className="p-0">
+                        <SkeletonStyles />
+                        <TableSkeleton rows={8} columns={4} />
                       </td>
                     </tr>
                   ) : currentIngredients.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-center py-8 text-gray-500">
+                      <td colSpan={4} className="text-center py-8 text-gray-500">
                         {searchQuery ? 'No ingredients found matching your search.' : 'No ingredients found.'}
                       </td>
                     </tr>
                   ) : (
                     currentIngredients.map((ingredient) => (
-                      <tr 
-                        key={ingredient.id} 
+                      <tr
+                        key={ingredient.id}
                         className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
                         onClick={() => handleRowClick(ingredient)}
                       >
-                        <td className="py-3 px-4">
-                          <div 
+                        <td className="py-2 px-3">
+                          <div
                             className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                              selectedRow === ingredient.id 
-                                ? 'border-orange-500 bg-orange-500' 
+                              selectedRow === ingredient.id
+                                ? 'border-orange-500 bg-orange-500'
                                 : 'border-gray-300'
                             }`}
                           >
@@ -433,28 +432,29 @@ export default function IngredientsPage() {
                             )}
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-sm">{ingredient.product_id}</td>
-                        <td className="py-3 px-4 text-sm">
-                          <div className="flex items-center gap-3">
+                        <td className="py-2 px-3 text-xs">
+                          <div className="flex items-center gap-2">
                             {ingredient.product_image ? (
-                              <Image 
-                                src={`https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${ingredient.product_image}`}
-                                alt={ingredient.product_name}
-                                width={40}
-                                height={40}
-                                className="w-10 h-10 object-cover rounded"
-                                unoptimized
-                              />
+                              <div className="w-8 h-8 min-w-[32px] min-h-[32px] flex-shrink-0">
+                                <Image
+                                  src={`https://boxzapgxostpqutxabzs.supabase.co/storage/v1/object/public/gwc_files/${ingredient.product_image}`}
+                                  alt={ingredient.product_name}
+                                  width={32}
+                                  height={32}
+                                  className="w-full h-full object-cover rounded"
+                                  unoptimized
+                                />
+                              </div>
                             ) : (
-                              <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center">
-                                <ImageIcon size={20} className="text-gray-400" />
+                              <div className="w-8 h-8 min-w-[32px] min-h-[32px] flex-shrink-0 bg-gray-200 rounded flex items-center justify-center">
+                                <ImageIcon size={16} className="text-gray-400" />
                               </div>
                             )}
-                            <span>{ingredient.product_name}</span>
+                            <span className="truncate">{ingredient.product_name}</span>
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-sm">{ingredient.product_ingredient || '-'}</td>
-                        <td className="py-3 px-4 text-sm">{ingredient.product_allergen || '-'}</td>
+                        <td className="py-2 px-3 text-xs">{ingredient.product_ingredient || '-'}</td>
+                        <td className="py-2 px-3 text-xs">{ingredient.product_allergen || '-'}</td>
                       </tr>
                     ))
                   )}

@@ -1,6 +1,7 @@
 'use client';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
+import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import ExcelJS from 'exceljs';
 import { useState, useEffect } from 'react';
 import { Search, Filter, Download, FileSpreadsheet, RefreshCw, ChevronDown } from 'lucide-react';
@@ -125,7 +126,9 @@ export default function ReportPage() {
   const itemsPerPage = 10;
 
   useEffect(() => {
-    fetchReports();
+    // Auto-generate reports on page load to fetch latest data
+    generateAllReports(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const formatDate = (dateString: string): string => {
@@ -179,7 +182,7 @@ export default function ReportPage() {
   }
 };
 
-  const generateAllReports = async () => {
+  const generateAllReports = async (showModal: boolean = true) => {
   try {
     setGenerating(true);
 
@@ -202,9 +205,9 @@ export default function ReportPage() {
       ...(clientOrders?.map((o: { delivery_date: string }) => o.delivery_date).filter(date => date != null) || []),
       ...(customerOrders?.map((o: { delivery_date: string }) => o.delivery_date).filter(date => date != null) || [])
     ];
-    
+
     const uniqueDates = [...new Set(allDates)];
-    
+
     // Group dates by year
     const datesByYear: { [year: number]: string[] } = {};
     uniqueDates.forEach(date => {
@@ -221,13 +224,13 @@ export default function ReportPage() {
     }
 
     await fetchReports();
-    setShowSuccessModal(true);
+    if (showModal) setShowSuccessModal(true);
   } catch (err: unknown) {
     const error = err as Error;
     console.error('Error generating reports:', error);
     console.error('Error message:', error?.message);
     console.error('Error stack:', error?.stack);
-    setShowErrorModal(true);
+    if (showModal) setShowErrorModal(true);
   } finally {
     setGenerating(false);
   }
@@ -1034,10 +1037,10 @@ const handleDownload = async (report: Report) => {
                 </div>
                 {/* Generate All Reports Button */}
                 <button
-                  onClick={generateAllReports}
+                  onClick={() => generateAllReports(true)}
                   disabled={generating}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 "
-                  style={{ 
+                  style={{
                     backgroundColor: generating ? '#FF5722' : '#FF5722',
                     color: 'white'
                   }}
@@ -1076,8 +1079,9 @@ const handleDownload = async (report: Report) => {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-8 text-gray-500">
-                        Loading reports...
+                      <td colSpan={6} className="p-0">
+                        <SkeletonStyles />
+                        <TableSkeleton rows={6} columns={6} />
                       </td>
                     </tr>
                   ) : currentReports.length === 0 ? (

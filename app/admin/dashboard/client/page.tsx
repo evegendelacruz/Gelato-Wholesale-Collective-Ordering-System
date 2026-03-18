@@ -1,6 +1,7 @@
 'use client';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
+import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import { downloadCredentialImage } from '@/app/components/credentialGenerator/credentialGenerator';
 import { useState, useEffect } from 'react';
 import { Search, Filter, Plus, X, Upload, Check, UserMinus, Download, ChevronDown } from 'lucide-react';
@@ -1742,33 +1743,30 @@ const handleUpdate = async () => {
               <table style={{ width: '100%' }}>
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
-                    <th className="text-left py-3 px-4" style={{ minWidth: '50px' }}>
-                      <input 
-                        type="checkbox" 
+                    <th className="text-left py-2 px-3" style={{ minWidth: '50px' }}>
+                      <input
+                        type="checkbox"
                         className="w-4 h-4 cursor-pointer"
                         checked={selectedRows.size === currentClients.length && currentClients.length > 0}
                         onChange={(e) => handleSelectAll(e.target.checked)}
                       />
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
-                      CLIENT ID
-                    </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       PERSON INCHARGE
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       BUSINESS NAME
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       EMAIL
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       CONTACT NUMBER
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       DELIVERY ADDRESS
                     </th>
-                    <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
+                    <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       CREDENTIAL
                     </th>
                   </tr>
@@ -1776,42 +1774,42 @@ const handleUpdate = async () => {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-gray-500">
-                        Loading clients...
+                      <td colSpan={7} className="p-0">
+                        <SkeletonStyles />
+                        <TableSkeleton rows={8} columns={7} />
                       </td>
                     </tr>
                   ) : currentClients.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-gray-500">
+                      <td colSpan={7} className="text-center py-8 text-gray-500">
                         {searchQuery ? 'No clients found matching your search.' : 'No clients found. Click "Add New Client" to get started.'}
                       </td>
                     </tr>
                   ) : (
                     currentClients.map((client) => (
-                      <tr 
-                        key={client.client_id} 
+                      <tr
+                        key={client.client_id}
                         className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
                         onClick={() => handleRowClick(client)}
                       >
-                        <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                          <input 
-                            type="checkbox" 
+                        <td className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
                             className="w-4 h-4 cursor-pointer"
                             checked={selectedRows.has(client.client_id)}
                             onChange={(e) => handleSelectRow(client.client_id, e.target.checked)}
                           />
                         </td>
-                        <td className="py-3 px-4 text-sm">{client.client_id}</td>
-                        <td className="py-3 px-4 text-sm">{client.client_person_incharge}</td>
-                        <td className="py-3 px-4 text-sm">{client.client_businessName}</td>
-                        <td className="py-3 px-4 text-sm">{client.client_email}</td>
-                        <td className="py-3 px-4 text-sm">{client.client_person_contact}</td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">{client.client_person_incharge}</td>
+                        <td className="py-2 px-3 text-xs">{client.client_businessName}</td>
+                        <td className="py-2 px-3 text-xs">{client.client_email}</td>
+                        <td className="py-2 px-3 text-xs">{client.client_person_contact}</td>
+                        <td className="py-2 px-3 text-xs">
                           {client.ad_streetName && client.ad_country && client.ad_postal
                             ? `${client.ad_streetName}, ${client.ad_country}, ${client.ad_postal}`
                             : client.client_delivery_address || 'N/A'}
                         </td>
-                        <td className="py-3 px-4 text-sm">
+                        <td className="py-2 px-3 text-xs">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

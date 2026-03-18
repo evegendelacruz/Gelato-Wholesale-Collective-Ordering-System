@@ -1,6 +1,7 @@
 'use client';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
+import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import supabase from '@/lib/client';
 import ClientInvoice from '@/app/components/clientInvoice';
 import ClientOrderModal from '@/app/components/clientOrderModal/page';
@@ -2467,8 +2468,9 @@ const handleViewInvoice = async (order) => {
                   <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="text-center py-8 text-gray-500">
-                    Loading orders...
+                  <td colSpan={12} className="p-0">
+                    <SkeletonStyles />
+                    <TableSkeleton rows={8} columns={10} />
                   </td>
                 </tr>
               ) : error ? (
