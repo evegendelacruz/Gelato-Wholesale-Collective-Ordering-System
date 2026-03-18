@@ -52,6 +52,7 @@ interface OrderItem {
   product_id: number;
   product_name: string;
   product_type: string;
+  product_description?: string;
   gelato_type: string;
   quantity: number;
   product_gelato_type: string;
@@ -256,12 +257,12 @@ export default function ReportClientPage() {
       // Filter out null product_ids (manual items)
       const productIds = [...new Set((orderItems || []).map((item: OrderItem) => item.product_id).filter((id): id is number => id !== null && id !== undefined))];
 
-      let products: { id: number; product_type: string; product_weight: number; product_gelato_type: string; product_milkbased: number; product_sugarbased: number; product_cost: number; product_price: number }[] = [];
+      let products: { id: number; product_type: string; product_weight: number; product_gelato_type: string; product_milkbased: number; product_sugarbased: number; product_cost: number; product_price: number; product_description: string | null }[] = [];
 
       if (productIds.length > 0) {
         const { data: productsData, error: productsError } = await supabase
           .from('product_list')
-          .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased, product_cost, product_price')
+          .select('id, product_type, product_weight, product_gelato_type, product_milkbased, product_sugarbased, product_cost, product_price, product_description')
           .in('id', productIds);
 
         if (productsError) throw productsError;
@@ -275,6 +276,7 @@ export default function ReportClientPage() {
       const productSugarBasedMap = new Map(products.map(p => [p.id, p.product_sugarbased]));
       const productCostMap = new Map(products.map(p => [p.id, p.product_cost]));
       const productPriceMap = new Map(products.map(p => [p.id, p.product_price]));
+      const productDescriptionMap = new Map(products.map(p => [p.id, p.product_description]));
 
       let milkProduction = 0;
       let sugarSyrupProduction = 0;
@@ -308,10 +310,13 @@ export default function ReportClientPage() {
             sugarSyrupProduction += sugarBased * item.quantity;
           }
 
+          // Prioritize: 1. order item's product_description, 2. product_list's product_description, 3. product_name
+          const displayName = item.product_description || productDescriptionMap.get(item.product_id) || item.product_name;
+
           items.push({
             deliveryDate: order.delivery_date,
             customerName: companyName,
-            productName: item.product_name,
+            productName: displayName,
             type: productType,
             quantity: item.quantity,
             gelatoType: productGelatoType,
@@ -319,13 +324,13 @@ export default function ReportClientPage() {
           });
 
           // Aggregate for monthly consolidated view
-          const key = `${item.product_name}|${productType}`;
+          const key = `${displayName}|${productType}`;
           if (consolidatedMap.has(key)) {
             const existing = consolidatedMap.get(key)!;
             existing.quantity += item.quantity;
           } else {
             consolidatedMap.set(key, {
-              productName: item.product_name,
+              productName: displayName,
               type: productType,
               quantity: item.quantity,
               cost: productCost,

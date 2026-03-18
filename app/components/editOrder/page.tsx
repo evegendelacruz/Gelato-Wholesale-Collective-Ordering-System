@@ -36,6 +36,8 @@ interface Product {
   product_milkbased: number | null;
   product_sugarbased: number | null;
   product_ingredient: string | null;
+  product_allergen: string | null;
+  product_description: string | null;
   product_image: string | null;
 }
 
@@ -128,7 +130,7 @@ const fetchAllProducts = async () => {
     setLoadingProducts(true);
     const { data, error } = await supabase
       .from('product_list')
-      .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_price, product_cost, product_milkbased, product_sugarbased, product_ingredient, product_image')
+      .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_price, product_cost, product_milkbased, product_sugarbased, product_ingredient, product_allergen, product_description, product_image')
       .eq('is_deleted', false)
       .order('product_name', { ascending: true });
 
@@ -201,13 +203,15 @@ const handleSelectProductForItem = (index: number, product: Product) => {
     product_type: productType,
     gelato_type: gelatoType,
     weight: product.product_weight || 0,
-    calculated_weight: String(product.product_weight || 0),
+    calculated_weight: String((product.product_weight || 0) * updatedItems[index].quantity),
     unit_price: product.product_price || 0,
     subtotal: updatedItems[index].quantity * (product.product_price || 0),
     product_cost: product.product_cost || 0,
     product_milkbase: product.product_milkbased || 0,
     product_sugarbase: product.product_sugarbased || 0,
-    product_ingredient: product.product_ingredient || ''
+    product_ingredient: product.product_ingredient || '',
+    product_allergen: product.product_allergen || '',
+    product_description: product.product_description || ''
   };
   setOrderItems(updatedItems);
   setShowProductPicker(null);
@@ -221,7 +225,7 @@ useEffect(() => {
       console.log('Fetching order items for order ID:', order.id);
       
       // Fetch order items with product details using the foreign key relationship
-      // Include product_list JOIN for ingredient, allergen, milkbase, sugarbase (same as Labels)
+      // Include product_list JOIN for ingredient, allergen, milkbase, sugarbase, weight, description (same as Labels)
       const { data: orderItemsData, error: itemsError } = await supabase
         .from('client_order_item')
         .select(`
@@ -230,7 +234,9 @@ useEffect(() => {
             product_ingredient,
             product_allergen,
             product_milkbased,
-            product_sugarbased
+            product_sugarbased,
+            product_weight,
+            product_description
           )
         `)
         .eq('order_id', order.id);
@@ -249,12 +255,14 @@ useEffect(() => {
       }
 
       // Map the data to include all product details
-      // Extract ingredient, allergen, milkbase, sugarbase from product_list JOIN
+      // Extract ingredient, allergen, milkbase, sugarbase, weight, description from product_list JOIN
       const itemsWithDetails = orderItemsData.map(item => {
         let productIngredient = '';
         let productAllergen = '';
         let productMilkbase = 0;
         let productSugarbase = 0;
+        let productWeight = 0;
+        let productDescription = '';
 
         if (item.product_list) {
           const productData = Array.isArray(item.product_list) ? item.product_list[0] : item.product_list;
@@ -262,6 +270,8 @@ useEffect(() => {
           productAllergen = productData?.product_allergen || '';
           productMilkbase = productData?.product_milkbased || 0;
           productSugarbase = productData?.product_sugarbased || 0;
+          productWeight = productData?.product_weight || 0;
+          productDescription = productData?.product_description || '';
         }
 
         return {
@@ -273,16 +283,18 @@ useEffect(() => {
           quantity: item.quantity,
           unit_price: item.unit_price,
           subtotal: item.subtotal,
-          weight: item.calculated_weight || 0,
-          calculated_weight: item.calculated_weight || '',
+          // Use calculated_weight from order item, fallback to product_weight from product_list
+          weight: item.calculated_weight ? parseFloat(item.calculated_weight) / item.quantity : productWeight,
+          calculated_weight: item.calculated_weight || String(productWeight * item.quantity),
           request: item.product_notes || null,
           // Prioritize saved label data, fallback to product_list (same as Labels)
           product_ingredient: item.label_ingredients || productIngredient,
           product_allergen: item.label_allergens || productAllergen,
-          product_description: '',
+          // Prioritize saved product_description, fallback to product_list
+          product_description: item.product_description || productDescription,
           // Get milkbase and sugarbase from product_list JOIN
-          product_milkbase: productMilkbase,
-          product_sugarbase: productSugarbase,
+          product_milkbase: item.product_milkbase || productMilkbase,
+          product_sugarbase: item.product_sugarbase || productSugarbase,
           isExpanded: false
         };
       });
@@ -675,7 +687,8 @@ useEffect(() => {
             subtotal: item.subtotal,
             calculated_weight: item.calculated_weight && !isNaN(parseFloat(String(item.calculated_weight))) ? parseFloat(String(item.calculated_weight)) : null,
             label_ingredients: item.product_ingredient || null,
-            label_allergens: item.product_allergen || null
+            label_allergens: item.product_allergen || null,
+            product_description: item.product_description || null
           })
           .eq('id', item.id);
 
@@ -710,7 +723,8 @@ useEffect(() => {
               subtotal: item.subtotal,
               calculated_weight: item.calculated_weight && !isNaN(parseFloat(String(item.calculated_weight))) ? parseFloat(String(item.calculated_weight)) : null,
               label_ingredients: item.product_ingredient || null,
-              label_allergens: item.product_allergen || null
+              label_allergens: item.product_allergen || null,
+              product_description: item.product_description || null
             });
 
           if (insertError) {

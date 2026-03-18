@@ -209,7 +209,10 @@ model ClientOrderItem {
   product_milkbase  Float?
   product_sugarbase Float?
   product_ingredient String?
-  product_notes     String?
+  product_notes       String?
+  product_description String?
+  label_ingredients   String?
+  label_allergens     String?
 
   // Relations
   order   ClientOrder  @relation(fields: [order_id], references: [id], onDelete: Cascade)

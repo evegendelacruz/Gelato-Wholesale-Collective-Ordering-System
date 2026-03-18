@@ -12,6 +12,21 @@ interface OrderItem {
   quantity: number;
 }
 
+// Helper function to aggregate items by product_type (gelato type)
+const aggregateItemsByType = (items: OrderItem[]): OrderItem[] => {
+  const aggregatedMap = new Map<string, number>();
+
+  items.forEach(item => {
+    const currentQty = aggregatedMap.get(item.product_type) || 0;
+    aggregatedMap.set(item.product_type, currentQty + item.quantity);
+  });
+
+  return Array.from(aggregatedMap.entries()).map(([product_type, quantity]) => ({
+    product_type,
+    quantity
+  }));
+};
+
 interface DeliveryDateData {
   delivery_date: string;
   total_orders: number;
@@ -265,38 +280,44 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         : clientData?.client_delivery_address || 'N/A';
 
       // Extract order items with product type directly from client_order_item
-      const orderItems: OrderItem[] = Array.isArray(order.client_order_item)
+      const rawItems: OrderItem[] = Array.isArray(order.client_order_item)
         ? order.client_order_item.map((item: { quantity: number; product_type: string | null }) => ({
             product_type: item.product_type || 'Unknown',
             quantity: item.quantity
           }))
         : [];
 
+      // Aggregate items by gelato type (product_type)
+      const aggregatedItems = aggregateItemsByType(rawItems);
+
       return {
         company: clientData?.client_businessName || 'N/A',
         address: combinedAddress,
         invoice: order.invoice_id,
         order_type: 'client' as const,
-        items: orderItems
+        items: aggregatedItems
       };
     });
 
     // **NEW: Transform customer orders with proper typing**
     const customerOrdersList = validCustomerOrders.map((order) => {
       // Extract order items with product type
-      const orderItems: OrderItem[] = Array.isArray(order.customer_order_item)
+      const rawItems: OrderItem[] = Array.isArray(order.customer_order_item)
         ? order.customer_order_item.map((item: { product_type: string | null; quantity: number }) => ({
             product_type: item.product_type || 'Unknown',
             quantity: item.quantity
           }))
         : [];
 
+      // Aggregate items by gelato type (product_type)
+      const aggregatedItems = aggregateItemsByType(rawItems);
+
       return {
         company: order.customer_name || 'N/A',
         address: order.delivery_address || 'N/A',
         invoice: order.invoice_id,
         order_type: 'customer' as const,
-        items: orderItems
+        items: aggregatedItems
       };
     });
 

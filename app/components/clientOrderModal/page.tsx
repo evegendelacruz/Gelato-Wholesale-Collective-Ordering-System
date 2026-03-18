@@ -25,6 +25,8 @@ interface Product {
   product_milkbased: number | null;
   product_sugarbased: number | null;
   product_ingredient: string | null;
+  product_allergen: string | null;
+  product_description: string | null;
   product_image: string | null;
 }
 
@@ -49,6 +51,8 @@ interface OrderItem {
   product_milkbase: number;
   product_sugarbase: number;
   product_ingredient: string;
+  product_allergen: string;
+  product_description: string;  // Description for reports (fallback to product_name if empty)
   is_manual: boolean;
   is_from_product_list: boolean;
   publish_to_client: boolean;  // Add product to client's assigned products
@@ -217,6 +221,8 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     product_milkbase: 0,
     product_sugarbase: 0,
     product_ingredient: '',
+    product_allergen: '',
+    product_description: '',
     request: ''
   });
 
@@ -254,7 +260,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       setLoadingProducts(true);
       const { data, error } = await supabase
         .from('product_list')
-        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_price, product_cost, product_milkbased, product_sugarbased, product_ingredient, product_image')
+        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_price, product_cost, product_milkbased, product_sugarbased, product_ingredient, product_allergen, product_description, product_image')
         .eq('is_deleted', false)
         .order('product_name', { ascending: true });
 
@@ -399,6 +405,8 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             product_milkbased,
             product_sugarbased,
             product_ingredient,
+            product_allergen,
+            product_description,
             product_image
           )
         `)
@@ -495,6 +503,8 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       product_milkbase: clientProduct.product_list.product_milkbased || 0,
       product_sugarbase: clientProduct.product_list.product_sugarbased || 0,
       product_ingredient: clientProduct.product_list.product_ingredient || '',
+      product_allergen: clientProduct.product_list.product_allergen || '',
+      product_description: clientProduct.product_list.product_description || '',
       is_manual: false,
       is_from_product_list: true,
       publish_to_client: false, // Already assigned to client
@@ -524,6 +534,8 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       product_milkbase: manualItemData.product_milkbase,
       product_sugarbase: manualItemData.product_sugarbase,
       product_ingredient: manualItemData.product_ingredient,
+      product_allergen: manualItemData.product_allergen,
+      product_description: manualItemData.product_description,
       is_manual: true,
       is_from_product_list: false,
       publish_to_client: true, // Default to true for manual items
@@ -547,6 +559,8 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       product_milkbase: 0,
       product_sugarbase: 0,
       product_ingredient: '',
+      product_allergen: '',
+      product_description: '',
       request: ''
     });
   };
@@ -613,6 +627,8 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       product_milkbase: 0,
       product_sugarbase: 0,
       product_ingredient: '',
+      product_allergen: '',
+      product_description: '',
       is_manual: true,
       is_from_product_list: false,
       publish_to_client: true,
@@ -653,6 +669,8 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       product_milkbase: product.product_milkbased || 0,
       product_sugarbase: product.product_sugarbased || 0,
       product_ingredient: product.product_ingredient || '',
+      product_allergen: product.product_allergen || '',
+      product_description: product.product_description || '',
       subtotal: newItems[index].quantity * (product.product_price || 0),
       is_manual: false,
       is_from_product_list: true,
@@ -880,7 +898,9 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             product_type: item.product_type || null,
             gelato_type: item.gelato_type || null,
             calculated_weight: (item.weight || 0) * item.quantity,
-            label_ingredients: item.product_ingredient || null
+            label_ingredients: item.product_ingredient || null,
+            label_allergens: item.product_allergen || null,
+            product_description: item.product_description || null
           };
         });
 
@@ -1015,11 +1035,15 @@ const handleClose = () => {
 
   if (!isOpen) return null;
 
-  const filteredClients = clients.filter(client =>
-    client.client_id.toLowerCase().includes(clientSearch.toLowerCase()) ||
-    client.client_businessName.toLowerCase().includes(clientSearch.toLowerCase()) ||
-    client.client_person_incharge.toLowerCase().includes(clientSearch.toLowerCase())
-  );
+  const filteredClients = clients.filter(client => {
+    const search = clientSearch.toLowerCase();
+    return (
+      client.client_id.toLowerCase().includes(search) ||
+      client.client_businessName.toLowerCase().includes(search) ||
+      (client.client_operationName?.toLowerCase().includes(search) || false) ||
+      client.client_person_incharge.toLowerCase().includes(search)
+    );
+  });
 
   const filteredProducts = availableProducts.filter(cp =>
     cp.product_list.product_id.toLowerCase().includes(productSearch.toLowerCase()) ||
@@ -1100,7 +1124,7 @@ const handleClose = () => {
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
                   <input
                     type="text"
-                    placeholder="Search clients by ID, name, or person in charge..."
+                    placeholder="Search by Business Name, Operation Name, or Person In Charge..."
                     value={clientSearch}
                     onChange={(e) => setClientSearch(e.target.value)}
                     className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -1168,30 +1192,10 @@ const handleClose = () => {
                   <input
                     type="date"
                     value={deliveryDate}
-                    onChange={(e) => {
-                      const selectedDate = new Date(e.target.value);
-                      // Check if selected date is a Sunday (0 = Sunday)
-                      if (selectedDate.getDay() === 0) {
-                        setMessage({ type: 'error', text: 'Sundays are not available for delivery. Please select another date.' });
-                        setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-                        return;
-                      }
-                      setDeliveryDate(e.target.value);
-                    }}
-                    min={(() => {
-                      // Calculate minimum date: 2 days from today (1-day lead time)
-                      const minDate = new Date();
-                      minDate.setDate(minDate.getDate() + 2);
-                      // If the minimum date falls on Sunday, move to Monday
-                      if (minDate.getDay() === 0) {
-                        minDate.setDate(minDate.getDate() + 1);
-                      }
-                      return minDate.toISOString().split('T')[0];
-                    })()}
+                    onChange={(e) => setDeliveryDate(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
                     required
                   />
-                  <p className="text-xs text-gray-500 mt-1">Minimum 1 day lead time. Sundays are not available for delivery.</p>
                 </div>
 
               <div>
@@ -1628,6 +1632,34 @@ const handleClose = () => {
                             />
                           </div>
 
+                          {/* Allergen */}
+                          <div className="col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Allergen
+                            </label>
+                            <textarea
+                              value={item.product_allergen}
+                              onChange={(e) => handleUpdateItemField(index, 'product_allergen', e.target.value)}
+                              rows={2}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                              placeholder="Enter product allergens..."
+                            />
+                          </div>
+
+                          {/* Description */}
+                          <div className="col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Description <span className="text-gray-400 font-normal text-xs">(Shows in report instead of product name if provided)</span>
+                            </label>
+                            <textarea
+                              value={item.product_description}
+                              onChange={(e) => handleUpdateItemField(index, 'product_description', e.target.value)}
+                              rows={2}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                              placeholder="Enter description for report (optional - defaults to product name)..."
+                            />
+                          </div>
+
                           {/* Notes/Request */}
                           <div className="col-span-2">
                             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2012,6 +2044,32 @@ const handleClose = () => {
                   rows={2}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   placeholder="Enter ingredients (optional)"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Allergen
+                </label>
+                <textarea
+                  value={manualItemData.product_allergen}
+                  onChange={(e) => setManualItemData({ ...manualItemData, product_allergen: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Enter allergens (optional)"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description <span className="text-gray-400 font-normal text-xs">(Shows in report instead of product name)</span>
+                </label>
+                <textarea
+                  value={manualItemData.product_description}
+                  onChange={(e) => setManualItemData({ ...manualItemData, product_description: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Enter description for report (optional - defaults to product name)"
                 />
               </div>
 
