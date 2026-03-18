@@ -381,7 +381,7 @@ const handleRemoveGelatoType = async (option: string) => {
     }
   };
 
-  const handleItemChange = (index: number, field: keyof OrderItem, value: string | number) => {
+  const handleItemChange = (index: number, field: keyof OrderItem, value: string | number | boolean) => {
     const newItems = [...orderItems];
     newItems[index] = {
         ...newItems[index],
