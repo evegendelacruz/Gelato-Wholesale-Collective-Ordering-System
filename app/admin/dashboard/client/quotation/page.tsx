@@ -133,6 +133,18 @@ export default function ClientQuotationPage() {
   const [selectedHeaderId, setSelectedHeaderId] = useState<number | null>(null);
   const [selectedFooterId, setSelectedFooterId] = useState<number | null>(null);
 
+  // Header/Footer editor states
+  const [showHeaderEditor, setShowHeaderEditor] = useState(false);
+  const [showFooterEditor, setShowFooterEditor] = useState(false);
+  const [editingHeaderId, setEditingHeaderId] = useState<number | null>(null);
+  const [editingFooterId, setEditingFooterId] = useState<number | null>(null);
+  const [headerFormData, setHeaderFormData] = useState({
+    option_name: '', line1: '', line2: '', line3: '', line4: '', line5: '', line6: '', line7: ''
+  });
+  const [footerFormData, setFooterFormData] = useState({
+    option_name: '', line1: '', line2: '', line3: '', line4: '', line5: ''
+  });
+
   // Success/Warning modals
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -198,11 +210,93 @@ export default function ClientQuotationPage() {
 
       if (data && data.length > 0) {
         setFooterOptions(data);
-        const defaultFooter = data.find(f => f.is_default) || data[0];
-        setSelectedFooterId(defaultFooter.id);
+        // Default to empty footer (null) for quotations
+        setSelectedFooterId(null);
       }
     } catch (error) {
       console.error('Error fetching footer options:', error);
+    }
+  };
+
+  // Header editor handlers
+  const handleEditHeaderOption = (header: HeaderOption) => {
+    setEditingHeaderId(header.id);
+    setHeaderFormData({
+      option_name: header.option_name,
+      line1: header.line1 || '', line2: header.line2 || '', line3: header.line3 || '',
+      line4: header.line4 || '', line5: header.line5 || '', line6: header.line6 || '', line7: header.line7 || ''
+    });
+    setShowHeaderEditor(true);
+  };
+
+  const handleSaveHeaderOption = async () => {
+    try {
+      if (editingHeaderId) {
+        const { error } = await supabase.from('header_options').update(headerFormData).eq('id', editingHeaderId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('header_options').insert({ ...headerFormData, is_default: false });
+        if (error) throw error;
+      }
+      fetchHeaderOptions();
+      setShowHeaderEditor(false);
+      setEditingHeaderId(null);
+      setHeaderFormData({ option_name: '', line1: '', line2: '', line3: '', line4: '', line5: '', line6: '', line7: '' });
+    } catch (error) {
+      console.error('Error saving header option:', error);
+    }
+  };
+
+  const handleDeleteHeaderOption = async (id: number) => {
+    try {
+      const { error } = await supabase.from('header_options').delete().eq('id', id);
+      if (error) throw error;
+      fetchHeaderOptions();
+      setShowHeaderEditor(false);
+      setEditingHeaderId(null);
+    } catch (error) {
+      console.error('Error deleting header option:', error);
+    }
+  };
+
+  // Footer editor handlers
+  const handleEditFooterOption = (footer: FooterOption) => {
+    setEditingFooterId(footer.id);
+    setFooterFormData({
+      option_name: footer.option_name,
+      line1: footer.line1 || '', line2: footer.line2 || '', line3: footer.line3 || '',
+      line4: footer.line4 || '', line5: footer.line5 || ''
+    });
+    setShowFooterEditor(true);
+  };
+
+  const handleSaveFooterOption = async () => {
+    try {
+      if (editingFooterId) {
+        const { error } = await supabase.from('footer_options').update(footerFormData).eq('id', editingFooterId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('footer_options').insert({ ...footerFormData, is_default: false });
+        if (error) throw error;
+      }
+      fetchFooterOptions();
+      setShowFooterEditor(false);
+      setEditingFooterId(null);
+      setFooterFormData({ option_name: '', line1: '', line2: '', line3: '', line4: '', line5: '' });
+    } catch (error) {
+      console.error('Error saving footer option:', error);
+    }
+  };
+
+  const handleDeleteFooterOption = async (id: number) => {
+    try {
+      const { error } = await supabase.from('footer_options').delete().eq('id', id);
+      if (error) throw error;
+      fetchFooterOptions();
+      setShowFooterEditor(false);
+      setEditingFooterId(null);
+    } catch (error) {
+      console.error('Error deleting footer option:', error);
     }
   };
 
@@ -696,10 +790,17 @@ export default function ClientQuotationPage() {
       if (notes) {
         yPos += 15;
         doc.setFont('helvetica', 'bold');
-        doc.text('Notes:', 20, yPos);
+        doc.text('Notes', 20, yPos);
         doc.setFont('helvetica', 'normal');
-        const notesLines = doc.splitTextToSize(notes, 165);
-        doc.text(notesLines, 20, yPos + 5);
+
+        // Split notes into paragraphs and render each with proper spacing
+        const paragraphs = notes.split('\n').filter(p => p.trim());
+        let noteY = yPos + 6;
+        paragraphs.forEach((paragraph) => {
+          const paragraphLines = doc.splitTextToSize(paragraph.trim(), 80);
+          doc.text(paragraphLines, 20, noteY);
+          noteY += (paragraphLines.length * 4) + 4;
+        });
       }
 
       // Footer
@@ -1117,10 +1218,17 @@ export default function ClientQuotationPage() {
       if (selectedQuotation.notes) {
         yPos += 15;
         doc.setFont('helvetica', 'bold');
-        doc.text('Notes:', 20, yPos);
+        doc.text('Notes', 20, yPos);
         doc.setFont('helvetica', 'normal');
-        const notesLines = doc.splitTextToSize(selectedQuotation.notes, 165);
-        doc.text(notesLines, 20, yPos + 5);
+
+        // Split notes into paragraphs and render each with proper spacing
+        const paragraphs = selectedQuotation.notes.split('\n').filter(p => p.trim());
+        let noteY = yPos + 6;
+        paragraphs.forEach((paragraph) => {
+          const paragraphLines = doc.splitTextToSize(paragraph.trim(), 80);
+          doc.text(paragraphLines, 20, noteY);
+          noteY += (paragraphLines.length * 4) + 4;
+        });
       }
 
       // Footer
@@ -1716,26 +1824,39 @@ export default function ClientQuotationPage() {
                   </button>
                 </div>
 
-                {/* Header Options Selection */}
-                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <label className="text-sm font-medium" style={{ color: '#5C2E1F' }}>
-                      Quotation Header:
+                {/* Header Options Selection - Compact */}
+                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="text-xs font-medium" style={{ color: '#5C2E1F' }}>
+                      Header:
                     </label>
-                    <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {headerOptions.map((header) => (
-                        <label key={header.id} className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-gray-200 hover:border-orange-300 transition-colors">
+                        <label key={header.id} className="flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:border-orange-300 transition-colors">
                           <input
                             type="radio"
                             name="headerOption"
                             value={header.id}
                             checked={selectedHeaderId === header.id}
                             onChange={() => setSelectedHeaderId(header.id)}
-                            className="cursor-pointer accent-orange-500"
+                            className="cursor-pointer accent-orange-500 w-3 h-3"
                           />
-                          <span className="text-sm font-medium">{header.option_name}</span>
+                          <span className="text-xs font-medium">{header.option_name}</span>
+                          <button
+                            onClick={(e) => { e.preventDefault(); handleEditHeaderOption(header); }}
+                            className="text-blue-500 hover:text-blue-700 text-xs ml-1 underline"
+                          >Edit</button>
                         </label>
                       ))}
+                      <button
+                        onClick={() => {
+                          setEditingHeaderId(null);
+                          setHeaderFormData({ option_name: '', line1: '', line2: '', line3: '', line4: '', line5: '', line6: '', line7: '' });
+                          setShowHeaderEditor(true);
+                        }}
+                        className="text-xs px-2 py-1 border border-dashed border-gray-300 rounded hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                        style={{ color: '#5C2E1F' }}
+                      >+ New Header</button>
                     </div>
                   </div>
                 </div>
@@ -1858,7 +1979,13 @@ export default function ClientQuotationPage() {
                             {selectedQuotation.notes && (
                               <>
                                 <div style={{ fontSize: '10pt', fontWeight: 'bold', marginBottom: '8px' }}>Notes</div>
-                                <div style={{ fontSize: '10pt', lineHeight: '1.6' }}>{selectedQuotation.notes}</div>
+                                <div style={{ fontSize: '10pt', lineHeight: '1.8', textAlign: 'justify' }}>
+                                  {selectedQuotation.notes.split('\n').map((paragraph, idx) => (
+                                    paragraph.trim() && (
+                                      <p key={idx} style={{ margin: '0 0 8px 0' }}>{paragraph}</p>
+                                    )
+                                  ))}
+                                </div>
                               </>
                             )}
                           </div>
@@ -1896,35 +2023,84 @@ export default function ClientQuotationPage() {
                   </div>
                 </div>
 
+                {/* Footer Options Selection - Compact */}
+                <div className="bg-gray-50 px-4 py-2 border-t border-gray-200">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="text-xs font-medium" style={{ color: '#5C2E1F' }}>
+                      Footer:
+                    </label>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* Empty Option */}
+                      <label className="flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:border-orange-300 transition-colors">
+                        <input
+                          type="radio"
+                          name="footerOption"
+                          value=""
+                          checked={selectedFooterId === null}
+                          onChange={() => setSelectedFooterId(null)}
+                          className="cursor-pointer accent-orange-500 w-3 h-3"
+                        />
+                        <span className="text-xs font-medium">Empty</span>
+                      </label>
+                      {footerOptions.map((footer) => (
+                        <label key={footer.id} className="flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:border-orange-300 transition-colors">
+                          <input
+                            type="radio"
+                            name="footerOption"
+                            value={footer.id}
+                            checked={selectedFooterId === footer.id}
+                            onChange={() => setSelectedFooterId(footer.id)}
+                            className="cursor-pointer accent-orange-500 w-3 h-3"
+                          />
+                          <span className="text-xs font-medium">{footer.option_name}</span>
+                          <button
+                            onClick={(e) => { e.preventDefault(); handleEditFooterOption(footer); }}
+                            className="text-blue-500 hover:text-blue-700 text-xs ml-1 underline"
+                          >Edit</button>
+                        </label>
+                      ))}
+                      <button
+                        onClick={() => {
+                          setEditingFooterId(null);
+                          setFooterFormData({ option_name: '', line1: '', line2: '', line3: '', line4: '', line5: '' });
+                          setShowFooterEditor(true);
+                        }}
+                        className="text-xs px-2 py-1 border border-dashed border-gray-300 rounded hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                        style={{ color: '#5C2E1F' }}
+                      >+ New Footer</button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Footer Actions */}
-                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg shadow-lg">
+                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-3 flex gap-3 shrink-0 rounded-b-lg shadow-lg">
                   <button
                     onClick={handlePrintQuotation}
-                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                    className="flex-1 px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
                     style={{ backgroundColor: '#FF5722' }}
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="6 9 6 2 18 2 18 9"></polyline>
                       <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
                       <rect x="6" y="14" width="12" height="8"></rect>
                     </svg>
-                    Print Quotation
+                    Print
                   </button>
                   <button
                     onClick={handleDownloadQuotation}
-                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                    className="flex-1 px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
                     style={{ backgroundColor: '#4db8ba' }}
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                       <polyline points="7 10 12 15 17 10"></polyline>
                       <line x1="12" y1="15" x2="12" y2="3"></line>
                     </svg>
-                    Download PDF
+                    Download
                   </button>
                   <button
                     onClick={() => setShowQuotationModal(false)}
-                    className="flex-1 px-4 py-3 rounded-lg border-2 font-medium hover:bg-gray-50 transition-colors"
+                    className="flex-1 px-4 py-2 rounded-lg border-2 font-medium hover:bg-gray-50 transition-colors"
                     style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
                   >
                     Close
@@ -2316,6 +2492,108 @@ export default function ClientQuotationPage() {
                 <Trash2 size={16} />
                 <span className="text-sm">Delete</span>
               </button>
+            </div>
+          )}
+
+          {/* Header Editor Modal */}
+          {showHeaderEditor && (
+            <div className="fixed inset-0 flex items-center justify-center z-[60] p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }} onClick={() => setShowHeaderEditor(false)}>
+              <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex justify-between items-center">
+                  <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>{editingHeaderId ? 'Edit Header' : 'New Header'}</h3>
+                  <div className="flex items-center gap-2">
+                    {editingHeaderId && (
+                      <button onClick={() => handleDeleteHeaderOption(editingHeaderId)} className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-300 rounded">Delete</button>
+                    )}
+                    <button onClick={() => setShowHeaderEditor(false)} className="text-gray-500 hover:text-gray-700 text-xl">×</button>
+                  </div>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Option Name *</label>
+                    <input type="text" value={headerFormData.option_name} onChange={(e) => setHeaderFormData({ ...headerFormData, option_name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" placeholder="e.g., Momolato Pte Ltd" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 1 (Company Name)</label>
+                    <input type="text" value={headerFormData.line1} onChange={(e) => setHeaderFormData({ ...headerFormData, line1: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 2</label>
+                    <input type="text" value={headerFormData.line2} onChange={(e) => setHeaderFormData({ ...headerFormData, line2: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 3</label>
+                    <input type="text" value={headerFormData.line3} onChange={(e) => setHeaderFormData({ ...headerFormData, line3: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 4</label>
+                    <input type="text" value={headerFormData.line4} onChange={(e) => setHeaderFormData({ ...headerFormData, line4: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 5</label>
+                    <input type="text" value={headerFormData.line5} onChange={(e) => setHeaderFormData({ ...headerFormData, line5: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 6</label>
+                    <input type="text" value={headerFormData.line6} onChange={(e) => setHeaderFormData({ ...headerFormData, line6: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 7</label>
+                    <input type="text" value={headerFormData.line7} onChange={(e) => setHeaderFormData({ ...headerFormData, line7: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                </div>
+                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-2">
+                  <button onClick={handleSaveHeaderOption} className="flex-1 px-3 py-2 text-white rounded text-sm font-medium hover:opacity-90" style={{ backgroundColor: '#FF5722' }}>{editingHeaderId ? 'Update' : 'Create'}</button>
+                  <button onClick={() => setShowHeaderEditor(false)} className="flex-1 px-3 py-2 border rounded text-sm font-medium hover:bg-gray-50" style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Footer Editor Modal */}
+          {showFooterEditor && (
+            <div className="fixed inset-0 flex items-center justify-center z-[60] p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }} onClick={() => setShowFooterEditor(false)}>
+              <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex justify-between items-center">
+                  <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>{editingFooterId ? 'Edit Footer' : 'New Footer'}</h3>
+                  <div className="flex items-center gap-2">
+                    {editingFooterId && (
+                      <button onClick={() => handleDeleteFooterOption(editingFooterId)} className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-300 rounded">Delete</button>
+                    )}
+                    <button onClick={() => setShowFooterEditor(false)} className="text-gray-500 hover:text-gray-700 text-xl">×</button>
+                  </div>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Option Name *</label>
+                    <input type="text" value={footerFormData.option_name} onChange={(e) => setFooterFormData({ ...footerFormData, option_name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" placeholder="e.g., Standard Footer" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 1</label>
+                    <input type="text" value={footerFormData.line1} onChange={(e) => setFooterFormData({ ...footerFormData, line1: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 2</label>
+                    <input type="text" value={footerFormData.line2} onChange={(e) => setFooterFormData({ ...footerFormData, line2: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 3</label>
+                    <input type="text" value={footerFormData.line3} onChange={(e) => setFooterFormData({ ...footerFormData, line3: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 4</label>
+                    <input type="text" value={footerFormData.line4} onChange={(e) => setFooterFormData({ ...footerFormData, line4: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: '#5C2E1F' }}>Line 5</label>
+                    <input type="text" value={footerFormData.line5} onChange={(e) => setFooterFormData({ ...footerFormData, line5: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                </div>
+                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-2">
+                  <button onClick={handleSaveFooterOption} className="flex-1 px-3 py-2 text-white rounded text-sm font-medium hover:opacity-90" style={{ backgroundColor: '#FF5722' }}>{editingFooterId ? 'Update' : 'Create'}</button>
+                  <button onClick={() => setShowFooterEditor(false)} className="flex-1 px-3 py-2 border rounded text-sm font-medium hover:bg-gray-50" style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}>Cancel</button>
+                </div>
+              </div>
             </div>
           )}
         </main>
