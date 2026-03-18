@@ -714,9 +714,28 @@ const handleRemoveGelatoType = async (option: string) => {
                 <input
                   type="date"
                   value={deliveryDate}
-                  onChange={(e) => setDeliveryDate(e.target.value)}
+                  onChange={(e) => {
+                    const selectedDate = new Date(e.target.value);
+                    // Check if selected date is a Sunday (0 = Sunday)
+                    if (selectedDate.getDay() === 0) {
+                      alert('Sundays are not available for delivery. Please select another date.');
+                      return;
+                    }
+                    setDeliveryDate(e.target.value);
+                  }}
+                  min={(() => {
+                    // Calculate minimum date: 2 days from today (1-day lead time)
+                    const minDate = new Date();
+                    minDate.setDate(minDate.getDate() + 2);
+                    // If the minimum date falls on Sunday, move to Monday
+                    if (minDate.getDay() === 0) {
+                      minDate.setDate(minDate.getDate() + 1);
+                    }
+                    return minDate.toISOString().split('T')[0];
+                  })()}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
+                <p className="text-xs text-gray-500 mt-1">Minimum 1 day lead time. Sundays are not available for delivery.</p>
               </div>
 
               <div>

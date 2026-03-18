@@ -1164,15 +1164,34 @@ const handleClose = () => {
                   <label className="block text-sm font-medium mb-1 text-gray-700">
                     Delivery Date <span className="text-red-500">*</span>
                   </label>
-                  
+
                   <input
                     type="date"
                     value={deliveryDate}
-                    onChange={(e) => setDeliveryDate(e.target.value)}
-                    min={new Date(new Date().setDate(new Date().getDate() + 3)).toISOString().split('T')[0]}
+                    onChange={(e) => {
+                      const selectedDate = new Date(e.target.value);
+                      // Check if selected date is a Sunday (0 = Sunday)
+                      if (selectedDate.getDay() === 0) {
+                        setMessage({ type: 'error', text: 'Sundays are not available for delivery. Please select another date.' });
+                        setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+                        return;
+                      }
+                      setDeliveryDate(e.target.value);
+                    }}
+                    min={(() => {
+                      // Calculate minimum date: 2 days from today (1-day lead time)
+                      const minDate = new Date();
+                      minDate.setDate(minDate.getDate() + 2);
+                      // If the minimum date falls on Sunday, move to Monday
+                      if (minDate.getDay() === 0) {
+                        minDate.setDate(minDate.getDate() + 1);
+                      }
+                      return minDate.toISOString().split('T')[0];
+                    })()}
                     className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
                     required
                   />
+                  <p className="text-xs text-gray-500 mt-1">Minimum 1 day lead time. Sundays are not available for delivery.</p>
                 </div>
 
               <div>
