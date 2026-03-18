@@ -223,7 +223,7 @@ export function generateStickerPDF(data: StickerData): jsPDF {
   doc.setFont('helvetica', 'bold');
 
   // Try to fit product name on one line with responsive font
-  let nameFontSize = getResponsiveFontSize(doc, data.productName, contentWidth, 6, 3.5);
+  let nameFontSize = getResponsiveFontSize(doc, data.productName, contentWidth, 5.5, 3.5);
   doc.setFontSize(nameFontSize);
 
   let nameLines: string[];
@@ -237,14 +237,14 @@ export function generateStickerPDF(data: StickerData): jsPDF {
     nameEndY = productNameStartY + 1;
   } else {
     // Need multiple lines - reduce font size and split
-    nameFontSize = Math.min(nameFontSize, 5);
+    nameFontSize = Math.min(nameFontSize, 5.5);
     doc.setFontSize(nameFontSize);
     nameLines = doc.splitTextToSize(data.productName, contentWidth);
 
     // Limit to 2 lines max
     if (nameLines.length > 2) {
       // Further reduce font size to try to fit in 2 lines
-      nameFontSize = getResponsiveFontSize(doc, data.productName, contentWidth * 1.8, 5, 3.5);
+      nameFontSize = getResponsiveFontSize(doc, data.productName, contentWidth * 1.8, 5.5, 3.5);
       doc.setFontSize(nameFontSize);
       nameLines = doc.splitTextToSize(data.productName, contentWidth);
       if (nameLines.length > 2) {
@@ -269,11 +269,11 @@ export function generateStickerPDF(data: StickerData): jsPDF {
   const ingredientsStartY = nameEndY + 1;
   const availableIngredientsHeight = ingredientsEndY - ingredientsStartY;
 
-  doc.setFontSize(3.5);
+  doc.setFontSize(4);
   doc.setFont('helvetica', 'normal');
 
   const ingredientLines = doc.splitTextToSize(data.ingredients, contentWidth);
-  const lineHeight = 1.1;
+  const lineHeight = 1.3;
   const maxIngredientLines = Math.floor(availableIngredientsHeight / lineHeight);
   const displayIngredients = ingredientLines.slice(0, Math.max(1, maxIngredientLines));
 
@@ -402,7 +402,7 @@ function drawStickerContent(doc: jsPDF, data: StickerData, widthMm: number, heig
 
   // Product Name (bold, LEFT aligned, responsive font size)
   doc.setFont('helvetica', 'bold');
-  let nameFontSize = 6;
+  let nameFontSize = 5.5;
   doc.setFontSize(nameFontSize);
 
   while (nameFontSize > 3.5 && doc.getTextWidth(data.productName) > contentWidth) {
@@ -415,7 +415,7 @@ function drawStickerContent(doc: jsPDF, data: StickerData, widthMm: number, heig
     doc.text(data.productName, contentStartX, productNameStartY);
     nameEndY = productNameStartY + 1;
   } else {
-    nameFontSize = Math.min(nameFontSize, 5);
+    nameFontSize = Math.min(nameFontSize, 5.5);
     doc.setFontSize(nameFontSize);
     let nameLines = doc.splitTextToSize(data.productName, contentWidth);
     if (nameLines.length > 2) {
@@ -432,11 +432,11 @@ function drawStickerContent(doc: jsPDF, data: StickerData, widthMm: number, heig
   const ingredientsStartY = nameEndY + 1;
   const availableIngredientsHeight = ingredientsEndY - ingredientsStartY;
 
-  doc.setFontSize(3.5);
+  doc.setFontSize(4);
   doc.setFont('helvetica', 'normal');
 
   const ingredientLines = doc.splitTextToSize(data.ingredients, contentWidth);
-  const lineHeight = 1.1;
+  const lineHeight = 1.3;
   const maxIngredientLines = Math.floor(availableIngredientsHeight / lineHeight);
   const displayIngredients = ingredientLines.slice(0, Math.max(1, maxIngredientLines));
 
@@ -722,11 +722,11 @@ export function generateBarcodeStickerPDF(data: BarcodeStickerData): jsPDF {
 
   // Product Name at top (bold, center aligned, can wrap to max 3 lines)
   doc.setFont('helvetica', 'bold');
-  let nameFontSize = 5;
+  let nameFontSize = 5.5;
   doc.setFontSize(nameFontSize);
 
   // Calculate responsive font size
-  while (nameFontSize > 3 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
+  while (nameFontSize > 3.5 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
     nameFontSize -= 0.3;
     doc.setFontSize(nameFontSize);
   }
@@ -767,7 +767,7 @@ export function generateBarcodeStickerPDF(data: BarcodeStickerData): jsPDF {
   // 13-digit code below barcode (centered, same value as barcode)
   const codeY = barcodeStartY + barcodeHeight + 1.2;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(3.5);
+  doc.setFontSize(4);
 
   // Format barcode with spaces for readability: 3 01 2 3 4 5 6 7 8 9 0 1
   const formattedCode = data.barcode13.split('').join(' ');
@@ -801,11 +801,11 @@ export function generateProductStickerPDF(data: ProductStickerData): jsPDF {
 
   // Product Name at top (bold, center aligned, can wrap)
   doc.setFont('helvetica', 'bold');
-  let nameFontSize = 5;
+  let nameFontSize = 5.5;
   doc.setFontSize(nameFontSize);
 
   // Calculate responsive font size
-  while (nameFontSize > 3 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
+  while (nameFontSize > 3.5 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
     nameFontSize -= 0.3;
     doc.setFontSize(nameFontSize);
   }
@@ -830,7 +830,7 @@ export function generateProductStickerPDF(data: ProductStickerData): jsPDF {
   // BBD and GPBN at bottom
   const bbdCodeY = heightMm - marginMm - 0.5;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(4.5);
+  doc.setFontSize(5.5);
   const bbdText = `BBD: ${data.bbd} ${data.gpbnCode}`;
   const bbdWidth = doc.getTextWidth(bbdText);
   const bbdX = contentStartX + (contentWidth - bbdWidth) / 2;
@@ -842,10 +842,10 @@ export function generateProductStickerPDF(data: ProductStickerData): jsPDF {
   const availableHeight = ingredientsEndY - ingredientsStartY;
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(3);
+  doc.setFontSize(4);
 
   const ingredientLines = doc.splitTextToSize(data.ingredients, contentWidth);
-  const ingredientLineHeight = 1;
+  const ingredientLineHeight = 1.3;
   const maxLines = Math.floor(availableHeight / ingredientLineHeight);
   const displayLines = ingredientLines.slice(0, Math.max(1, maxLines));
 
@@ -1105,10 +1105,10 @@ function drawBarcodeStickerContent(doc: jsPDF, data: BarcodeStickerData, widthMm
 
   // Product Name at top (bold, center aligned, can wrap to max 3 lines)
   doc.setFont('helvetica', 'bold');
-  let nameFontSize = 5;
+  let nameFontSize = 5.5;
   doc.setFontSize(nameFontSize);
 
-  while (nameFontSize > 3 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
+  while (nameFontSize > 3.5 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
     nameFontSize -= 0.3;
     doc.setFontSize(nameFontSize);
   }
@@ -1146,7 +1146,7 @@ function drawBarcodeStickerContent(doc: jsPDF, data: BarcodeStickerData, widthMm
   // Code below barcode
   const codeY = barcodeStartY + barcodeHeight + 1.2;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(3.5);
+  doc.setFontSize(4);
 
   const formattedCode = data.barcode13.split('').join(' ');
   const codeTextWidth = doc.getTextWidth(formattedCode);
@@ -1171,10 +1171,10 @@ function drawProductStickerContent(doc: jsPDF, data: ProductStickerData, widthMm
 
   // Product Name at top (bold, center aligned, can wrap)
   doc.setFont('helvetica', 'bold');
-  let nameFontSize = 5;
+  let nameFontSize = 5.5;
   doc.setFontSize(nameFontSize);
 
-  while (nameFontSize > 3 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
+  while (nameFontSize > 3.5 && doc.getTextWidth(data.productName) > contentWidth * 2.5) {
     nameFontSize -= 0.3;
     doc.setFontSize(nameFontSize);
   }
@@ -1197,7 +1197,7 @@ function drawProductStickerContent(doc: jsPDF, data: ProductStickerData, widthMm
   // BBD and GPBN at bottom
   const bbdCodeY = heightMm - marginMm - 0.5;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(4.5);
+  doc.setFontSize(5.5);
   const bbdText = `BBD: ${data.bbd} ${data.gpbnCode}`;
   const bbdWidth = doc.getTextWidth(bbdText);
   const bbdX = contentStartX + (contentWidth - bbdWidth) / 2;
@@ -1208,10 +1208,10 @@ function drawProductStickerContent(doc: jsPDF, data: ProductStickerData, widthMm
   const ingredientsEndY = bbdCodeY - 1.5;
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(3);
+  doc.setFontSize(4);
 
   const ingredientLines = doc.splitTextToSize(data.ingredients, contentWidth);
-  const ingredientLineHeight = 1;
+  const ingredientLineHeight = 1.3;
   const availableHeight = ingredientsEndY - ingredientsStartY;
   const maxLines = Math.floor(availableHeight / ingredientLineHeight);
   const displayLines = ingredientLines.slice(0, Math.max(1, maxLines));
