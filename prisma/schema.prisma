@@ -290,6 +290,7 @@ model ClientStatement {
   client_person_incharge  String?
   client_business_contact String?
   business_address        String?
+  aging_category          String?  @default("1-30_days")
 
   // Relations
   client ClientUser    @relation(fields: [client_auth_id], references: [client_auth_id], onDelete: Cascade)
@@ -425,4 +426,14 @@ model GpbnCounter {
   updated_at       DateTime @default(now()) @updatedAt
 
   @@map("gpbn_counter")
+}
+
+model AdminAccessPermissions {
+  id            Int      @id @default(autoincrement())
+  admin_auth_id String   @unique
+  permissions   Json     @default("{}")
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@map("admin_access_permissions")
 }

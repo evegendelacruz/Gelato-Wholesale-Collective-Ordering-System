@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Settings, Users, Camera, UserMinus, Plus, Eye, EyeOff } from 'lucide-react';
+import { Settings, Users, Camera, UserMinus, Plus, Eye, EyeOff, Shield, ChevronDown, ChevronRight } from 'lucide-react';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import supabase from '@/lib/client';
@@ -15,13 +15,86 @@ interface AdminUser {
   admin_role: string;
   admin_password: string;
   created_at: string;
-  admin_profile: string | null; 
+  admin_profile: string | null;
 }
 
 interface Message {
   type: 'success' | 'error' | '';
   text: string;
 }
+
+interface SubmenuPermission {
+  view: boolean;
+  edit: boolean;
+}
+
+interface ScreenPermission {
+  view: boolean;
+  edit: boolean;
+  submenus?: Record<string, SubmenuPermission>;
+}
+
+interface AccessPermissions {
+  client?: ScreenPermission;
+  product?: ScreenPermission;
+  orders?: ScreenPermission;
+  report?: ScreenPermission;
+}
+
+// Define the screen structure for access control
+const SCREEN_STRUCTURE = [
+  {
+    id: 'client',
+    label: 'Client Account',
+    submenus: [
+      { id: 'client', label: 'Client Account' },
+      { id: 'statement', label: 'Client Statement' },
+      { id: 'quotation', label: 'Client Quotation' }
+    ]
+  },
+  {
+    id: 'product',
+    label: 'Product',
+    submenus: [
+      { id: 'product-list', label: 'Product List' },
+      { id: 'ingredients', label: 'Ingredients' }
+    ]
+  },
+  {
+    id: 'orders',
+    label: 'Orders',
+    submenus: [
+      { id: 'order', label: 'Client Order' },
+      { id: 'online-order', label: 'Online Order' }
+    ]
+  },
+  {
+    id: 'report',
+    label: 'Reports',
+    submenus: [
+      { id: 'product-analysis', label: 'Product Analysis (Product)' },
+      { id: 'product-analysis-customer', label: 'Product Analysis (Client)' },
+      { id: 'delivery-list', label: 'Delivery Report' }
+    ]
+  }
+];
+
+// Default permissions - all access enabled
+const getDefaultPermissions = (): AccessPermissions => {
+  const permissions: AccessPermissions = {};
+  SCREEN_STRUCTURE.forEach(screen => {
+    const submenus: Record<string, SubmenuPermission> = {};
+    screen.submenus.forEach(submenu => {
+      submenus[submenu.id] = { view: true, edit: true };
+    });
+    permissions[screen.id as keyof AccessPermissions] = {
+      view: true,
+      edit: true,
+      submenus
+    };
+  });
+  return permissions;
+};
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState('account');
@@ -51,10 +124,17 @@ export default function ProfilePage() {
   const [newUserData, setNewUserData] = useState({
     fullName: '',
     email: '',
-    role: 'User'
+    role: 'Staff'
   });
   const [searchUser, setSearchUser] = useState('');
   const [users, setUsers] = useState<AdminUser[]>([]);
+
+  // Access Control Modal State
+  const [showAccessControlModal, setShowAccessControlModal] = useState(false);
+  const [selectedUserForAccess, setSelectedUserForAccess] = useState<AdminUser | null>(null);
+  const [accessPermissions, setAccessPermissions] = useState<AccessPermissions>(getDefaultPermissions());
+  const [savingAccess, setSavingAccess] = useState(false);
+  const [expandedScreens, setExpandedScreens] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     fetchUsers();
@@ -634,7 +714,7 @@ export default function ProfilePage() {
     setNewUserData({
       fullName: '',
       email: '',
-      role: 'User'
+      role: 'Staff'
     });
     
     // Clear message after 2 seconds
@@ -737,6 +817,173 @@ export default function ProfilePage() {
       console.error('Error updating role:', error);
       setMessage({ type: 'error', text: 'Failed to update role' });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    }
+  };
+
+  // Access Control Functions
+  const handleOpenAccessControl = async (user: AdminUser) => {
+    setSelectedUserForAccess(user);
+    setExpandedScreens({});
+
+    // Load existing permissions from database
+    try {
+      const { data, error } = await supabase
+        .from('admin_access_permissions')
+        .select('permissions')
+        .eq('admin_auth_id', user.admin_auth_id)
+        .single();
+
+      // PGRST116 = no rows found, PGRST205 = table doesn't exist
+      if (error && error.code !== 'PGRST116' && error.code !== 'PGRST205') {
+        console.error('Error loading permissions:', error);
+      }
+
+      if (data && data.permissions) {
+        setAccessPermissions(data.permissions as AccessPermissions);
+      } else {
+        // Set default permissions for new users
+        setAccessPermissions(getDefaultPermissions());
+      }
+    } catch (err) {
+      console.error('Error loading permissions:', err);
+      setAccessPermissions(getDefaultPermissions());
+    }
+
+    setShowAccessControlModal(true);
+  };
+
+  const handleToggleScreenExpand = (screenId: string) => {
+    setExpandedScreens(prev => ({
+      ...prev,
+      [screenId]: !prev[screenId]
+    }));
+  };
+
+  const handleScreenPermissionChange = (screenId: string, field: 'view' | 'edit', value: boolean) => {
+    setAccessPermissions(prev => {
+      const newPermissions = { ...prev };
+      const screen = newPermissions[screenId as keyof AccessPermissions];
+
+      if (screen) {
+        screen[field] = value;
+
+        // If disabling view, also disable edit and all submenus
+        if (field === 'view' && !value) {
+          screen.edit = false;
+          if (screen.submenus) {
+            Object.keys(screen.submenus).forEach(submenuId => {
+              screen.submenus![submenuId] = { view: false, edit: false };
+            });
+          }
+        }
+
+        // If enabling view, enable all submenus view
+        if (field === 'view' && value) {
+          if (screen.submenus) {
+            Object.keys(screen.submenus).forEach(submenuId => {
+              screen.submenus![submenuId].view = true;
+            });
+          }
+        }
+
+        // If enabling edit, also enable view and all submenus edit
+        if (field === 'edit' && value) {
+          screen.view = true;
+          if (screen.submenus) {
+            Object.keys(screen.submenus).forEach(submenuId => {
+              screen.submenus![submenuId] = { view: true, edit: true };
+            });
+          }
+        }
+
+        // If disabling edit, disable all submenus edit
+        if (field === 'edit' && !value) {
+          if (screen.submenus) {
+            Object.keys(screen.submenus).forEach(submenuId => {
+              screen.submenus![submenuId].edit = false;
+            });
+          }
+        }
+      }
+
+      return newPermissions;
+    });
+  };
+
+  const handleSubmenuPermissionChange = (screenId: string, submenuId: string, field: 'view' | 'edit', value: boolean) => {
+    setAccessPermissions(prev => {
+      const newPermissions = { ...prev };
+      const screen = newPermissions[screenId as keyof AccessPermissions];
+
+      if (screen && screen.submenus && screen.submenus[submenuId]) {
+        screen.submenus[submenuId][field] = value;
+
+        // If disabling view, also disable edit for this submenu
+        if (field === 'view' && !value) {
+          screen.submenus[submenuId].edit = false;
+        }
+
+        // If enabling edit, also enable view for this submenu
+        if (field === 'edit' && value) {
+          screen.submenus[submenuId].view = true;
+        }
+
+        // Update parent checkbox based on submenus state
+        const anySubmenuHasView = Object.values(screen.submenus).some(s => s.view);
+        const anySubmenuHasEdit = Object.values(screen.submenus).some(s => s.edit);
+        const allSubmenusHaveView = Object.values(screen.submenus).every(s => s.view);
+        const allSubmenusHaveEdit = Object.values(screen.submenus).every(s => s.edit);
+
+        // Parent view is checked if any submenu has view
+        screen.view = anySubmenuHasView;
+        // Parent edit is checked if any submenu has edit
+        screen.edit = anySubmenuHasEdit;
+      }
+
+      return newPermissions;
+    });
+  };
+
+  const handleSaveAccessPermissions = async () => {
+    if (!selectedUserForAccess) return;
+
+    setSavingAccess(true);
+    try {
+      // Try to upsert permissions
+      const { error } = await supabase
+        .from('admin_access_permissions')
+        .upsert({
+          admin_auth_id: selectedUserForAccess.admin_auth_id,
+          permissions: accessPermissions,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'admin_auth_id'
+        });
+
+      if (error) {
+        // PGRST205 = table doesn't exist
+        if (error.code === 'PGRST205' || error.code === '42P01') {
+          setMessage({
+            type: 'error',
+            text: 'Access permissions table not found. Please run the database migration first.'
+          });
+          setTimeout(() => setMessage({ type: '', text: '' }), 5000);
+          return;
+        }
+        console.error('Error saving permissions:', error);
+        throw error;
+      }
+
+      setMessage({ type: 'success', text: 'Access permissions saved successfully' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 2000);
+      setShowAccessControlModal(false);
+      setSelectedUserForAccess(null);
+    } catch (err) {
+      console.error('Error saving permissions:', err);
+      setMessage({ type: 'error', text: 'Failed to save access permissions' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    } finally {
+      setSavingAccess(false);
     }
   };
 
@@ -1387,16 +1634,35 @@ export default function ProfilePage() {
                     </tr>
                   ) : (
                     filteredUsers.map((user) => (
-                      <tr key={user.admin_auth_id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                      <tr
+                        key={user.admin_auth_id}
+                        style={{
+                          borderBottom: '1px solid #f5f5f5',
+                          cursor: user.admin_role === 'Staff' ? 'pointer' : 'default',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (user.admin_role === 'Staff') {
+                            (e.currentTarget as HTMLTableRowElement).style.backgroundColor = '#fef3e9';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLTableRowElement).style.backgroundColor = 'transparent';
+                        }}
+                      >
                         <td style={{ padding: '14px 12px', fontSize: '14px', color: '#333' }}>{user.admin_fullName}</td>
                         <td style={{ padding: '14px 12px', fontSize: '14px', color: '#333' }}>{user.admin_acc_id}</td>
                         <td style={{ padding: '14px 12px', fontSize: '14px' }}>
-                          <a href={`mailto:${user.admin_email}`} style={{ color: '#2563eb', textDecoration: 'underline' }}>
+                          <a
+                            href={`mailto:${user.admin_email}`}
+                            style={{ color: '#2563eb', textDecoration: 'underline' }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             {user.admin_email}
                           </a>
                         </td>
-                        <td style={{ padding: '14px 12px' }}>
-                          <select 
+                        <td style={{ padding: '14px 12px' }} onClick={(e) => e.stopPropagation()}>
+                          <select
                             value={user.admin_role}
                             onChange={(e) => handleRoleChange(user.admin_acc_id, e.target.value)}
                             disabled={loading}
@@ -1412,53 +1678,85 @@ export default function ProfilePage() {
                             }}
                           >
                             <option value="Admin">Admin</option>
-                            <option value="User">User</option>
+                            <option value="Staff">Staff</option>
                           </select>
                         </td>
                         <td style={{ padding: '14px 12px', fontSize: '14px', color: '#666' }}>
-                          {new Date(user.created_at).toLocaleDateString('en-US', { 
-                            year: 'numeric', 
-                            month: 'short', 
-                            day: 'numeric' 
+                          {new Date(user.created_at).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
                           })}
                         </td>
-                        <td style={{ padding: '14px 12px', textAlign: 'center' }}>
-                        <button
-                          onClick={() => {
-                            setUserToDelete({
-                              id: user.admin_acc_id,
-                              email: user.admin_email,
-                              name: user.admin_fullName
-                            });
-                            setShowDeleteModal(true);
-                          }}
-                          disabled={loading}
-                          title="Delete User"
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            cursor: loading ? 'not-allowed' : 'pointer',
-                            color: '#dc2626',
-                            padding: '6px',
-                            borderRadius: '4px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            transition: 'background-color 0.2s',
-                            opacity: loading ? 0.5 : 1
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!loading) {
-                              (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#fee2e2';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                          }}
-                        >
-                          <UserMinus size={18} />
-                        </button>
-                      </td>
+                        <td style={{ padding: '14px 12px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                            {user.admin_role === 'Staff' && (
+                              <button
+                                onClick={() => handleOpenAccessControl(user)}
+                                disabled={loading}
+                                title="Set Access Control"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: loading ? 'not-allowed' : 'pointer',
+                                  color: '#ff5722',
+                                  padding: '6px',
+                                  borderRadius: '4px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'background-color 0.2s',
+                                  opacity: loading ? 0.5 : 1
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (!loading) {
+                                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#fff3e0';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+                                }}
+                              >
+                                <Shield size={18} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                setUserToDelete({
+                                  id: user.admin_acc_id,
+                                  email: user.admin_email,
+                                  name: user.admin_fullName
+                                });
+                                setShowDeleteModal(true);
+                              }}
+                              disabled={loading}
+                              title="Delete User"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: loading ? 'not-allowed' : 'pointer',
+                                color: '#dc2626',
+                                padding: '6px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                transition: 'background-color 0.2s',
+                                opacity: loading ? 0.5 : 1
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!loading) {
+                                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#fee2e2';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+                              }}
+                            >
+                              <UserMinus size={18} />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1611,7 +1909,7 @@ export default function ProfilePage() {
                   cursor: loading ? 'not-allowed' : 'pointer'
                 }}
               >
-                <option value="User">User</option>
+                <option value="Staff">Staff</option>
                 <option value="Admin">Admin</option>
               </select>
             </div>
@@ -2017,6 +2315,245 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
-    </div>  
+
+      {/* Access Control Modal */}
+      {showAccessControlModal && selectedUserForAccess && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1003,
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '32px',
+            width: '100%',
+            maxWidth: '700px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+            position: 'relative'
+          }}>
+            {/* Close Button */}
+            <button
+              onClick={() => {
+                setShowAccessControlModal(false);
+                setSelectedUserForAccess(null);
+              }}
+              disabled={savingAccess}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                right: '16px',
+                background: 'none',
+                border: 'none',
+                fontSize: '24px',
+                color: '#999',
+                cursor: savingAccess ? 'not-allowed' : 'pointer',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              ×
+            </button>
+
+            {/* Header */}
+            <div style={{ marginBottom: '24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '50%',
+                  backgroundColor: '#ff5722',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Shield size={24} color="white" />
+                </div>
+                <div>
+                  <h2 style={{
+                    fontSize: '20px',
+                    fontWeight: 'bold',
+                    color: '#7d1f1f',
+                    margin: 0
+                  }}>Access Control</h2>
+                  <p style={{ color: '#666', fontSize: '14px', margin: 0 }}>
+                    {selectedUserForAccess.admin_fullName} ({selectedUserForAccess.admin_acc_id})
+                  </p>
+                </div>
+              </div>
+              <p style={{ fontSize: '13px', color: '#888', marginTop: '12px' }}>
+                Configure which screens and features this staff member can access. Dashboard is always visible.
+              </p>
+            </div>
+
+            {/* Screen Permissions */}
+            <div style={{ marginBottom: '24px' }}>
+              {SCREEN_STRUCTURE.map((screen) => {
+                const screenPermission = accessPermissions[screen.id as keyof AccessPermissions];
+                const isExpanded = expandedScreens[screen.id];
+
+                return (
+                  <div
+                    key={screen.id}
+                    style={{
+                      border: '1px solid #e5e5e5',
+                      borderRadius: '8px',
+                      marginBottom: '12px',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {/* Screen Header */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '14px 16px',
+                        backgroundColor: '#f9f9f9',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => handleToggleScreenExpand(screen.id)}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {isExpanded ? <ChevronDown size={18} color="#666" /> : <ChevronRight size={18} color="#666" />}
+                        <span style={{ fontWeight: '600', fontSize: '14px', color: '#333' }}>{screen.label}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }} onClick={(e) => e.stopPropagation()}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={screenPermission?.view || false}
+                            onChange={(e) => handleScreenPermissionChange(screen.id, 'view', e.target.checked)}
+                            style={{ width: '16px', height: '16px', accentColor: '#ff5722' }}
+                          />
+                          <span style={{ fontSize: '13px', color: '#666' }}>View</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={screenPermission?.edit || false}
+                            onChange={(e) => handleScreenPermissionChange(screen.id, 'edit', e.target.checked)}
+                            disabled={!screenPermission?.view}
+                            style={{
+                              width: '16px',
+                              height: '16px',
+                              accentColor: '#ff5722',
+                              opacity: screenPermission?.view ? 1 : 0.5
+                            }}
+                          />
+                          <span style={{ fontSize: '13px', color: screenPermission?.view ? '#666' : '#aaa' }}>Edit</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Submenus */}
+                    {isExpanded && (
+                      <div style={{ padding: '12px 16px 12px 44px', borderTop: '1px solid #e5e5e5' }}>
+                        {screen.submenus.map((submenu) => {
+                          const submenuPermission = screenPermission?.submenus?.[submenu.id];
+
+                          return (
+                            <div
+                              key={submenu.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '10px 0',
+                                borderBottom: '1px solid #f0f0f0'
+                              }}
+                            >
+                              <span style={{ fontSize: '13px', color: '#555' }}>{submenu.label}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={submenuPermission?.view || false}
+                                    onChange={(e) => handleSubmenuPermissionChange(screen.id, submenu.id, 'view', e.target.checked)}
+                                    style={{ width: '14px', height: '14px', accentColor: '#ff5722' }}
+                                  />
+                                  <span style={{ fontSize: '12px', color: '#666' }}>View</span>
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={submenuPermission?.edit || false}
+                                    onChange={(e) => handleSubmenuPermissionChange(screen.id, submenu.id, 'edit', e.target.checked)}
+                                    disabled={!submenuPermission?.view}
+                                    style={{
+                                      width: '14px',
+                                      height: '14px',
+                                      accentColor: '#ff5722',
+                                      opacity: submenuPermission?.view ? 1 : 0.5
+                                    }}
+                                  />
+                                  <span style={{ fontSize: '12px', color: submenuPermission?.view ? '#666' : '#aaa' }}>Edit</span>
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowAccessControlModal(false);
+                  setSelectedUserForAccess(null);
+                }}
+                disabled={savingAccess}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#e0e0e0',
+                  color: '#666',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: savingAccess ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAccessPermissions}
+                disabled={savingAccess}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: savingAccess ? '#ccc' : '#ff5722',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: savingAccess ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {savingAccess ? 'Saving...' : 'Save Permissions'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

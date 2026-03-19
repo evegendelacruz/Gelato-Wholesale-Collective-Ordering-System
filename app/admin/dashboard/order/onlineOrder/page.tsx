@@ -6,6 +6,7 @@ import supabase from "@/lib/client";
 import Image from "next/image";
 import { useState, useEffect, Fragment, useCallback, useRef } from "react";
 import { Search, Filter, Plus, X, Check, ChevronDown, Tag } from "lucide-react";
+import { useAccessControl } from "@/lib/accessControl";
 import {
   downloadMultiStickerPDF,
   downloadAllOrderStickersPDF,
@@ -91,6 +92,10 @@ const loadImageAsBase64 = (src: string): Promise<string> => {
 };
 
 export default function OnlineOrderPage() {
+  // Access Control
+  const { canEdit } = useAccessControl();
+  const canEditOnlineOrders = canEdit('orders', 'online-order');
+
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -2779,8 +2784,14 @@ export default function OnlineOrderPage() {
                 {/* Create Order Button */}
                 <button
                   onClick={() => setIsCreateModalOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: "#FF5722" }}
+                  disabled={!canEditOnlineOrders}
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-opacity"
+                  style={{
+                    backgroundColor: canEditOnlineOrders ? "#FF5722" : "#ccc",
+                    cursor: canEditOnlineOrders ? "pointer" : "not-allowed",
+                    opacity: canEditOnlineOrders ? 1 : 0.6
+                  }}
+                  title={!canEditOnlineOrders ? "You do not have permission to create orders" : ""}
                 >
                   <Plus size={20} />
                   <span>Create Online Order</span>
@@ -2835,12 +2846,13 @@ export default function OnlineOrderPage() {
                         <th className="text-left py-3 px-2 w-[40px]">
                           <input
                             type="checkbox"
-                            className="w-4 h-4 cursor-pointer"
+                            className={`w-4 h-4 ${canEditOnlineOrders ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                             checked={
                               selectedRows.size === currentOrders.length &&
                               currentOrders.length > 0
                             }
                             onChange={(e) => handleSelectAll(e.target.checked)}
+                            disabled={!canEditOnlineOrders}
                           />
                         </th>
                         <th className="text-left py-3 px-2 font-bold text-xs w-[180px]" style={{ color: "#5C2E1F" }}>
@@ -2945,11 +2957,12 @@ export default function OnlineOrderPage() {
                             <td className="py-3 px-2 w-[40px]">
                               <input
                                 type="checkbox"
-                                className="w-4 h-4 cursor-pointer"
+                                className={`w-4 h-4 ${canEditOnlineOrders ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                                 checked={selectedRows.has(order.id)}
                                 onChange={(e) =>
                                   handleSelectRow(order.id, e.target.checked)
                                 }
+                                disabled={!canEditOnlineOrders}
                               />
                             </td>
                             <td className="py-3 px-2 text-xs w-[180px]" title={order.customer_name}>
@@ -2973,8 +2986,9 @@ export default function OnlineOrderPage() {
                                 onChange={(e) =>
                                   handleStatusUpdate(order.id, e.target.value)
                                 }
-                                disabled={updatingStatus[order.id]}
-                                className={`px-2 py-1 text-xs font-semibold rounded border-0 cursor-pointer ${getStatusBadge(order.status)} ${updatingStatus[order.id] ? "opacity-50 cursor-wait" : ""}`}
+                                disabled={updatingStatus[order.id] || !canEditOnlineOrders}
+                                className={`px-2 py-1 text-xs font-semibold rounded border-0 ${getStatusBadge(order.status)} ${updatingStatus[order.id] ? "opacity-50 cursor-wait" : ""} ${!canEditOnlineOrders ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+                                title={!canEditOnlineOrders ? "You do not have permission to change status" : ""}
                               >
                                 <option value="Pending">Pending</option>
                                 <option value="Completed">Completed</option>
@@ -3542,9 +3556,10 @@ export default function OnlineOrderPage() {
                         setShowEditOrderModal(true);
                       }
                     }}
-                    disabled={loading}
+                    disabled={loading || !canEditOnlineOrders}
                     className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ padding: "2px 6px" }}
+                    title={!canEditOnlineOrders ? "You do not have permission to edit orders" : ""}
                   >
                     <svg
                       width="16"
@@ -3574,9 +3589,10 @@ export default function OnlineOrderPage() {
 
               <button
                 onClick={() => setIsDeleteConfirmOpen(true)}
-                disabled={loading}
+                disabled={loading || !canEditOnlineOrders}
                 className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ padding: "2px 6px" }}
+                title={!canEditOnlineOrders ? "You do not have permission to delete orders" : ""}
               >
                 <X size={16} />
                 <span className="text-sm">Remove</span>

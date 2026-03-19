@@ -9,6 +9,7 @@ import LabelGenerator from '@/app/components/orderLabel/page';
 import EditOrderModal from '@/app/components/editOrder/page';
 import { useState, useEffect, Fragment, useRef } from 'react';
 import { Search, Filter, Plus, X, Check, ChevronDown, Tag } from 'lucide-react';
+import { useAccessControl } from '@/lib/accessControl';
 import {
   downloadMultiStickerPDF,
   downloadAllOrderStickersPDF,
@@ -84,6 +85,10 @@ const loadImageAsBase64 = (src: string): Promise<string> => {
 };
 
 export default function OrderPage() {
+  // Access Control
+  const { canEdit } = useAccessControl();
+  const canEditOrders = canEdit('orders', 'order');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [orders, setOrders] = useState([]);
@@ -2601,10 +2606,16 @@ const handleViewInvoice = async (order) => {
               </div>
 
                 {/* Create Order Button */}
-               <button 
+               <button
                 onClick={() => setShowCreateOrderModal(true)}
-                className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-opacity"
-                style={{ backgroundColor: '#FF5722' }}
+                disabled={!canEditOrders}
+                className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-opacity"
+                style={{
+                  backgroundColor: canEditOrders ? '#FF5722' : '#ccc',
+                  cursor: canEditOrders ? 'pointer' : 'not-allowed',
+                  opacity: canEditOrders ? 1 : 0.6
+                }}
+                title={!canEditOrders ? 'You do not have permission to create orders' : ''}
               >
                 <Plus size={20} />
                 <span>Create Order</span>
@@ -2657,9 +2668,10 @@ const handleViewInvoice = async (order) => {
                         <th className="text-left py-3 px-2 w-[40px]">
                           <input
                             type="checkbox"
-                            className="w-4 h-4 cursor-pointer"
+                            className={`w-4 h-4 ${canEditOrders ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                             checked={selectedRows.size === currentOrders.length && currentOrders.length > 0}
                             onChange={(e) => handleSelectAll(e.target.checked)}
+                            disabled={!canEditOrders}
                           />
                         </th>
                         <th className="text-left py-3 px-2 font-bold text-xs w-[180px]" style={{ color: '#5C2E1F' }}>
@@ -2757,9 +2769,10 @@ const handleViewInvoice = async (order) => {
                         <td className="py-3 px-2 w-[40px]">
                           <input
                             type="checkbox"
-                            className="w-4 h-4 cursor-pointer"
+                            className={`w-4 h-4 ${canEditOrders ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                             checked={selectedRows.has(order.id)}
                             onChange={(e) => handleSelectRow(order.id, e.target.checked)}
+                            disabled={!canEditOrders}
                           />
                         </td>
                         <td className="py-3 px-2 text-xs w-[180px]" title={order.company_name}>
@@ -2781,10 +2794,11 @@ const handleViewInvoice = async (order) => {
                           <select
                             value={order.status || 'pending'}
                             onChange={(e) => handleStatusUpdate(order.id, e.target.value)}
-                            disabled={updatingStatus[order.id]}
-                            className={`px-2 py-1 text-xs font-semibold rounded border-0 cursor-pointer ${getStatusBadge(order.status)} ${
+                            disabled={updatingStatus[order.id] || !canEditOrders}
+                            className={`px-2 py-1 text-xs font-semibold rounded border-0 ${getStatusBadge(order.status)} ${
                               updatingStatus[order.id] ? 'opacity-50 cursor-wait' : ''
-                            }`}
+                            } ${!canEditOrders ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                            title={!canEditOrders ? 'You do not have permission to change status' : ''}
                           >
                             <option value="Pending">Pending</option>
                             <option value="Completed">Completed</option>
@@ -3674,9 +3688,10 @@ const handleViewInvoice = async (order) => {
                 <>
                   <button
                     onClick={handleEdit}
-                    disabled={loading}
+                    disabled={loading || !canEditOrders}
                     className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ padding: '2px 6px' }}
+                    title={!canEditOrders ? 'You do not have permission to edit orders' : ''}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -3684,16 +3699,17 @@ const handleViewInvoice = async (order) => {
                     </svg>
                     <span className="text-sm">Edit</span>
                   </button>
-                  
+
                   <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
                 </>
               )}
               
               <button
                 onClick={() => setIsDeleteConfirmOpen(true)}
-                disabled={loading}
+                disabled={loading || !canEditOrders}
                 className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ padding: '2px 6px' }}
+                title={!canEditOrders ? 'You do not have permission to delete orders' : ''}
               >
                 <X size={16} />
                 <span className="text-sm">Remove</span>

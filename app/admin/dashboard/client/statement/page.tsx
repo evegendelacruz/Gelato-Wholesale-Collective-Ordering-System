@@ -291,27 +291,38 @@ export default function ClientStatementPage() {
             }
           }
         } else {
-          // Verify client exists before creating statement
-          const { data: clientExists, error: clientError } = await supabase
+          // Verify client exists and get client data before creating statement
+          const { data: clientData, error: clientError } = await supabase
             .from('client_user')
-            .select('client_auth_id')
+            .select('client_auth_id, client_businessName, client_email, client_person_incharge, client_business_contact, ad_streetName, ad_country, ad_postal')
             .eq('client_auth_id', firstOrder.client_auth_id)
             .single();
 
-          if (clientError || !clientExists) {
+          if (clientError || !clientData) {
             console.error(`Client ${firstOrder.client_auth_id} does not exist, skipping statement creation`);
             continue;
           }
 
-          // Create new statement
+          // Generate unique statement_id (format: STM-YYYYMMDD-XXXX)
+          const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+          const newStatementId = `STM-${dateStr}-${randomSuffix}`;
+
+          // Create new statement with all required fields
           const { data: newStatement, error: statementError } = await supabase
             .from('client_statement')
             .insert({
+              statement_id: newStatementId,
               client_auth_id: firstOrder.client_auth_id,
+              company_name: clientData.client_businessName || 'Unknown Company',
               statement_month: statementMonthStr,
               total_amount: totalAmount,
+              invoice_count: orders.length,
               date_generated: new Date().toISOString(),
-              aging_category: '1-30_days' // Set default aging category
+              client_email: clientData.client_email,
+              client_person_incharge: clientData.client_person_incharge,
+              client_business_contact: clientData.client_business_contact,
+              business_address: [clientData.ad_streetName, clientData.ad_country, clientData.ad_postal].filter(Boolean).join(', ') || null
             })
             .select('statement_id')
             .single();
@@ -320,9 +331,12 @@ export default function ClientStatementPage() {
             console.error('Error creating statement:', {
               error: statementError,
               details: {
+                statement_id: newStatementId,
                 client_auth_id: firstOrder.client_auth_id,
+                company_name: clientData.client_businessName,
                 statement_month: statementMonthStr,
-                total_amount: totalAmount
+                total_amount: totalAmount,
+                invoice_count: orders.length
               }
             });
             continue;

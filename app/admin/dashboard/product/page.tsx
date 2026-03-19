@@ -15,6 +15,7 @@ import {
   Tag,
 } from "lucide-react";
 import supabase from "@/lib/client";
+import { useAccessControl } from "@/lib/accessControl";
 import Image from "next/image";
 import {
   generateNextBbdCode,
@@ -90,6 +91,10 @@ interface Message {
 }
 
 export default function ProductPage() {
+  // Access Control
+  const { canEdit } = useAccessControl();
+  const canEditProducts = canEdit('product', 'product-list');
+
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1849,9 +1854,10 @@ export default function ProductPage() {
                 <>
                   <button
                     onClick={handleEdit}
-                    disabled={loading}
+                    disabled={loading || !canEditProducts}
                     className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ padding: "2px 6px" }}
+                    title={!canEditProducts ? "You do not have permission to edit products" : ""}
                   >
                     <svg
                       width="16"
@@ -1881,9 +1887,10 @@ export default function ProductPage() {
 
               <button
                 onClick={() => setIsDeleteConfirmOpen(true)}
-                disabled={loading}
+                disabled={loading || !canEditProducts}
                 className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ padding: "2px 6px" }}
+                title={!canEditProducts ? "You do not have permission to delete products" : ""}
               >
                 <X size={16} />
                 <span className="text-sm">Remove</span>
@@ -2114,9 +2121,13 @@ export default function ProductPage() {
                 {/* Add New Product Button */}
                 <button
                   onClick={openModal}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: "#FF5722" }}
+                  disabled={loading || !canEditProducts}
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    backgroundColor: canEditProducts ? "#FF5722" : "#ccc",
+                    cursor: canEditProducts ? "pointer" : "not-allowed"
+                  }}
+                  title={!canEditProducts ? "You do not have permission to add products" : ""}
                 >
                   <Plus size={20} />
                   <span>Add New Product</span>
@@ -2132,12 +2143,13 @@ export default function ProductPage() {
                     <th className="text-left py-2 px-3">
                       <input
                         type="checkbox"
-                        className="w-4 h-4 cursor-pointer"
+                        className={`w-4 h-4 ${canEditProducts ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                         checked={
                           selectedRows.size === currentProducts.length &&
                           currentProducts.length > 0
                         }
                         onChange={(e) => handleSelectAll(e.target.checked)}
+                        disabled={!canEditProducts}
                       />
                     </th>
                     <th
@@ -2240,11 +2252,12 @@ export default function ProductPage() {
                         >
                           <input
                             type="checkbox"
-                            className="w-4 h-4 cursor-pointer"
+                            className={`w-4 h-4 ${canEditProducts ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                             checked={selectedRows.has(product.id)}
                             onChange={(e) =>
                               handleSelectRow(product.id, e.target.checked)
                             }
+                            disabled={!canEditProducts}
                           />
                         </td>
                         <td className="py-2 px-3 text-xs">
@@ -2733,7 +2746,8 @@ export default function ProductPage() {
                                     type="checkbox"
                                     checked={selectedClients.has(client.client_auth_id)}
                                     onChange={(e) => handleClientSelection(client.client_auth_id, e.target.checked)}
-                                    className="w-4 h-4 cursor-pointer"
+                                    className={`w-4 h-4 ${canEditProducts ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                                    disabled={!canEditProducts}
                                   />
                                   <div className="flex-1">
                                     <p className="text-sm font-medium text-gray-900">{client.client_businessName}</p>

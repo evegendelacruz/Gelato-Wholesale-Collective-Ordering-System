@@ -6,6 +6,7 @@ import Header from '@/app/components/header/page';
 import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import supabase from '@/lib/client';
 import Image from 'next/image';
+import { useAccessControl } from '@/lib/accessControl';
 
 // Helper function to load image as base64 for PDF
 const loadImageAsBase64 = (src: string): Promise<string> => {
@@ -100,6 +101,8 @@ interface FooterOption {
 }
 
 export default function ClientQuotationPage() {
+  const { canEdit } = useAccessControl();
+  const canEditQuotations = canEdit('client-account', 'quotation');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -1416,7 +1419,8 @@ export default function ClientQuotationPage() {
                         type="checkbox"
                         checked={currentQuotations.length > 0 && selectedQuotationIds.length === currentQuotations.length}
                         onChange={handleSelectAll}
-                        className="w-4 h-4 accent-orange-500 cursor-pointer"
+                        className={`w-4 h-4 accent-orange-500 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                        disabled={!canEditQuotations}
                       />
                     </th>
                     <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
@@ -1458,7 +1462,8 @@ export default function ClientQuotationPage() {
                             type="checkbox"
                             checked={selectedQuotationIds.includes(quotation.id)}
                             onChange={() => handleSelectQuotation(quotation.id)}
-                            className="w-4 h-4 accent-orange-500 cursor-pointer"
+                            className={`w-4 h-4 accent-orange-500 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                            disabled={!canEditQuotations}
                           />
                         </td>
                         <td className="py-2 px-3 text-xs">{quotation.company_name}</td>

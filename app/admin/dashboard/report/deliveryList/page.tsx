@@ -6,6 +6,7 @@ import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import supabase from "@/lib/client";
+import { useAccessControl } from '@/lib/accessControl';
 
 
 interface OrderItem {
@@ -62,6 +63,8 @@ interface ReportDataFromDB {
 }
 
 export default function DeliveryReportPage() {
+  const { canEdit } = useAccessControl();
+  const canEditReports = canEdit('report', 'delivery-list');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [reports, setReports] = useState<Report[]>([]);
@@ -831,7 +834,11 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
                     <th className="text-left py-3 px-4">
-                      <input type="checkbox" className="w-4 h-4" />
+                      <input
+                        type="checkbox"
+                        className={`w-4 h-4 ${canEditReports ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                        disabled={!canEditReports}
+                      />
                     </th>
                     <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
                       SUMMARY ID
@@ -876,7 +883,11 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                     return (
                         <tr key={report.id} className="border-b border-gray-200 hover:bg-gray-50">
                         <td className="py-3 px-4">
-                            <input type="checkbox" className="w-4 h-4" />
+                            <input
+                              type="checkbox"
+                              className={`w-4 h-4 ${canEditReports ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                              disabled={!canEditReports}
+                            />
                         </td>
                         <td className="py-3 px-4 text-sm font-medium">{report.summary_id}</td>
                         <td className="py-3 px-4 text-sm">{year} ({deliveryDatesCount} dates)</td>
