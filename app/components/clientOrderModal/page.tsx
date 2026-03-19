@@ -3,6 +3,13 @@ import { useState, useEffect, useRef } from 'react';
 import { X, Search, Trash2, Check, Plus } from 'lucide-react';
 import supabase from '@/lib/client';
 import Image from 'next/image';
+import {
+  generateNextBbdCode,
+  generateNextPbnCode,
+  generate30DigitBarcode,
+  generate13DigitBarcode,
+  generateNextGpbnCode,
+} from '@/lib/stickerGenerator';
 
 interface Client {
   client_id: string;
@@ -28,6 +35,12 @@ interface Product {
   product_allergen: string | null;
   product_description: string | null;
   product_image: string | null;
+  // Barcode fields
+  sticker_bbd_code: string | null;
+  sticker_pbn_code: string | null;
+  sticker_barcode: string | null;
+  barcode_13digit: string | null;
+  sticker_gpbn_code: string | null;
 }
 
 interface ClientProduct {
@@ -57,6 +70,12 @@ interface OrderItem {
   is_from_product_list: boolean;
   publish_to_client: boolean;  // Add product to client's assigned products
   add_to_product_list: boolean; // For manual items: add to product_list table
+  // Barcode fields from product_list
+  sticker_bbd_code: string | null;
+  sticker_pbn_code: string | null;
+  sticker_barcode: string | null;
+  barcode_13digit: string | null;
+  sticker_gpbn_code: string | null;
 }
 
 interface ClientOrderModalProps {
@@ -264,7 +283,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       setLoadingProducts(true);
       const { data, error } = await supabase
         .from('product_list')
-        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_price, product_cost, product_milkbased, product_sugarbased, product_ingredient, product_allergen, product_description, product_image')
+        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_price, product_cost, product_milkbased, product_sugarbased, product_ingredient, product_allergen, product_description, product_image, sticker_bbd_code, sticker_pbn_code, sticker_barcode, barcode_13digit, sticker_gpbn_code')
         .eq('is_deleted', false)
         .order('product_name', { ascending: true });
 
@@ -392,7 +411,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     try {
       setLoading(true);
       
-      // Fetch client products with full product details including ingredients
+      // Fetch client products with full product details including ingredients and barcodes
       const { data: productsData, error: productsError } = await supabase
         .from('client_product')
         .select(`
@@ -411,7 +430,12 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             product_ingredient,
             product_allergen,
             product_description,
-            product_image
+            product_image,
+            sticker_bbd_code,
+            sticker_pbn_code,
+            sticker_barcode,
+            barcode_13digit,
+            sticker_gpbn_code
           )
         `)
         .eq('client_auth_id', clientAuthId)
@@ -512,7 +536,13 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       is_manual: false,
       is_from_product_list: true,
       publish_to_client: false, // Already assigned to client
-      add_to_product_list: false
+      add_to_product_list: false,
+      // Barcode fields from product_list
+      sticker_bbd_code: clientProduct.product_list.sticker_bbd_code || null,
+      sticker_pbn_code: clientProduct.product_list.sticker_pbn_code || null,
+      sticker_barcode: clientProduct.product_list.sticker_barcode || null,
+      barcode_13digit: clientProduct.product_list.barcode_13digit || null,
+      sticker_gpbn_code: clientProduct.product_list.sticker_gpbn_code || null
     };
     setOrderItems([...orderItems, newItem]);
   };
@@ -543,7 +573,13 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       is_manual: true,
       is_from_product_list: false,
       publish_to_client: false, // Default to false - user must explicitly enable via confirmation modal
-      add_to_product_list: true // Default to true for manual items
+      add_to_product_list: true, // Default to true for manual items
+      // Manual items don't have barcodes yet - they'll get them when added to product_list
+      sticker_bbd_code: null,
+      sticker_pbn_code: null,
+      sticker_barcode: null,
+      barcode_13digit: null,
+      sticker_gpbn_code: null
     };
 
     setOrderItems([...orderItems, newItem]);
@@ -680,7 +716,13 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       is_manual: true,
       is_from_product_list: false,
       publish_to_client: false, // Default to false - user must explicitly enable via confirmation modal
-      add_to_product_list: false
+      add_to_product_list: false,
+      // Empty items don't have barcodes
+      sticker_bbd_code: null,
+      sticker_pbn_code: null,
+      sticker_barcode: null,
+      barcode_13digit: null,
+      sticker_gpbn_code: null
     };
     setOrderItems([...orderItems, newItem]);
   };
@@ -722,7 +764,13 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       subtotal: newItems[index].quantity * (product.product_price || 0),
       is_manual: false,
       is_from_product_list: true,
-      publish_to_client: false // Default to false - user must explicitly enable via confirmation modal
+      publish_to_client: false, // Default to false - user must explicitly enable via confirmation modal
+      // Copy barcode fields from product
+      sticker_bbd_code: product.sticker_bbd_code || null,
+      sticker_pbn_code: product.sticker_pbn_code || null,
+      sticker_barcode: product.sticker_barcode || null,
+      barcode_13digit: product.barcode_13digit || null,
+      sticker_gpbn_code: product.sticker_gpbn_code || null
     };
 
     newItems[index] = updatedItem;
@@ -809,6 +857,50 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             // Generate product ID and add to product_list
             const productId = await generateProductId();
 
+            // Generate unique sequential barcodes for the new product
+            const { data: allProducts } = await supabase
+              .from('product_list')
+              .select('sticker_bbd_code, sticker_pbn_code, barcode_13digit, sticker_gpbn_code')
+              .order('id', { ascending: false });
+
+            // Find highest existing codes
+            let highestBbdCode: string | null = null;
+            let highestPbnCode: string | null = null;
+            let highestBarcode13: string | null = null;
+            let highestGpbnCode: string | null = null;
+
+            if (allProducts) {
+              for (const p of allProducts) {
+                if (p.sticker_bbd_code) {
+                  const currentPrefix = parseInt(p.sticker_bbd_code.substring(0, 4) || '0', 10);
+                  const highestPrefix = parseInt(highestBbdCode?.substring(0, 4) || '0', 10);
+                  if (currentPrefix > highestPrefix) highestBbdCode = p.sticker_bbd_code;
+                }
+                if (p.sticker_pbn_code) {
+                  const currentNum = parseInt(p.sticker_pbn_code.replace('PBN', '') || '0', 10);
+                  const highestNum = parseInt(highestPbnCode?.replace('PBN', '') || '0', 10);
+                  if (currentNum > highestNum) highestPbnCode = p.sticker_pbn_code;
+                }
+                if (p.barcode_13digit) {
+                  const currentNum = parseInt(p.barcode_13digit || '0', 10);
+                  const highestNum = parseInt(highestBarcode13 || '0', 10);
+                  if (currentNum > highestNum) highestBarcode13 = p.barcode_13digit;
+                }
+                if (p.sticker_gpbn_code) {
+                  const currentNum = parseInt(p.sticker_gpbn_code.replace('GPBN', '') || '0', 10);
+                  const highestNum = parseInt(highestGpbnCode?.replace('GPBN', '') || '0', 10);
+                  if (currentNum > highestNum) highestGpbnCode = p.sticker_gpbn_code;
+                }
+              }
+            }
+
+            // Generate next sequential barcodes
+            const newBbdCode = generateNextBbdCode(highestBbdCode);
+            const newPbnCode = generateNextPbnCode(highestPbnCode);
+            const newBarcode = generate30DigitBarcode(newBbdCode, newPbnCode);
+            const newBarcode13 = generate13DigitBarcode(highestBarcode13);
+            const newGpbnCode = generateNextGpbnCode(highestGpbnCode);
+
             const { data: newProduct, error: productError } = await supabase
               .from('product_list')
               .insert({
@@ -822,19 +914,66 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
                 product_price: item.unit_price || 0,
                 product_cost: item.product_cost || null,
                 product_ingredient: item.product_ingredient || null,
-                product_created_at: new Date().toISOString()
+                product_allergen: item.product_allergen || null,
+                product_description: item.product_description || null,
+                product_created_at: new Date().toISOString(),
+                // Barcode fields
+                sticker_bbd_code: newBbdCode,
+                sticker_pbn_code: newPbnCode,
+                sticker_barcode: newBarcode,
+                barcode_13digit: newBarcode13,
+                sticker_gpbn_code: newGpbnCode
               })
-              .select('id')
+              .select('id, sticker_bbd_code, sticker_pbn_code, sticker_barcode, barcode_13digit, sticker_gpbn_code')
               .single();
 
             if (productError) {
               console.error('Error adding product to product_list:', productError);
             } else if (newProduct) {
               productIdMap[item.product_name] = newProduct.id;
-              console.log(`Added product "${item.product_name}" to product_list with ID: ${newProduct.id}`);
+              // Update the item's barcode fields so they get saved to order_item
+              item.sticker_bbd_code = newProduct.sticker_bbd_code;
+              item.sticker_pbn_code = newProduct.sticker_pbn_code;
+              item.sticker_barcode = newProduct.sticker_barcode;
+              item.barcode_13digit = newProduct.barcode_13digit;
+              item.sticker_gpbn_code = newProduct.sticker_gpbn_code;
+              console.log(`Added product "${item.product_name}" to product_list with ID: ${newProduct.id} and barcodes`);
             }
           } else {
             productIdMap[item.product_name] = existingProduct.id;
+            // Fetch existing product's barcodes to use in order item
+            const { data: existingProductData } = await supabase
+              .from('product_list')
+              .select('sticker_bbd_code, sticker_pbn_code, sticker_barcode, barcode_13digit, sticker_gpbn_code')
+              .eq('id', existingProduct.id)
+              .single();
+
+            if (existingProductData) {
+              item.sticker_bbd_code = existingProductData.sticker_bbd_code;
+              item.sticker_pbn_code = existingProductData.sticker_pbn_code;
+              item.sticker_barcode = existingProductData.sticker_barcode;
+              item.barcode_13digit = existingProductData.barcode_13digit;
+              item.sticker_gpbn_code = existingProductData.sticker_gpbn_code;
+            }
+          }
+        }
+
+        // Ensure ALL order items have barcodes - fetch from product_list if they have a product_id
+        for (const item of orderItems) {
+          if (item.product_id && (!item.sticker_barcode || !item.barcode_13digit)) {
+            const { data: productData } = await supabase
+              .from('product_list')
+              .select('sticker_bbd_code, sticker_pbn_code, sticker_barcode, barcode_13digit, sticker_gpbn_code')
+              .eq('id', item.product_id)
+              .single();
+
+            if (productData) {
+              item.sticker_bbd_code = productData.sticker_bbd_code;
+              item.sticker_pbn_code = productData.sticker_pbn_code;
+              item.sticker_barcode = productData.sticker_barcode;
+              item.barcode_13digit = productData.barcode_13digit;
+              item.sticker_gpbn_code = productData.sticker_gpbn_code;
+            }
           }
         }
 
@@ -929,7 +1068,13 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             product_sugarbase: item.product_sugarbase || 0,
             label_ingredients: item.product_ingredient || null,
             label_allergens: item.product_allergen || null,
-            product_description: item.product_description || null
+            product_description: item.product_description || null,
+            // Barcode fields
+            sticker_bbd_code: item.sticker_bbd_code || null,
+            sticker_pbn_code: item.sticker_pbn_code || null,
+            sticker_barcode: item.sticker_barcode || null,
+            barcode_13digit: item.barcode_13digit || null,
+            sticker_gpbn_code: item.sticker_gpbn_code || null
           };
         });
 
@@ -962,7 +1107,13 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             product_sugarbase: item.product_sugarbase || 0,
             label_ingredients: item.product_ingredient || null,
             label_allergens: item.product_allergen || null,
-            product_description: item.product_description || null
+            product_description: item.product_description || null,
+            // Barcode fields
+            sticker_bbd_code: item.sticker_bbd_code || null,
+            sticker_pbn_code: item.sticker_pbn_code || null,
+            sticker_barcode: item.sticker_barcode || null,
+            barcode_13digit: item.barcode_13digit || null,
+            sticker_gpbn_code: item.sticker_gpbn_code || null
           };
         });
 

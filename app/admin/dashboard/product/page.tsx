@@ -286,14 +286,32 @@ export default function ProductPage() {
     setStickerType("barcode"); // Default to barcode sticker
 
     try {
-      // Check if product has sticker codes, if not generate them
-      let bbdCode = product.sticker_bbd_code;
-      let pbnCode = product.sticker_pbn_code;
-      let barcode = product.sticker_barcode;
+      // ALWAYS fetch the latest product data from database to get current barcodes
+      const { data: freshProductData, error: fetchError } = await supabase
+        .from('product_list')
+        .select('*')
+        .eq('id', product.id)
+        .single();
 
-      // New sticker codes
-      let barcode13 = product.barcode_13digit;
-      let gpbn = product.sticker_gpbn_code;
+      if (fetchError) {
+        console.error('Error fetching product data:', fetchError);
+        throw fetchError;
+      }
+
+      // Use fresh data from database
+      let bbdCode = freshProductData?.sticker_bbd_code || null;
+      let pbnCode = freshProductData?.sticker_pbn_code || null;
+      let barcode = freshProductData?.sticker_barcode || null;
+      let barcode13 = freshProductData?.barcode_13digit || null;
+      let gpbn = freshProductData?.sticker_gpbn_code || null;
+
+      console.log('Fetched product barcodes from DB:', {
+        bbdCode,
+        pbnCode,
+        barcode,
+        barcode13,
+        gpbn
+      });
 
       // Generate old sticker codes if needed
       if (!bbdCode || !pbnCode || !barcode) {
@@ -341,30 +359,47 @@ export default function ProductPage() {
         gpbn = generateNextGpbnCode(lastGpbn?.sticker_gpbn_code || null);
       }
 
-      // Save all generated codes to the database
-      const updateData: Record<string, string | null> = {
+      // Only update database if we generated new codes
+      const needsUpdate =
+        bbdCode !== freshProductData?.sticker_bbd_code ||
+        pbnCode !== freshProductData?.sticker_pbn_code ||
+        barcode !== freshProductData?.sticker_barcode ||
+        barcode13 !== freshProductData?.barcode_13digit ||
+        gpbn !== freshProductData?.sticker_gpbn_code;
+
+      if (needsUpdate) {
+        const updateData: Record<string, string | null> = {
+          sticker_bbd_code: bbdCode,
+          sticker_pbn_code: pbnCode,
+          sticker_barcode: barcode,
+          barcode_13digit: barcode13,
+          sticker_gpbn_code: gpbn,
+        };
+
+        await supabase
+          .from('product_list')
+          .update(updateData)
+          .eq('id', product.id);
+
+        // Update local state
+        setProducts(prev => prev.map(p =>
+          p.id === product.id
+            ? { ...p, ...updateData }
+            : p
+        ));
+      }
+
+      // Update the product reference with all fresh data
+      const updatedProduct: Product = {
+        ...product,
+        ...freshProductData,
         sticker_bbd_code: bbdCode,
         sticker_pbn_code: pbnCode,
         sticker_barcode: barcode,
         barcode_13digit: barcode13,
         sticker_gpbn_code: gpbn,
       };
-
-      await supabase
-        .from('product_list')
-        .update(updateData)
-        .eq('id', product.id);
-
-      // Update local state
-      setProducts(prev => prev.map(p =>
-        p.id === product.id
-          ? { ...p, ...updateData }
-          : p
-      ));
-
-      // Update the product reference
-      product = { ...product, ...updateData } as Product;
-      setStickerProduct(product);
+      setStickerProduct(updatedProduct);
 
       // Set editable codes (old sticker)
       setEditableBbdCode(bbdCode!);
@@ -376,13 +411,13 @@ export default function ProductPage() {
       setGpbnCode(gpbn!);
 
       // Calculate BBD based on shelf life
-      const bbdDateValue = calculateBBD(product.product_shelflife || '3 months');
+      const bbdDateValue = calculateBBD(updatedProduct.product_shelflife || '3 months');
       setBbdDate(bbdDateValue);
 
       // Generate preview for old sticker
       const stickerData: StickerData = {
-        productName: product.product_name,
-        ingredients: product.product_ingredient || 'No ingredients listed',
+        productName: updatedProduct.product_name,
+        ingredients: updatedProduct.product_ingredient || 'No ingredients listed',
         bbdCode: bbdCode!,
         pbnCode: pbnCode!,
         barcode: barcode!
@@ -392,7 +427,7 @@ export default function ProductPage() {
 
       // Generate Barcode Sticker preview
       const barcodeStickerData: BarcodeStickerData = {
-        productName: product.product_name,
+        productName: updatedProduct.product_name,
         barcode13: barcode13!
       };
       const barcodePreview = generateBarcodeStickerBlobUrl(barcodeStickerData);
@@ -400,8 +435,8 @@ export default function ProductPage() {
 
       // Generate Product Sticker preview
       const productStickerData: ProductStickerData = {
-        productName: product.product_name,
-        ingredients: product.product_ingredient || 'No ingredients listed',
+        productName: updatedProduct.product_name,
+        ingredients: updatedProduct.product_ingredient || 'No ingredients listed',
         bbd: bbdDateValue,
         gpbnCode: gpbn!
       };
@@ -579,6 +614,110 @@ export default function ProductPage() {
     }
   };
 
+  // Function to assign unique sequential barcodes to all products
+  const assignBarcodesToProducts = async (products: Product[]) => {
+    try {
+      // Sort ALL products by id ascending for consistent sequential assignment
+      const sortedProducts = [...products].sort((a, b) => a.id - b.id);
+
+      // Find the highest existing codes across ALL products
+      let highestBbdCode: string | null = null;
+      let highestPbnCode: string | null = null;
+      let highestBarcode13: string | null = null;
+      let highestGpbnCode: string | null = null;
+
+      for (const p of sortedProducts) {
+        if (p.sticker_bbd_code) {
+          const currentPrefix = parseInt(p.sticker_bbd_code.substring(0, 4) || '0', 10);
+          const highestPrefix = parseInt(highestBbdCode?.substring(0, 4) || '0', 10);
+          if (currentPrefix > highestPrefix) {
+            highestBbdCode = p.sticker_bbd_code;
+          }
+        }
+        if (p.sticker_pbn_code) {
+          const currentNum = parseInt(p.sticker_pbn_code.replace('PBN', '') || '0', 10);
+          const highestNum = parseInt(highestPbnCode?.replace('PBN', '') || '0', 10);
+          if (currentNum > highestNum) {
+            highestPbnCode = p.sticker_pbn_code;
+          }
+        }
+        if (p.barcode_13digit) {
+          const currentNum = parseInt(p.barcode_13digit || '0', 10);
+          const highestNum = parseInt(highestBarcode13 || '0', 10);
+          if (currentNum > highestNum) {
+            highestBarcode13 = p.barcode_13digit;
+          }
+        }
+        if (p.sticker_gpbn_code) {
+          const currentNum = parseInt(p.sticker_gpbn_code.replace('GPBN', '') || '0', 10);
+          const highestNum = parseInt(highestGpbnCode?.replace('GPBN', '') || '0', 10);
+          if (currentNum > highestNum) {
+            highestGpbnCode = p.sticker_gpbn_code;
+          }
+        }
+      }
+
+      // Track current codes for sequential assignment
+      let currentBbdCode = highestBbdCode;
+      let currentPbnCode = highestPbnCode;
+      let currentBarcode13 = highestBarcode13;
+      let currentGpbnCode = highestGpbnCode;
+
+      // Assign barcodes to products that are missing ANY barcode field
+      for (const product of sortedProducts) {
+        const needsOldCodes = !product.sticker_bbd_code || !product.sticker_pbn_code || !product.sticker_barcode;
+        const needsNewCodes = !product.barcode_13digit || !product.sticker_gpbn_code;
+
+        if (needsOldCodes || needsNewCodes) {
+          const updateData: Record<string, string | null> = {};
+
+          // Generate old sticker codes if missing
+          if (needsOldCodes) {
+            currentBbdCode = generateNextBbdCode(currentBbdCode);
+            currentPbnCode = generateNextPbnCode(currentPbnCode);
+            const barcode = generate30DigitBarcode(currentBbdCode, currentPbnCode);
+
+            updateData.sticker_bbd_code = currentBbdCode;
+            updateData.sticker_pbn_code = currentPbnCode;
+            updateData.sticker_barcode = barcode;
+
+            // Update local product object
+            product.sticker_bbd_code = currentBbdCode;
+            product.sticker_pbn_code = currentPbnCode;
+            product.sticker_barcode = barcode;
+          }
+
+          // Generate new sticker codes if missing
+          if (needsNewCodes) {
+            currentBarcode13 = generate13DigitBarcode(currentBarcode13);
+            currentGpbnCode = generateNextGpbnCode(currentGpbnCode);
+
+            updateData.barcode_13digit = currentBarcode13;
+            updateData.sticker_gpbn_code = currentGpbnCode;
+
+            // Update local product object
+            product.barcode_13digit = currentBarcode13;
+            product.sticker_gpbn_code = currentGpbnCode;
+          }
+
+          // Update database
+          const { error: updateError } = await supabase
+            .from('product_list')
+            .update(updateData)
+            .eq('id', product.id);
+
+          if (updateError) {
+            console.error(`Error updating barcodes for product ${product.id}:`, updateError);
+          } else {
+            console.log(`Assigned barcodes to product ${product.id} (${product.product_name}):`, updateData);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error assigning barcodes to products:', error);
+    }
+  };
+
   useEffect(() => {
     fetchProducts();
   }, []);
@@ -617,53 +756,9 @@ export default function ProductPage() {
 
       const products = data || [];
 
-      // Auto-assign codes to products without them
-      const productsWithoutCodes = products.filter(
-        p => !p.sticker_bbd_code || !p.sticker_pbn_code || !p.sticker_barcode
-      );
-
-      if (productsWithoutCodes.length > 0) {
-        // Get the last assigned codes from products that have them
-        const productsWithCodes = products.filter(p => p.sticker_bbd_code && p.sticker_pbn_code);
-        let currentBbdCode = productsWithCodes.length > 0
-          ? productsWithCodes.reduce((latest, p) => {
-              const pPrefix = parseInt(p.sticker_bbd_code?.substring(0, 4) || '0', 10);
-              const latestPrefix = parseInt(latest?.substring(0, 4) || '0', 10);
-              return pPrefix > latestPrefix ? p.sticker_bbd_code : latest;
-            }, productsWithCodes[0].sticker_bbd_code)
-          : null;
-        let currentPbnCode = productsWithCodes.length > 0
-          ? productsWithCodes.reduce((latest, p) => {
-              const pNum = parseInt(p.sticker_pbn_code?.replace('PBN', '') || '0', 10);
-              const latestNum = parseInt(latest?.replace('PBN', '') || '0', 10);
-              return pNum > latestNum ? p.sticker_pbn_code : latest;
-            }, productsWithCodes[0].sticker_pbn_code)
-          : null;
-
-        // Sort by id ascending to assign in order
-        const sortedProductsWithoutCodes = [...productsWithoutCodes].sort((a, b) => a.id - b.id);
-
-        for (const product of sortedProductsWithoutCodes) {
-          currentBbdCode = generateNextBbdCode(currentBbdCode);
-          currentPbnCode = generateNextPbnCode(currentPbnCode);
-          const barcode = generate30DigitBarcode(currentBbdCode, currentPbnCode);
-
-          // Update in database
-          await supabase
-            .from('product_list')
-            .update({
-              sticker_bbd_code: currentBbdCode,
-              sticker_pbn_code: currentPbnCode,
-              sticker_barcode: barcode
-            })
-            .eq('id', product.id);
-
-          // Update local product object
-          product.sticker_bbd_code = currentBbdCode;
-          product.sticker_pbn_code = currentPbnCode;
-          product.sticker_barcode = barcode;
-        }
-      }
+      // Auto-assign ALL barcode fields to products that are missing any of them
+      // This ensures every product has a complete set of unique sequential barcodes
+      await assignBarcodesToProducts(products);
 
       setProducts(products);
     } catch (error) {
@@ -1392,17 +1487,63 @@ export default function ProductPage() {
       // Generate sticker codes for the new product
       const { data: lastProduct } = await supabase
         .from('product_list')
-        .select('sticker_bbd_code, sticker_pbn_code')
-        .not('sticker_bbd_code', 'is', null)
+        .select('sticker_bbd_code, sticker_pbn_code, barcode_13digit, sticker_gpbn_code')
         .order('id', { ascending: false })
         .limit(1)
         .single();
 
-      const newBbdCode = generateNextBbdCode(lastProduct?.sticker_bbd_code || null);
-      const newPbnCode = generateNextPbnCode(lastProduct?.sticker_pbn_code || null);
-      const newBarcode = generate30DigitBarcode(newBbdCode, newPbnCode);
+      // Find the highest codes to ensure uniqueness
+      const { data: allProducts } = await supabase
+        .from('product_list')
+        .select('sticker_bbd_code, sticker_pbn_code, barcode_13digit, sticker_gpbn_code')
+        .order('id', { ascending: false });
 
-      // Insert product into database with new fields
+      // Find highest BBD code
+      let highestBbdCode: string | null = null;
+      let highestPbnCode: string | null = null;
+      let highestBarcode13: string | null = null;
+      let highestGpbnCode: string | null = null;
+
+      if (allProducts) {
+        for (const p of allProducts) {
+          if (p.sticker_bbd_code) {
+            const currentPrefix = parseInt(p.sticker_bbd_code.substring(0, 4) || '0', 10);
+            const highestPrefix = parseInt(highestBbdCode?.substring(0, 4) || '0', 10);
+            if (currentPrefix > highestPrefix) {
+              highestBbdCode = p.sticker_bbd_code;
+            }
+          }
+          if (p.sticker_pbn_code) {
+            const currentNum = parseInt(p.sticker_pbn_code.replace('PBN', '') || '0', 10);
+            const highestNum = parseInt(highestPbnCode?.replace('PBN', '') || '0', 10);
+            if (currentNum > highestNum) {
+              highestPbnCode = p.sticker_pbn_code;
+            }
+          }
+          if (p.barcode_13digit) {
+            const currentNum = parseInt(p.barcode_13digit || '0', 10);
+            const highestNum = parseInt(highestBarcode13 || '0', 10);
+            if (currentNum > highestNum) {
+              highestBarcode13 = p.barcode_13digit;
+            }
+          }
+          if (p.sticker_gpbn_code) {
+            const currentNum = parseInt(p.sticker_gpbn_code.replace('GPBN', '') || '0', 10);
+            const highestNum = parseInt(highestGpbnCode?.replace('GPBN', '') || '0', 10);
+            if (currentNum > highestNum) {
+              highestGpbnCode = p.sticker_gpbn_code;
+            }
+          }
+        }
+      }
+
+      const newBbdCode = generateNextBbdCode(highestBbdCode);
+      const newPbnCode = generateNextPbnCode(highestPbnCode);
+      const newBarcode = generate30DigitBarcode(newBbdCode, newPbnCode);
+      const newBarcode13 = generate13DigitBarcode(highestBarcode13);
+      const newGpbnCode = generateNextGpbnCode(highestGpbnCode);
+
+      // Insert product into database with all sticker fields
       const { data: insertData, error: insertError } = await supabase
         .from("product_list")
         .insert({
@@ -1429,6 +1570,8 @@ export default function ProductPage() {
           sticker_bbd_code: newBbdCode,
           sticker_pbn_code: newPbnCode,
           sticker_barcode: newBarcode,
+          barcode_13digit: newBarcode13,
+          sticker_gpbn_code: newGpbnCode,
         })
         .select();
 

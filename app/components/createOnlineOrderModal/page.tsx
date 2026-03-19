@@ -2,6 +2,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Plus, Trash2, Check, Search } from 'lucide-react';
 import supabase from '@/lib/client';
+import {
+  generateNextBbdCode,
+  generateNextPbnCode,
+  generate30DigitBarcode,
+  generate13DigitBarcode,
+  generateNextGpbnCode,
+} from '@/lib/stickerGenerator';
 
 interface OrderItem {
   product_id: number | null;
@@ -21,6 +28,12 @@ interface OrderItem {
   add_to_product_list: boolean;
   is_from_product_list?: boolean;
   product_list_id?: number;
+  // Barcode fields from product_list
+  sticker_bbd_code: string | null;
+  sticker_pbn_code: string | null;
+  sticker_barcode: string | null;
+  barcode_13digit: string | null;
+  sticker_gpbn_code: string | null;
 }
 
 interface Product {
@@ -37,6 +50,12 @@ interface Product {
   product_ingredient: string | null;
   product_allergen: string | null;
   product_description: string | null;
+  // Barcode fields
+  sticker_bbd_code: string | null;
+  sticker_pbn_code: string | null;
+  sticker_barcode: string | null;
+  barcode_13digit: string | null;
+  sticker_gpbn_code: string | null;
 }
 
 interface CreateOnlineOrderModalProps {
@@ -75,7 +94,7 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
     try {
       const { data, error } = await supabase
         .from('product_list')
-        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_milkbased, product_sugarbased, product_price, product_cost, product_ingredient, product_allergen, product_description')
+        .select('id, product_id, product_name, product_type, product_gelato_type, product_weight, product_milkbased, product_sugarbased, product_price, product_cost, product_ingredient, product_allergen, product_description, sticker_bbd_code, sticker_pbn_code, sticker_barcode, barcode_13digit, sticker_gpbn_code')
         .order('product_name', { ascending: true });
 
       if (error) {
@@ -142,7 +161,12 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
       product_allergen: '',
       product_description: '',
       add_to_product_list: false,
-      is_from_product_list: false
+      is_from_product_list: false,
+      sticker_bbd_code: null,
+      sticker_pbn_code: null,
+      sticker_barcode: null,
+      barcode_13digit: null,
+      sticker_gpbn_code: null
     }
   ]);
 
@@ -165,7 +189,12 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
         product_allergen: '',
         product_description: '',
         add_to_product_list: false,
-        is_from_product_list: false
+        is_from_product_list: false,
+        sticker_bbd_code: null,
+        sticker_pbn_code: null,
+        sticker_barcode: null,
+        barcode_13digit: null,
+        sticker_gpbn_code: null
       }
     ]);
   };
@@ -190,7 +219,13 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
       product_description: product.product_description ?? '',
       add_to_product_list: false,
       is_from_product_list: true,
-      product_list_id: product.id
+      product_list_id: product.id,
+      // Copy barcode fields from product
+      sticker_bbd_code: product.sticker_bbd_code ?? null,
+      sticker_pbn_code: product.sticker_pbn_code ?? null,
+      sticker_barcode: product.sticker_barcode ?? null,
+      barcode_13digit: product.barcode_13digit ?? null,
+      sticker_gpbn_code: product.sticker_gpbn_code ?? null
     };
     setOrderItems(updatedItems);
     setShowProductPicker(null);
@@ -482,9 +517,52 @@ const handleRemoveGelatoType = async (option: string) => {
           // Generate product ID
           const productId = await generateProductId();
 
-          // Add to product_list
-          // Use ?? to properly handle 0 values when saving to product_list
-          const { error: productError } = await supabase
+          // Generate unique sequential barcodes for the new product
+          const { data: allProducts } = await supabase
+            .from('product_list')
+            .select('sticker_bbd_code, sticker_pbn_code, barcode_13digit, sticker_gpbn_code')
+            .order('id', { ascending: false });
+
+          // Find highest existing codes
+          let highestBbdCode: string | null = null;
+          let highestPbnCode: string | null = null;
+          let highestBarcode13: string | null = null;
+          let highestGpbnCode: string | null = null;
+
+          if (allProducts) {
+            for (const p of allProducts) {
+              if (p.sticker_bbd_code) {
+                const currentPrefix = parseInt(p.sticker_bbd_code.substring(0, 4) || '0', 10);
+                const highestPrefix = parseInt(highestBbdCode?.substring(0, 4) || '0', 10);
+                if (currentPrefix > highestPrefix) highestBbdCode = p.sticker_bbd_code;
+              }
+              if (p.sticker_pbn_code) {
+                const currentNum = parseInt(p.sticker_pbn_code.replace('PBN', '') || '0', 10);
+                const highestNum = parseInt(highestPbnCode?.replace('PBN', '') || '0', 10);
+                if (currentNum > highestNum) highestPbnCode = p.sticker_pbn_code;
+              }
+              if (p.barcode_13digit) {
+                const currentNum = parseInt(p.barcode_13digit || '0', 10);
+                const highestNum = parseInt(highestBarcode13 || '0', 10);
+                if (currentNum > highestNum) highestBarcode13 = p.barcode_13digit;
+              }
+              if (p.sticker_gpbn_code) {
+                const currentNum = parseInt(p.sticker_gpbn_code.replace('GPBN', '') || '0', 10);
+                const highestNum = parseInt(highestGpbnCode?.replace('GPBN', '') || '0', 10);
+                if (currentNum > highestNum) highestGpbnCode = p.sticker_gpbn_code;
+              }
+            }
+          }
+
+          // Generate next sequential barcodes
+          const newBbdCode = generateNextBbdCode(highestBbdCode);
+          const newPbnCode = generateNextPbnCode(highestPbnCode);
+          const newBarcode = generate30DigitBarcode(newBbdCode, newPbnCode);
+          const newBarcode13 = generate13DigitBarcode(highestBarcode13);
+          const newGpbnCode = generateNextGpbnCode(highestGpbnCode);
+
+          // Add to product_list with barcodes
+          const { data: newProduct, error: productError } = await supabase
             .from('product_list')
             .insert({
               product_id: productId,
@@ -499,12 +577,64 @@ const handleRemoveGelatoType = async (option: string) => {
               product_ingredient: item.product_ingredient ?? null,
               product_allergen: item.product_allergen ?? null,
               product_description: item.product_description ?? null,
-              product_created_at: new Date().toISOString()
-            });
+              product_created_at: new Date().toISOString(),
+              // Barcode fields
+              sticker_bbd_code: newBbdCode,
+              sticker_pbn_code: newPbnCode,
+              sticker_barcode: newBarcode,
+              barcode_13digit: newBarcode13,
+              sticker_gpbn_code: newGpbnCode
+            })
+            .select('id, sticker_bbd_code, sticker_pbn_code, sticker_barcode, barcode_13digit, sticker_gpbn_code')
+            .single();
 
           if (productError) {
             console.error('Error adding product to product_list:', productError);
             // Continue with order creation even if product insert fails
+          } else if (newProduct) {
+            // Update item's barcode fields so they get saved to order_item
+            item.sticker_bbd_code = newProduct.sticker_bbd_code;
+            item.sticker_pbn_code = newProduct.sticker_pbn_code;
+            item.sticker_barcode = newProduct.sticker_barcode;
+            item.barcode_13digit = newProduct.barcode_13digit;
+            item.sticker_gpbn_code = newProduct.sticker_gpbn_code;
+            item.product_list_id = newProduct.id;
+            console.log(`Added product "${item.product_name}" to product_list with barcodes`);
+          }
+        } else {
+          // Fetch existing product's barcodes to use in order item
+          const { data: existingProductData } = await supabase
+            .from('product_list')
+            .select('sticker_bbd_code, sticker_pbn_code, sticker_barcode, barcode_13digit, sticker_gpbn_code')
+            .eq('id', existingProduct.id)
+            .single();
+
+          if (existingProductData) {
+            item.sticker_bbd_code = existingProductData.sticker_bbd_code;
+            item.sticker_pbn_code = existingProductData.sticker_pbn_code;
+            item.sticker_barcode = existingProductData.sticker_barcode;
+            item.barcode_13digit = existingProductData.barcode_13digit;
+            item.sticker_gpbn_code = existingProductData.sticker_gpbn_code;
+            item.product_list_id = existingProduct.id;
+          }
+        }
+      }
+
+      // Ensure ALL order items have barcodes - fetch from product_list if they have a product_list_id
+      for (const item of orderItems) {
+        if (item.product_list_id && (!item.sticker_barcode || !item.barcode_13digit)) {
+          const { data: productData } = await supabase
+            .from('product_list')
+            .select('sticker_bbd_code, sticker_pbn_code, sticker_barcode, barcode_13digit, sticker_gpbn_code')
+            .eq('id', item.product_list_id)
+            .single();
+
+          if (productData) {
+            item.sticker_bbd_code = productData.sticker_bbd_code;
+            item.sticker_pbn_code = productData.sticker_pbn_code;
+            item.sticker_barcode = productData.sticker_barcode;
+            item.barcode_13digit = productData.barcode_13digit;
+            item.sticker_gpbn_code = productData.sticker_gpbn_code;
           }
         }
       }
@@ -566,7 +696,13 @@ const handleRemoveGelatoType = async (option: string) => {
         label_allergens: item.product_allergen ?? null,
         product_description: item.product_description ?? null,
         product_milkbase: item.product_milkbase ?? 0,
-        product_sugarbase: item.product_sugarbase ?? 0
+        product_sugarbase: item.product_sugarbase ?? 0,
+        // Barcode fields
+        sticker_bbd_code: item.sticker_bbd_code ?? null,
+        sticker_pbn_code: item.sticker_pbn_code ?? null,
+        sticker_barcode: item.sticker_barcode ?? null,
+        barcode_13digit: item.barcode_13digit ?? null,
+        sticker_gpbn_code: item.sticker_gpbn_code ?? null
       }));
 
       const { error: itemsError } = await supabase
@@ -628,7 +764,12 @@ const handleRemoveGelatoType = async (option: string) => {
         product_allergen: '',
         product_description: '',
         add_to_product_list: false,
-        is_from_product_list: false
+        is_from_product_list: false,
+        sticker_bbd_code: null,
+        sticker_pbn_code: null,
+        sticker_barcode: null,
+        barcode_13digit: null,
+        sticker_gpbn_code: null
       }
     ]);
     setShowProductPicker(null);
