@@ -359,7 +359,7 @@ useEffect(() => {
         });
 
         // Sort orders: Pending/active first, Completed/Cancelled at bottom
-        const sortedOrders = ordersWithCompany.sort((a: any, b: any) => {
+        const sortedOrders = ordersWithCompany.sort((a: Order, b: Order) => {
           const aIsFinished = a.status === 'Completed' || a.status === 'Cancelled';
           const bIsFinished = b.status === 'Completed' || b.status === 'Cancelled';
 
@@ -1624,45 +1624,6 @@ const handleDelete = async () => {
     const orderInvoiceId = order?.invoice_id || `Order #${orderId}`;
     handleStatusChangeRequest(orderId, newStatus, orderInvoiceId);
   };
-
-  // Direct status update without confirmation (used internally after confirmation)
-  const executeStatusUpdate = async (orderId, newStatus) => {
-  try {
-    setUpdatingStatus(prev => ({ ...prev, [orderId]: true }));
-
-    const { error: updateError } = await supabase
-      .from('client_order')
-      .update({ status: newStatus })
-      .eq('id', orderId);
-
-    if (updateError) throw updateError;
-
-    // Update local state and sort: completed/cancelled go to bottom
-    setOrders(prevOrders => {
-      const updatedOrders = prevOrders.map(order =>
-        order.id === orderId ? { ...order, status: newStatus } : order
-      );
-
-      // Sort orders: Pending first, then by delivery_date, Completed/Cancelled at bottom
-      return updatedOrders.sort((a, b) => {
-        const aIsFinished = a.status === 'Completed' || a.status === 'Cancelled';
-        const bIsFinished = b.status === 'Completed' || b.status === 'Cancelled';
-
-        // If one is finished and the other is not, finished goes to bottom
-        if (aIsFinished && !bIsFinished) return 1;
-        if (!aIsFinished && bIsFinished) return -1;
-
-        // Otherwise, sort by delivery_date (most recent first)
-        return new Date(b.delivery_date).getTime() - new Date(a.delivery_date).getTime();
-      });
-    });
-  } catch (err) {
-    console.error('Error updating status:', err);
-    alert('Failed to update status');
-  } finally {
-    setUpdatingStatus(prev => ({ ...prev, [orderId]: false }));
-  }
-};
 
 const handlePrintInvoice = async () => {
   if (!selectedOrder || !clientData) return;
