@@ -90,6 +90,11 @@ export default function OrderPage() {
   const [error, setError] = useState(null);
   const itemsPerPage = 10;
   const [updatingStatus, setUpdatingStatus] = useState({});
+
+  // Status change confirmation modal
+  const [showStatusConfirmModal, setShowStatusConfirmModal] = useState(false);
+  const [statusChangeData, setStatusChangeData] = useState<{ orderId: number; newStatus: string; orderInvoiceId: string } | null>(null);
+
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [clientData, setClientData] = useState(null);
@@ -338,7 +343,7 @@ useEffect(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ordersWithCompany = data.map((order: any) => {
           let companyName = 'N/A';
-          
+
           if (order.client_user) {
             if (Array.isArray(order.client_user)) {
               companyName = order.client_user[0]?.client_businessName || 'N/A';
@@ -346,13 +351,27 @@ useEffect(() => {
               companyName = order.client_user.client_businessName || 'N/A';
             }
           }
-          
+
           return {
             ...order,
             company_name: companyName
           };
         });
-        setOrders(ordersWithCompany);
+
+        // Sort orders: Pending/active first, Completed/Cancelled at bottom
+        const sortedOrders = ordersWithCompany.sort((a: any, b: any) => {
+          const aIsFinished = a.status === 'Completed' || a.status === 'Cancelled';
+          const bIsFinished = b.status === 'Completed' || b.status === 'Cancelled';
+
+          // If one is finished and the other is not, finished goes to bottom
+          if (aIsFinished && !bIsFinished) return 1;
+          if (!aIsFinished && bIsFinished) return -1;
+
+          // Otherwise, sort by delivery_date (most recent first)
+          return new Date(b.delivery_date).getTime() - new Date(a.delivery_date).getTime();
+        });
+
+        setOrders(sortedOrders);
 
         // Calculate GPBN by order date - all orders placed on the same day get the same GPBN
         // Fetch order dates from BOTH client orders AND online orders to ensure synchronized GPBN
@@ -417,12 +436,19 @@ useEffect(() => {
   );
 
   // Apply status filter
-  const matchesFilter = filterStatus === 'all' || 
+  const matchesFilter = filterStatus === 'all' ||
     order.status?.toLowerCase() === filterStatus.toLowerCase();
 
   return matchesSearch && matchesFilter;
 }).sort((a, b) => {
-  // Apply sorting
+  // First priority: Completed/Cancelled orders go to the bottom
+  const aIsFinished = a.status === 'Completed' || a.status === 'Cancelled';
+  const bIsFinished = b.status === 'Completed' || b.status === 'Cancelled';
+
+  if (aIsFinished && !bIsFinished) return 1;
+  if (!aIsFinished && bIsFinished) return -1;
+
+  // Second priority: Apply user's chosen sorting within each group
   switch (sortBy) {
     case 'order_date_desc':
       return new Date(b.order_date).getTime() - new Date(a.order_date).getTime();
@@ -1533,10 +1559,77 @@ const handleDelete = async () => {
     downloadOrderProductStickers(newStickerItems, newStickerOrderDate, filename, currentGpbnCode, true);
   };
 
+  // Show confirmation modal before changing status
+  const handleStatusChangeRequest = (orderId: number, newStatus: string, orderInvoiceId: string) => {
+    setStatusChangeData({ orderId, newStatus, orderInvoiceId });
+    setShowStatusConfirmModal(true);
+  };
+
+  // Confirm and execute status change
+  const handleConfirmStatusChange = async () => {
+    if (!statusChangeData) return;
+
+    const { orderId, newStatus } = statusChangeData;
+
+    try {
+      setUpdatingStatus(prev => ({ ...prev, [orderId]: true }));
+
+      const { error: updateError } = await supabase
+        .from('client_order')
+        .update({ status: newStatus })
+        .eq('id', orderId);
+
+      if (updateError) throw updateError;
+
+      // Update local state and sort: completed/cancelled go to bottom
+      setOrders(prevOrders => {
+        const updatedOrders = prevOrders.map(order =>
+          order.id === orderId ? { ...order, status: newStatus } : order
+        );
+
+        // Sort orders: Pending first, then by delivery_date, Completed/Cancelled at bottom
+        return updatedOrders.sort((a, b) => {
+          const aIsFinished = a.status === 'Completed' || a.status === 'Cancelled';
+          const bIsFinished = b.status === 'Completed' || b.status === 'Cancelled';
+
+          // If one is finished and the other is not, finished goes to bottom
+          if (aIsFinished && !bIsFinished) return 1;
+          if (!aIsFinished && bIsFinished) return -1;
+
+          // Otherwise, sort by delivery_date (most recent first)
+          return new Date(b.delivery_date).getTime() - new Date(a.delivery_date).getTime();
+        });
+      });
+
+      setShowStatusConfirmModal(false);
+      setStatusChangeData(null);
+    } catch (err) {
+      console.error('Error updating status:', err);
+      alert('Failed to update status');
+    } finally {
+      setUpdatingStatus(prev => ({ ...prev, [statusChangeData.orderId]: false }));
+    }
+  };
+
+  // Cancel status change
+  const handleCancelStatusChange = () => {
+    setShowStatusConfirmModal(false);
+    setStatusChangeData(null);
+  };
+
+  // Legacy function for backward compatibility (now redirects to confirmation)
   const handleStatusUpdate = async (orderId, newStatus) => {
+    // Find the order to get its invoice_id
+    const order = orders.find(o => o.id === orderId);
+    const orderInvoiceId = order?.invoice_id || `Order #${orderId}`;
+    handleStatusChangeRequest(orderId, newStatus, orderInvoiceId);
+  };
+
+  // Direct status update without confirmation (used internally after confirmation)
+  const executeStatusUpdate = async (orderId, newStatus) => {
   try {
     setUpdatingStatus(prev => ({ ...prev, [orderId]: true }));
-    
+
     const { error: updateError } = await supabase
       .from('client_order')
       .update({ status: newStatus })
@@ -1544,12 +1637,25 @@ const handleDelete = async () => {
 
     if (updateError) throw updateError;
 
-    // Update local state
-    setOrders(prevOrders =>
-      prevOrders.map(order =>
+    // Update local state and sort: completed/cancelled go to bottom
+    setOrders(prevOrders => {
+      const updatedOrders = prevOrders.map(order =>
         order.id === orderId ? { ...order, status: newStatus } : order
-      )
-    );
+      );
+
+      // Sort orders: Pending first, then by delivery_date, Completed/Cancelled at bottom
+      return updatedOrders.sort((a, b) => {
+        const aIsFinished = a.status === 'Completed' || a.status === 'Cancelled';
+        const bIsFinished = b.status === 'Completed' || b.status === 'Cancelled';
+
+        // If one is finished and the other is not, finished goes to bottom
+        if (aIsFinished && !bIsFinished) return 1;
+        if (!aIsFinished && bIsFinished) return -1;
+
+        // Otherwise, sort by delivery_date (most recent first)
+        return new Date(b.delivery_date).getTime() - new Date(a.delivery_date).getTime();
+      });
+    });
   } catch (err) {
     console.error('Error updating status:', err);
     alert('Failed to update status');
@@ -3333,6 +3439,79 @@ const handleViewInvoice = async (order) => {
             order={selectedOrder}
           />
         )}
+
+          {/* Status Change Confirmation Modal */}
+          {showStatusConfirmModal && statusChangeData && (
+            <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+              <div className="bg-white rounded-lg p-6 max-w-md mx-4">
+                <div className="flex justify-center mb-4">
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center ${
+                    statusChangeData.newStatus === 'Completed' ? 'bg-green-100' :
+                    statusChangeData.newStatus === 'Cancelled' ? 'bg-red-100' :
+                    'bg-orange-100'
+                  }`}>
+                    {statusChangeData.newStatus === 'Completed' ? (
+                      <Check size={28} className="text-green-600" />
+                    ) : statusChangeData.newStatus === 'Cancelled' ? (
+                      <X size={28} className="text-red-600" />
+                    ) : (
+                      <svg className="w-7 h-7 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    )}
+                  </div>
+                </div>
+                <h3 className="text-lg font-bold text-center mb-3" style={{ color: '#5C2E1F' }}>
+                  Confirm Status Change
+                </h3>
+                <div className={`rounded-lg p-4 mb-4 ${
+                  statusChangeData.newStatus === 'Completed' ? 'bg-green-50 border border-green-200' :
+                  statusChangeData.newStatus === 'Cancelled' ? 'bg-red-50 border border-red-200' :
+                  'bg-orange-50 border border-orange-200'
+                }`}>
+                  <p className="text-sm text-gray-700 text-center">
+                    You are about to change the status of order
+                  </p>
+                  <p className="text-sm font-bold text-center mt-1" style={{ color: '#5C2E1F' }}>
+                    {statusChangeData.orderInvoiceId}
+                  </p>
+                  <p className="text-sm text-gray-700 text-center mt-2">
+                    to <span className={`font-bold ${
+                      statusChangeData.newStatus === 'Completed' ? 'text-green-600' :
+                      statusChangeData.newStatus === 'Cancelled' ? 'text-red-600' :
+                      'text-orange-600'
+                    }`}>{statusChangeData.newStatus}</span>
+                  </p>
+                </div>
+                {(statusChangeData.newStatus === 'Completed' || statusChangeData.newStatus === 'Cancelled') && (
+                  <p className="text-xs text-center text-gray-500 mb-4">
+                    This order will be moved to the bottom of the list.
+                  </p>
+                )}
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleCancelStatusChange}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                    style={{ color: '#5C2E1F' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmStatusChange}
+                    disabled={updatingStatus[statusChangeData.orderId]}
+                    className={`flex-1 px-4 py-2 text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 ${
+                      statusChangeData.newStatus === 'Completed' ? 'bg-green-600' :
+                      statusChangeData.newStatus === 'Cancelled' ? 'bg-red-600' :
+                      'bg-orange-600'
+                    }`}
+                  >
+                    {updatingStatus[statusChangeData.orderId] ? 'Updating...' : 'Confirm'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Delete Confirmation Modal */}
           {isDeleteConfirmOpen && (
             <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
