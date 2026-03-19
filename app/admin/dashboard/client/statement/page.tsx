@@ -5,6 +5,29 @@ import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import supabase from '@/lib/client';
+import Image from 'next/image';
+
+// Helper function to load image as base64 for PDF
+const loadImageAsBase64 = (src: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } else {
+        reject(new Error('Could not get canvas context'));
+      }
+    };
+    img.onerror = reject;
+    img.src = src;
+  });
+};
 
 interface Statement {
   statement_id: string;
@@ -505,8 +528,17 @@ useEffect(() => {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const renderHeaderInPDF = (doc: any, selectedHeader: HeaderOption | undefined) => {
+const renderHeaderInPDF = (doc: any, selectedHeader: HeaderOption | undefined, logoBase64?: string) => {
   if (!selectedHeader) return;
+
+  // Add logo in upper right corner
+  if (logoBase64) {
+    try {
+      doc.addImage(logoBase64, 'PNG', 165, 10, 30, 20);
+    } catch (e) {
+      console.error('Failed to add logo to PDF:', e);
+    }
+  }
 
   doc.setFontSize(10);
   let yPos = 20;
@@ -588,10 +620,10 @@ const handleSaveAgingCategory = async () => {
 
 const handlePrintStatement = async () => {
   if (!selectedStatement || !statementInvoices) return;
-  
+
   try {
     const jsPDF = (await import('jspdf')).default;
-    
+
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -600,8 +632,16 @@ const handlePrintStatement = async () => {
 
     doc.setFont('helvetica');
 
+    // Load logo image
+    let logoBase64: string | undefined;
+    try {
+      logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
+    } catch (e) {
+      console.error('Failed to load logo:', e);
+    }
+
     const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-    renderHeaderInPDF(doc, selectedHeader);
+    renderHeaderInPDF(doc, selectedHeader, logoBase64);
 
     // Title
     doc.setFontSize(16);
@@ -732,10 +772,10 @@ const handlePrintStatement = async () => {
 
 const handleDownloadStatement = async () => {
   if (!selectedStatement || !statementInvoices) return;
-  
+
   try {
     const jsPDF = (await import('jspdf')).default;
-    
+
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -744,8 +784,16 @@ const handleDownloadStatement = async () => {
 
     doc.setFont('helvetica');
 
+    // Load logo image
+    let logoBase64: string | undefined;
+    try {
+      logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
+    } catch (e) {
+      console.error('Failed to load logo:', e);
+    }
+
     const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-    renderHeaderInPDF(doc, selectedHeader);
+    renderHeaderInPDF(doc, selectedHeader, logoBase64);
 
     // Title
     doc.setFontSize(16);
@@ -1576,16 +1624,27 @@ const fetchStatements = async () => {
                       const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
                       if (!selectedHeader) return null;
                       return (
-                        <div style={{ fontSize: '10pt', lineHeight: '1.6' }}>
-                          {selectedHeader.line1 && (
-                            <div style={{ fontWeight: 'bold' }}>{selectedHeader.line1}</div>
-                          )}
-                          {selectedHeader.line2 && <div>{selectedHeader.line2}</div>}
-                          {selectedHeader.line3 && <div>{selectedHeader.line3}</div>}
-                          {selectedHeader.line4 && <div>{selectedHeader.line4}</div>}
-                          {selectedHeader.line5 && <div>{selectedHeader.line5}</div>}
-                          {selectedHeader.line6 && <div>{selectedHeader.line6}</div>}
-                          {selectedHeader.line7 && <div>{selectedHeader.line7}</div>}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ fontSize: '10pt', lineHeight: '1.6' }}>
+                            {selectedHeader.line1 && (
+                              <div style={{ fontWeight: 'bold' }}>{selectedHeader.line1}</div>
+                            )}
+                            {selectedHeader.line2 && <div>{selectedHeader.line2}</div>}
+                            {selectedHeader.line3 && <div>{selectedHeader.line3}</div>}
+                            {selectedHeader.line4 && <div>{selectedHeader.line4}</div>}
+                            {selectedHeader.line5 && <div>{selectedHeader.line5}</div>}
+                            {selectedHeader.line6 && <div>{selectedHeader.line6}</div>}
+                            {selectedHeader.line7 && <div>{selectedHeader.line7}</div>}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end' }}>
+                            <Image
+                              src="/assets/file_logo.png"
+                              alt="Company Logo"
+                              width={80}
+                              height={60}
+                              style={{ objectFit: 'contain' }}
+                            />
+                          </div>
                         </div>
                       );
                     })()}
