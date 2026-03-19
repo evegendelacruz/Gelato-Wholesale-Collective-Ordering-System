@@ -230,6 +230,10 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [createdOrderId, setCreatedOrderId] = useState('');
 
+  // Publish to Client Confirmation Modal
+  const [showPublishConfirmModal, setShowPublishConfirmModal] = useState(false);
+  const [publishConfirmItemIndex, setPublishConfirmItemIndex] = useState<number | null>(null);
+
   // Fetch clients and dropdown options on mount
   useEffect(() => {
     if (isOpen) {
@@ -538,7 +542,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       product_description: manualItemData.product_description,
       is_manual: true,
       is_from_product_list: false,
-      publish_to_client: true, // Default to true for manual items
+      publish_to_client: false, // Default to false - user must explicitly enable via confirmation modal
       add_to_product_list: true // Default to true for manual items
     };
 
@@ -595,6 +599,29 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   };
 
   const handleUpdateItemField = (index: number, field: keyof OrderItem, value: string | number | boolean | null) => {
+    // Special handling for publish_to_client checkbox
+    if (field === 'publish_to_client' && value === true) {
+      const item = orderItems[index];
+      // If Add to Product List is not checked, show confirmation modal
+      if (!item.add_to_product_list) {
+        setPublishConfirmItemIndex(index);
+        setShowPublishConfirmModal(true);
+        return;
+      }
+    }
+
+    // If unchecking add_to_product_list, also uncheck publish_to_client
+    if (field === 'add_to_product_list' && value === false) {
+      const newItems = [...orderItems];
+      newItems[index] = {
+        ...newItems[index],
+        add_to_product_list: false,
+        publish_to_client: false
+      };
+      setOrderItems(newItems);
+      return;
+    }
+
     const newItems = [...orderItems];
     newItems[index] = {
       ...newItems[index],
@@ -604,6 +631,27 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       newItems[index].subtotal = newItems[index].quantity * newItems[index].unit_price;
     }
     setOrderItems(newItems);
+  };
+
+  // Handle confirming publish to client (also enables add_to_product_list)
+  const handleConfirmPublishToClient = () => {
+    if (publishConfirmItemIndex !== null) {
+      const newItems = [...orderItems];
+      newItems[publishConfirmItemIndex] = {
+        ...newItems[publishConfirmItemIndex],
+        publish_to_client: true,
+        add_to_product_list: true
+      };
+      setOrderItems(newItems);
+    }
+    setShowPublishConfirmModal(false);
+    setPublishConfirmItemIndex(null);
+  };
+
+  // Handle canceling publish to client confirmation
+  const handleCancelPublishToClient = () => {
+    setShowPublishConfirmModal(false);
+    setPublishConfirmItemIndex(null);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -631,7 +679,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       product_description: '',
       is_manual: true,
       is_from_product_list: false,
-      publish_to_client: true,
+      publish_to_client: false, // Default to false - user must explicitly enable via confirmation modal
       add_to_product_list: false
     };
     setOrderItems([...orderItems, newItem]);
@@ -674,7 +722,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       subtotal: newItems[index].quantity * (product.product_price || 0),
       is_manual: false,
       is_from_product_list: true,
-      publish_to_client: !isAlreadyAssigned
+      publish_to_client: false // Default to false - user must explicitly enable via confirmation modal
     };
 
     newItems[index] = updatedItem;
@@ -2183,6 +2231,55 @@ const handleClose = () => {
                 className="px-4 py-2 bg-orange-500 text-white rounded text-sm hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Add Option
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Publish to Client Confirmation Modal */}
+      {showPublishConfirmModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-60" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+          <div className="bg-white rounded-lg p-6 max-w-md mx-4">
+            <div className="flex justify-center mb-4">
+              <div className="w-14 h-14 bg-orange-100 rounded-full flex items-center justify-center">
+                <svg className="w-7 h-7 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+            </div>
+            <h3 className="text-lg font-bold text-center mb-3" style={{ color: '#5C2E1F' }}>
+              Publish to Client Requires Product List
+            </h3>
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-4">
+              <p className="text-sm text-gray-700 mb-3">
+                To publish this product to the client&apos;s assigned products, you must also add it to the Product List.
+              </p>
+              <p className="text-sm text-gray-600">
+                <span className="font-medium">This will:</span>
+              </p>
+              <ul className="text-sm text-gray-600 mt-1 ml-4 list-disc">
+                <li>Save the product to the master Product List</li>
+                <li>Assign the product to this client&apos;s available products</li>
+              </ul>
+            </div>
+            <p className="text-sm text-center text-gray-500 mb-4">
+              Do you want to enable both options?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancelPublishToClient}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                style={{ color: '#5C2E1F' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmPublishToClient}
+                className="flex-1 px-4 py-2 text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: '#FF5722' }}
+              >
+                Yes, Enable Both
               </button>
             </div>
           </div>
