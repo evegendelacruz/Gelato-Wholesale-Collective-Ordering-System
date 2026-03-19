@@ -5,7 +5,7 @@ import { TableSkeleton, SkeletonStyles } from "@/app/components/skeletonLoader/p
 import supabase from "@/lib/client";
 import Image from "next/image";
 import { useState, useEffect, Fragment, useCallback, useRef } from "react";
-import { Search, Filter, Plus, X, Check, ChevronDown, Tag, Pencil } from "lucide-react";
+import { Search, Filter, Plus, X, Check, ChevronDown, Tag } from "lucide-react";
 import {
   downloadMultiStickerPDF,
   downloadAllOrderStickersPDF,

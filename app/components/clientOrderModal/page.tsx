@@ -730,8 +730,6 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   // Handle selecting a product from the picker for a specific item
   const handleSelectProductForItem = (index: number, product: Product) => {
     const newItems = [...orderItems];
-    // Check if product is already assigned to this client
-    const isAlreadyAssigned = availableProducts.some(cp => cp.product_list.id === product.id);
 
     // Handle null/undefined product_type and gelato_type
     const productType = product.product_type ?? '';

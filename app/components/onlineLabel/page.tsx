@@ -50,7 +50,7 @@ const OnlineLabelGenerator = ({ orderItems, clientData, onUpdate }) => {
   return `${day}/${month}/${year}`;
 }, []);
 
-const handlePrintLabels = async () => {
+const _handlePrintLabels = async () => {
   try {
     setIsGenerating(true);
     
@@ -275,10 +275,10 @@ const handlePrintLabels = async () => {
         
         const mfgLines = [
           'Manufactured by:',
-          'Momolato Pte Ltd',
+          'Gelato Wholesale Collective',
           '21 Tampines St 92 #04-06',
           'Singapore 528891',
-          'UEN: 201319550R'
+          'UEN: 202553148Z'
         ];
         
         mfgLines.forEach((line, idx) => {
@@ -450,10 +450,10 @@ const handleBarTenderSDKPrint = async () => {
             
             <div class="manufacturer-info">
               Manufactured by:<br>
-              Momolato Pte Ltd<br>
+              Gelato Wholesale Collective<br>
               21 Tampines St 92 #04-06<br>
               Singapore 528891<br>
-              UEN: 201319550R
+              UEN: 202553148Z
             </div>
           </div>
         </div>
@@ -903,10 +903,10 @@ useEffect(() => {
         
         const mfgLines = [
           'Manufactured by:',
-          'Momolato Pte Ltd',
+          'Gelato Wholesale Collective',
           '21 Tampines St 92 #04-06',
           'Singapore 528891',
-          'UEN: 201319550R'
+          'UEN: 202553148Z'
         ];
         
         mfgLines.forEach((line, idx) => {

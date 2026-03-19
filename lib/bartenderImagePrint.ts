@@ -231,10 +231,10 @@ export async function generateLabelCanvas(
 
       const mfgLines = [
         'Manufactured by:',
-        'Momolato Pte Ltd',
+        'Gelato Wholesale Collective',
         '21 Tampines St 92 #04-06',
         'Singapore 528891',
-        'UEN: 201319550R'
+        'UEN: 202553148Z'
       ];
 
       mfgLines.forEach((line, idx) => {
