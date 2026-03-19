@@ -180,6 +180,7 @@ model ClientOrder {
   pdf_generated       Boolean   @default(false)
   pdf_generated_at    DateTime?
   published_to_client Boolean   @default(true)
+  gst_percentage      Decimal?  @default(9.00) @db.Decimal(5, 2)
 
   // Relations
   client    ClientUser       @relation(fields: [client_auth_id], references: [client_auth_id], onDelete: Cascade)
@@ -236,6 +237,7 @@ model CustomerOrder {
   updated_at       DateTime @updatedAt
   total_amount     Float
   invoice_id       String?
+  gst_percentage   Decimal?  @default(9.00) @db.Decimal(5, 2)
 
   // Relations
   items CustomerOrderItem[]
@@ -372,6 +374,17 @@ model ClientQuotationItem {
 // ============================================
 // CONFIGURATION TABLES
 // ============================================
+
+model SystemSettings {
+  id            Int      @id @default(autoincrement())
+  setting_key   String   @unique @db.VarChar(100)
+  setting_value String
+  description   String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@map("system_settings")
+}
 
 model HeaderOption {
   id          Int     @id @default(autoincrement())

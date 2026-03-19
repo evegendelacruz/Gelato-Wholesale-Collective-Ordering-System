@@ -40,6 +40,7 @@ interface Order {
   updated_at: string;
   total_amount: number;
   invoice_id: string;
+  gst_percentage?: number;
 }
 interface OrderItem {
   id: number;
@@ -213,6 +214,21 @@ export default function OnlineOrderPage() {
     is_default: boolean;
   } | null>(null);
 
+  // Edit Invoice state
+  const [showEditInvoiceModal, setShowEditInvoiceModal] = useState(false);
+  const [editInvoiceGstPercent, setEditInvoiceGstPercent] = useState<number>(9);
+  const [currentInvoiceGstPercent, setCurrentInvoiceGstPercent] = useState<number>(9);
+  const [editInvoiceItems, setEditInvoiceItems] = useState<Array<{
+    id: number;
+    product_name: string;
+    product_type: string;
+    quantity: number;
+    unit_price: number;
+    subtotal: number;
+  }>>([]);
+  const [applyGstToFutureOrders, setApplyGstToFutureOrders] = useState(false);
+  const [isSavingInvoice, setIsSavingInvoice] = useState(false);
+
   // Sticker preview state
   const [showStickerPreview, setShowStickerPreview] = useState(false);
   const [stickerPreviewUrl, setStickerPreviewUrl] = useState<string>('');
@@ -271,6 +287,17 @@ export default function OnlineOrderPage() {
     if (source !== 'scrollbar') scrollbarEl.scrollLeft = scrollLeft;
     if (source !== 'body') bodyEl.scrollLeft = scrollLeft;
   };
+
+  // Load default GST from localStorage on mount
+  useEffect(() => {
+    const savedGst = localStorage.getItem('defaultGstPercent_online');
+    if (savedGst) {
+      const gstValue = parseFloat(savedGst);
+      if (!isNaN(gstValue) && gstValue >= 0 && gstValue <= 100) {
+        setCurrentInvoiceGstPercent(gstValue);
+      }
+    }
+  }, []);
 
   // Fetch header options on component mount
   useEffect(() => {
@@ -1271,6 +1298,20 @@ export default function OnlineOrderPage() {
 
       setSelectedOrder(order);
       setInvoiceOrderItems(data || []);
+
+      // Calculate GST percentage from stored total if possible, otherwise use default from localStorage or 9%
+      const items = data || [];
+      const subtotal = items.reduce((sum, item) => sum + item.product_price * item.quantity, 0);
+      if (subtotal > 0 && order.total_amount > subtotal) {
+        const derivedGst = ((order.total_amount - subtotal) / subtotal) * 100;
+        setCurrentInvoiceGstPercent(Math.round(derivedGst * 100) / 100); // Round to 2 decimal places
+      } else {
+        // Use saved default GST or fallback to 9%
+        const savedGst = localStorage.getItem('defaultGstPercent_online');
+        const defaultGst = savedGst ? parseFloat(savedGst) : 9;
+        setCurrentInvoiceGstPercent(!isNaN(defaultGst) ? defaultGst : 9);
+      }
+
       setShowInvoiceModal(true);
     } catch (error) {
       console.error("Error fetching order items for invoice:", error);
@@ -1621,6 +1662,134 @@ export default function OnlineOrderPage() {
     setShowDeleteConfirmModal(true);
   };
 
+  // Open Edit Invoice modal with current data
+  const handleOpenEditInvoice = () => {
+    if (!selectedOrder || !invoiceOrderItems) return;
+
+    // Use the current invoice GST percentage
+    setEditInvoiceGstPercent(currentInvoiceGstPercent);
+    setEditInvoiceItems(invoiceOrderItems.map(item => ({
+      id: item.id,
+      product_name: item.product_name,
+      product_type: item.product_type || '',
+      quantity: item.quantity,
+      unit_price: item.product_price,
+      subtotal: item.product_price * item.quantity
+    })));
+
+    // Check if this invoice's GST matches the saved default - if so, check the checkbox
+    const savedGst = localStorage.getItem('defaultGstPercent_online');
+    const savedGstValue = savedGst ? parseFloat(savedGst) : 9;
+    setApplyGstToFutureOrders(currentInvoiceGstPercent === savedGstValue);
+
+    setShowEditInvoiceModal(true);
+  };
+
+  // Update an edit invoice item
+  const handleEditInvoiceItemChange = (index: number, field: string, value: string | number) => {
+    setEditInvoiceItems(prev => {
+      const updated = [...prev];
+      if (field === 'quantity' || field === 'unit_price') {
+        const numValue = parseFloat(String(value)) || 0;
+        updated[index] = {
+          ...updated[index],
+          [field]: numValue,
+          subtotal: field === 'quantity'
+            ? numValue * updated[index].unit_price
+            : updated[index].quantity * numValue
+        };
+      } else {
+        updated[index] = { ...updated[index], [field]: value };
+      }
+      return updated;
+    });
+  };
+
+  // Save edited invoice data
+  const handleSaveEditInvoice = async () => {
+    if (!selectedOrder) return;
+
+    setIsSavingInvoice(true);
+    try {
+      // Calculate new totals
+      const newSubtotal = editInvoiceItems.reduce((sum, item) => sum + item.subtotal, 0);
+      const newGst = newSubtotal * (editInvoiceGstPercent / 100);
+      const newTotal = newSubtotal + newGst;
+
+      // Update order items in database
+      for (const item of editInvoiceItems) {
+        const { error: itemError } = await supabase
+          .from('customer_order_item')
+          .update({
+            product_name: item.product_name,
+            product_type: item.product_type,
+            quantity: item.quantity,
+            product_price: item.unit_price
+          })
+          .eq('id', item.id);
+
+        if (itemError) {
+          console.error('Error updating order item:', itemError);
+          throw itemError;
+        }
+      }
+
+      // Update order with new total
+      const { error: orderError } = await supabase
+        .from('customer_order')
+        .update({
+          total_amount: newTotal
+        })
+        .eq('id', selectedOrder.id);
+
+      if (orderError) {
+        console.error('Error updating order:', orderError);
+        throw orderError;
+      }
+
+      // Update local state
+      setInvoiceOrderItems(editInvoiceItems.map(item => ({
+        ...invoiceOrderItems.find(oi => oi.id === item.id)!,
+        product_name: item.product_name,
+        product_type: item.product_type,
+        quantity: item.quantity,
+        product_price: item.unit_price
+      })));
+
+      setSelectedOrder(prev => prev ? {
+        ...prev,
+        total_amount: newTotal
+      } : null);
+
+      // Update the current invoice GST percentage
+      setCurrentInvoiceGstPercent(editInvoiceGstPercent);
+
+      // If "Apply to future orders" is checked, save to localStorage
+      if (applyGstToFutureOrders) {
+        localStorage.setItem('defaultGstPercent_online', editInvoiceGstPercent.toString());
+      }
+
+      // Refresh orders list
+      const { data } = await supabase
+        .from("customer_order")
+        .select("*")
+        .order("order_date", { ascending: false });
+      if (data) {
+        setOrders(data);
+      }
+
+      setShowEditInvoiceModal(false);
+      setSuccessMessage('Invoice updated successfully');
+      setShowSuccessModal(true);
+    } catch (error) {
+      console.error('Error saving invoice:', error);
+      setWarningMessage('Failed to save invoice changes');
+      setShowWarningModal(true);
+    } finally {
+      setIsSavingInvoice(false);
+    }
+  };
+
   const InvoiceModal = ({
     isOpen,
     order,
@@ -1639,7 +1808,7 @@ export default function OnlineOrderPage() {
         (sum, item) => sum + item.product_price * item.quantity,
         0,
       );
-    const getGST = () => getSubtotal() * 0.09;
+    const getGST = () => getSubtotal() * (currentInvoiceGstPercent / 100);
     const getTotal = () => getSubtotal() + getGST();
     const subtotal = getSubtotal();
     const gst = getGST();
@@ -1876,7 +2045,7 @@ export default function OnlineOrderPage() {
       doc.text("SUBTOTAL", totalsLabelX, yPos + 5);
       doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: "right" });
 
-      doc.text("GST 9%", totalsLabelX, yPos + 10);
+      doc.text(`GST ${currentInvoiceGstPercent}%`, totalsLabelX, yPos + 10);
       doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: "right" });
 
       doc.text("TOTAL", totalsLabelX, yPos + 15);
@@ -2219,7 +2388,7 @@ export default function OnlineOrderPage() {
                     </div>
                   </div>
                   <div className="flex justify-end mb-1.5 text-[10px]">
-                    <div className="w-32 text-right pr-4 font-bold">GST 9%</div>
+                    <div className="w-32 text-right pr-4 font-bold">GST {currentInvoiceGstPercent}%</div>
                     <div className="w-24 text-right">{formatCurrency(gst)}</div>
                   </div>
                   <div className="flex justify-end mb-1.5 text-[10px]">
@@ -2329,6 +2498,25 @@ export default function OnlineOrderPage() {
           </div>
 
           <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg shadow-lg">
+            <button
+              onClick={handleOpenEditInvoice}
+              className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+              style={{ backgroundColor: "#5C2E1F" }}
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+              </svg>
+              Edit Invoice
+            </button>
             <button
               onClick={handlePrintInvoice}
               className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
@@ -3105,6 +3293,174 @@ export default function OnlineOrderPage() {
               orderItems={invoiceOrderItems}
             />
           )}
+
+          {/* Edit Invoice Modal */}
+          {showEditInvoiceModal && selectedOrder && (
+            <div className="fixed inset-0 z-[60] overflow-auto flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+              <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
+                {/* Header */}
+                <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4 shrink-0 rounded-t-lg flex justify-between items-center">
+                  <h3 className="text-xl font-bold" style={{ color: '#5C2E1F' }}>
+                    Edit Invoice - {selectedOrder.invoice_id || selectedOrder.order_id}
+                  </h3>
+                  <button
+                    onClick={() => setShowEditInvoiceModal(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-auto p-6">
+                  {/* GST Section */}
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <h4 className="text-lg font-semibold mb-4" style={{ color: '#5C2E1F' }}>GST Settings</h4>
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm font-medium text-gray-700">GST Percentage:</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={editInvoiceGstPercent}
+                          onChange={(e) => setEditInvoiceGstPercent(parseFloat(e.target.value) || 0)}
+                          className="w-24 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-center"
+                        />
+                        <span className="text-sm text-gray-500">%</span>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={applyGstToFutureOrders}
+                          onChange={(e) => setApplyGstToFutureOrders(e.target.checked)}
+                          className="w-4 h-4 accent-orange-500"
+                        />
+                        <span className="text-sm text-gray-700">Apply this GST rate to future orders</span>
+                      </label>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Note: Changing GST will only affect this order. Previous orders will retain their original GST rates.
+                    </p>
+                  </div>
+
+                  {/* Order Items Table */}
+                  <div className="mb-6">
+                    <h4 className="text-lg font-semibold mb-4" style={{ color: '#5C2E1F' }}>Order Items</h4>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="text-left px-3 py-2 text-sm font-semibold text-gray-700 border-b">Product Type</th>
+                            <th className="text-left px-3 py-2 text-sm font-semibold text-gray-700 border-b">Product Name</th>
+                            <th className="text-center px-3 py-2 text-sm font-semibold text-gray-700 border-b w-24">Qty</th>
+                            <th className="text-right px-3 py-2 text-sm font-semibold text-gray-700 border-b w-32">Unit Price</th>
+                            <th className="text-right px-3 py-2 text-sm font-semibold text-gray-700 border-b w-32">Subtotal</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {editInvoiceItems.map((item, index) => (
+                            <tr key={item.id} className="hover:bg-gray-50">
+                              <td className="px-3 py-2 border-b">
+                                <input
+                                  type="text"
+                                  value={item.product_type}
+                                  onChange={(e) => handleEditInvoiceItemChange(index, 'product_type', e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm"
+                                />
+                              </td>
+                              <td className="px-3 py-2 border-b">
+                                <input
+                                  type="text"
+                                  value={item.product_name}
+                                  onChange={(e) => handleEditInvoiceItemChange(index, 'product_name', e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm"
+                                />
+                              </td>
+                              <td className="px-3 py-2 border-b text-center">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(e) => handleEditInvoiceItemChange(index, 'quantity', e.target.value)}
+                                  className="w-20 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm text-center"
+                                />
+                              </td>
+                              <td className="px-3 py-2 border-b text-right">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={item.unit_price}
+                                  onChange={(e) => handleEditInvoiceItemChange(index, 'unit_price', e.target.value)}
+                                  className="w-28 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm text-right"
+                                />
+                              </td>
+                              <td className="px-3 py-2 border-b text-right font-medium">
+                                ${item.subtotal.toFixed(2)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Totals Preview */}
+                  <div className="flex justify-end">
+                    <div className="w-64 bg-gray-50 rounded-lg p-4">
+                      <div className="flex justify-between py-1 text-sm">
+                        <span className="text-gray-600">Subtotal:</span>
+                        <span className="font-medium">${editInvoiceItems.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between py-1 text-sm">
+                        <span className="text-gray-600">GST ({editInvoiceGstPercent}%):</span>
+                        <span className="font-medium">${(editInvoiceItems.reduce((sum, item) => sum + item.subtotal, 0) * (editInvoiceGstPercent / 100)).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between py-2 text-lg font-bold border-t border-gray-300 mt-2" style={{ color: '#5C2E1F' }}>
+                        <span>Total:</span>
+                        <span>${(editInvoiceItems.reduce((sum, item) => sum + item.subtotal, 0) * (1 + editInvoiceGstPercent / 100)).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer Actions */}
+                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg">
+                  <button
+                    onClick={handleSaveEditInvoice}
+                    disabled={isSavingInvoice}
+                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    style={{ backgroundColor: '#FF5722' }}
+                  >
+                    {isSavingInvoice ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Check size={20} />
+                        Save Changes
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setShowEditInvoiceModal(false)}
+                    className="flex-1 px-4 py-3 rounded-lg border-2 font-medium hover:bg-gray-50 transition-colors"
+                    style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Edit Order Modal */}
           {showEditOrderModal && selectedOrder && (
             <EditOnlineOrderModal

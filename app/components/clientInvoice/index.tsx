@@ -42,6 +42,7 @@ interface ClientInvoiceProps {
   formatDate: (dateString: string) => string;
   getSubtotal: (order: Order) => number;
   getGST: (order: Order) => number;
+  gstPercentage?: number;
   selectedHeader?: {
     id: number;
     option_name: string;
@@ -72,11 +73,13 @@ export default function ClientInvoice({
   formatDate,
   getSubtotal,
   getGST,
+  gstPercentage = 9,
   selectedHeader,
   selectedFooter
 }: ClientInvoiceProps) {
   const subtotal = getSubtotal(order);
   const gst = getGST(order);
+  const displayGstPercentage = gstPercentage;
 
   return (
     <div style={{
@@ -441,7 +444,7 @@ export default function ClientInvoice({
                 <div className="totals-value">{subtotal.toFixed(2)}</div>
               </div>
               <div className="totals-row">
-                <div className="totals-label">GST 9%</div>
+                <div className="totals-label">GST {displayGstPercentage}%</div>
                 <div className="totals-value">{gst.toFixed(2)}</div>
               </div>
               <div className="totals-row">

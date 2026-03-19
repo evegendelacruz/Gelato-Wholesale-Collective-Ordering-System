@@ -209,6 +209,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   const [country, setCountry] = useState('Singapore');
   const [postalCode, setPostalCode] = useState('');
   const [publishToClient, setPublishToClient] = useState(true);
+  const [defaultGstPercent, setDefaultGstPercent] = useState(9);
 
   // Step 3: Product Selection
   const [availableProducts, setAvailableProducts] = useState<ClientProduct[]>([]);
@@ -252,6 +253,17 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   // Publish to Client Confirmation Modal
   const [showPublishConfirmModal, setShowPublishConfirmModal] = useState(false);
   const [publishConfirmItemIndex, setPublishConfirmItemIndex] = useState<number | null>(null);
+
+  // Load default GST from localStorage on mount
+  useEffect(() => {
+    const savedGst = localStorage.getItem('defaultGstPercent_client');
+    if (savedGst) {
+      const gstValue = parseFloat(savedGst);
+      if (!isNaN(gstValue) && gstValue >= 0 && gstValue <= 100) {
+        setDefaultGstPercent(gstValue);
+      }
+    }
+  }, []);
 
   // Fetch clients and dropdown options on mount
   useEffect(() => {
@@ -782,7 +794,7 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
   };
 
   const calculateGST = () => {
-    return calculateTotal() * 0.09;
+    return calculateTotal() * (defaultGstPercent / 100);
   };
 
   const calculateGrandTotal = () => {
@@ -1939,7 +1951,7 @@ const handleClose = () => {
                       <span className="font-medium">S$ {calculateTotal().toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-sm mb-2">
-                      <span className="text-gray-600">GST (9%):</span>
+                      <span className="text-gray-600">GST ({defaultGstPercent}%):</span>
                       <span className="font-medium">S$ {calculateGST().toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-lg font-bold border-t pt-2">

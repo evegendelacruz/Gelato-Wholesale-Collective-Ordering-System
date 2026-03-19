@@ -19,7 +19,8 @@
       "Bash(timeout 45 npm run dev:*)",
       "Bash(npm run lint:*)",
       "Bash(npx next build:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(npx supabase:*)"
     ]
   }
 }
