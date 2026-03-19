@@ -102,7 +102,7 @@ interface FooterOption {
 
 export default function ClientQuotationPage() {
   const { canEdit } = useAccessControl();
-  const canEditQuotations = canEdit('client-account', 'quotation');
+  const canEditQuotations = canEdit('client', 'quotation');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -1400,8 +1400,10 @@ export default function ClientQuotationPage() {
 
                 <button
                   onClick={() => setShowCreateModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: '#FF5722' }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-white font-medium transition-opacity ${canEditQuotations ? 'hover:opacity-90' : 'opacity-50 cursor-not-allowed'}`}
+                  style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }}
+                  disabled={!canEditQuotations}
+                  title={!canEditQuotations ? 'You do not have permission to create quotations' : ''}
                 >
                   <Plus size={20} />
                   <span>Create Quotation</span>
@@ -1536,7 +1538,7 @@ export default function ClientQuotationPage() {
                 <div className="flex-1 overflow-auto p-6 space-y-6">
                   {/* Client Type Toggle */}
                   <div className="flex items-center gap-4 mb-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className={`flex items-center gap-2 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                       <input
                         type="radio"
                         name="clientType"
@@ -1546,11 +1548,12 @@ export default function ClientQuotationPage() {
                           setUnregisteredClientName('');
                           setUnregisteredClientAddress('');
                         }}
-                        className="accent-orange-500"
+                        className={`accent-orange-500 ${!canEditQuotations ? 'cursor-not-allowed' : ''}`}
+                        disabled={!canEditQuotations}
                       />
                       <span className="text-sm font-medium" style={{ color: '#5C2E1F' }}>Registered Client</span>
                     </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className={`flex items-center gap-2 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                       <input
                         type="radio"
                         name="clientType"
@@ -1560,7 +1563,8 @@ export default function ClientQuotationPage() {
                           setSelectedClient('');
                           setClientSearchQuery('');
                         }}
-                        className="accent-orange-500"
+                        className={`accent-orange-500 ${!canEditQuotations ? 'cursor-not-allowed' : ''}`}
+                        disabled={!canEditQuotations}
                       />
                       <span className="text-sm font-medium" style={{ color: '#5C2E1F' }}>Unregistered Client</span>
                     </label>
@@ -1654,7 +1658,9 @@ export default function ClientQuotationPage() {
                       </label>
                       <button
                         onClick={handleAddItem}
-                        className="flex items-center gap-1 text-sm px-3 py-1 rounded border border-orange-500 text-orange-500 hover:bg-orange-50 transition-colors"
+                        className={`flex items-center gap-1 text-sm px-3 py-1 rounded border transition-colors ${canEditQuotations ? 'border-orange-500 text-orange-500 hover:bg-orange-50' : 'border-gray-300 text-gray-400 cursor-not-allowed opacity-50'}`}
+                        disabled={!canEditQuotations}
+                        title={!canEditQuotations ? 'You do not have permission to add items' : ''}
                       >
                         <Plus size={16} />
                         Add Item
@@ -1740,7 +1746,9 @@ export default function ClientQuotationPage() {
                                 <td className="py-2 px-2 text-center">
                                   <button
                                     onClick={() => handleRemoveItem(index)}
-                                    className="text-red-500 hover:text-red-700 transition-colors"
+                                    className={`transition-colors ${canEditQuotations ? 'text-red-500 hover:text-red-700' : 'text-gray-400 cursor-not-allowed opacity-50'}`}
+                                    disabled={!canEditQuotations}
+                                    title={!canEditQuotations ? 'You do not have permission to remove items' : ''}
                                   >
                                     <Trash2 size={16} />
                                   </button>
@@ -1790,9 +1798,10 @@ export default function ClientQuotationPage() {
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg">
                   <button
                     onClick={handleCreateQuotation}
-                    disabled={creatingQuotation}
-                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-                    style={{ backgroundColor: '#FF5722' }}
+                    disabled={creatingQuotation || !canEditQuotations}
+                    className={`flex-1 px-4 py-3 rounded-lg text-white font-medium transition-opacity disabled:opacity-50 ${canEditQuotations ? 'hover:opacity-90' : 'cursor-not-allowed'}`}
+                    style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }}
+                    title={!canEditQuotations ? 'You do not have permission to create quotations' : ''}
                   >
                     {creatingQuotation ? 'Creating...' : 'Create Quotation'}
                   </button>
@@ -1835,19 +1844,21 @@ export default function ClientQuotationPage() {
                     </label>
                     <div className="flex items-center gap-2 flex-wrap">
                       {headerOptions.map((header) => (
-                        <label key={header.id} className="flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:border-orange-300 transition-colors">
+                        <label key={header.id} className={`flex items-center gap-1 bg-white px-2 py-1 rounded border border-gray-200 transition-colors ${canEditQuotations ? 'cursor-pointer hover:border-orange-300' : 'cursor-not-allowed opacity-50'}`}>
                           <input
                             type="radio"
                             name="headerOption"
                             value={header.id}
                             checked={selectedHeaderId === header.id}
                             onChange={() => setSelectedHeaderId(header.id)}
-                            className="cursor-pointer accent-orange-500 w-3 h-3"
+                            className={`accent-orange-500 w-3 h-3 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                            disabled={!canEditQuotations}
                           />
                           <span className="text-xs font-medium">{header.option_name}</span>
                           <button
                             onClick={(e) => { e.preventDefault(); handleEditHeaderOption(header); }}
-                            className="text-blue-500 hover:text-blue-700 text-xs ml-1 underline"
+                            className={`text-xs ml-1 underline ${canEditQuotations ? 'text-blue-500 hover:text-blue-700' : 'text-gray-400 cursor-not-allowed'}`}
+                            disabled={!canEditQuotations}
                           >Edit</button>
                         </label>
                       ))}
@@ -1857,8 +1868,10 @@ export default function ClientQuotationPage() {
                           setHeaderFormData({ option_name: '', line1: '', line2: '', line3: '', line4: '', line5: '', line6: '', line7: '' });
                           setShowHeaderEditor(true);
                         }}
-                        className="text-xs px-2 py-1 border border-dashed border-gray-300 rounded hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                        className={`text-xs px-2 py-1 border border-dashed rounded transition-colors ${canEditQuotations ? 'border-gray-300 hover:border-orange-400 hover:bg-orange-50' : 'border-gray-200 opacity-50 cursor-not-allowed'}`}
                         style={{ color: '#5C2E1F' }}
+                        disabled={!canEditQuotations}
+                        title={!canEditQuotations ? 'You do not have permission to add headers' : ''}
                       >+ New Header</button>
                     </div>
                   </div>
@@ -2034,31 +2047,34 @@ export default function ClientQuotationPage() {
                     </label>
                     <div className="flex items-center gap-2 flex-wrap">
                       {/* Empty Option */}
-                      <label className="flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:border-orange-300 transition-colors">
+                      <label className={`flex items-center gap-1 bg-white px-2 py-1 rounded border border-gray-200 transition-colors ${canEditQuotations ? 'cursor-pointer hover:border-orange-300' : 'cursor-not-allowed opacity-50'}`}>
                         <input
                           type="radio"
                           name="footerOption"
                           value=""
                           checked={selectedFooterId === null}
                           onChange={() => setSelectedFooterId(null)}
-                          className="cursor-pointer accent-orange-500 w-3 h-3"
+                          className={`accent-orange-500 w-3 h-3 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                          disabled={!canEditQuotations}
                         />
                         <span className="text-xs font-medium">Empty</span>
                       </label>
                       {footerOptions.map((footer) => (
-                        <label key={footer.id} className="flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:border-orange-300 transition-colors">
+                        <label key={footer.id} className={`flex items-center gap-1 bg-white px-2 py-1 rounded border border-gray-200 transition-colors ${canEditQuotations ? 'cursor-pointer hover:border-orange-300' : 'cursor-not-allowed opacity-50'}`}>
                           <input
                             type="radio"
                             name="footerOption"
                             value={footer.id}
                             checked={selectedFooterId === footer.id}
                             onChange={() => setSelectedFooterId(footer.id)}
-                            className="cursor-pointer accent-orange-500 w-3 h-3"
+                            className={`accent-orange-500 w-3 h-3 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                            disabled={!canEditQuotations}
                           />
                           <span className="text-xs font-medium">{footer.option_name}</span>
                           <button
                             onClick={(e) => { e.preventDefault(); handleEditFooterOption(footer); }}
-                            className="text-blue-500 hover:text-blue-700 text-xs ml-1 underline"
+                            className={`text-xs ml-1 underline ${canEditQuotations ? 'text-blue-500 hover:text-blue-700' : 'text-gray-400 cursor-not-allowed'}`}
+                            disabled={!canEditQuotations}
                           >Edit</button>
                         </label>
                       ))}
@@ -2068,8 +2084,10 @@ export default function ClientQuotationPage() {
                           setFooterFormData({ option_name: '', line1: '', line2: '', line3: '', line4: '', line5: '' });
                           setShowFooterEditor(true);
                         }}
-                        className="text-xs px-2 py-1 border border-dashed border-gray-300 rounded hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                        className={`text-xs px-2 py-1 border border-dashed rounded transition-colors ${canEditQuotations ? 'border-gray-300 hover:border-orange-400 hover:bg-orange-50' : 'border-gray-200 opacity-50 cursor-not-allowed'}`}
                         style={{ color: '#5C2E1F' }}
+                        disabled={!canEditQuotations}
+                        title={!canEditQuotations ? 'You do not have permission to add footers' : ''}
                       >+ New Footer</button>
                     </div>
                   </div>
@@ -2245,7 +2263,9 @@ export default function ClientQuotationPage() {
                       </label>
                       <button
                         onClick={handleAddEditItem}
-                        className="flex items-center gap-1 text-sm px-3 py-1 rounded border border-orange-500 text-orange-500 hover:bg-orange-50 transition-colors"
+                        className={`flex items-center gap-1 text-sm px-3 py-1 rounded border transition-colors ${canEditQuotations ? 'border-orange-500 text-orange-500 hover:bg-orange-50' : 'border-gray-300 text-gray-400 cursor-not-allowed opacity-50'}`}
+                        disabled={!canEditQuotations}
+                        title={!canEditQuotations ? 'You do not have permission to add items' : ''}
                       >
                         <Plus size={16} />
                         Add Item
@@ -2344,7 +2364,9 @@ export default function ClientQuotationPage() {
                                 <td className="py-2 px-2 text-center">
                                   <button
                                     onClick={() => handleRemoveEditItem(index)}
-                                    className="text-red-500 hover:text-red-700 transition-colors"
+                                    className={`transition-colors ${canEditQuotations ? 'text-red-500 hover:text-red-700' : 'text-gray-400 cursor-not-allowed opacity-50'}`}
+                                    disabled={!canEditQuotations}
+                                    title={!canEditQuotations ? 'You do not have permission to remove items' : ''}
                                   >
                                     <Trash2 size={16} />
                                   </button>
@@ -2394,9 +2416,10 @@ export default function ClientQuotationPage() {
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg">
                   <button
                     onClick={handleSaveEdit}
-                    disabled={loading}
-                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-                    style={{ backgroundColor: '#FF5722' }}
+                    disabled={loading || !canEditQuotations}
+                    className={`flex-1 px-4 py-3 rounded-lg text-white font-medium transition-opacity disabled:opacity-50 ${canEditQuotations ? 'hover:opacity-90' : 'cursor-not-allowed'}`}
+                    style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }}
+                    title={!canEditQuotations ? 'You do not have permission to save changes' : ''}
                   >
                     {loading ? 'Saving...' : 'Save Changes'}
                   </button>
@@ -2468,9 +2491,10 @@ export default function ClientQuotationPage() {
                 <>
                   <button
                     onClick={handleEditSelected}
-                    disabled={loading}
-                    className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={loading || !canEditQuotations}
+                    className={`flex items-center gap-1.5 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${canEditQuotations ? 'hover:text-gray-300' : ''}`}
                     style={{ padding: "2px 6px" }}
+                    title={!canEditQuotations ? 'You do not have permission to edit quotations' : ''}
                   >
                     <Edit2 size={16} />
                     <span className="text-sm">Edit</span>
@@ -2488,9 +2512,10 @@ export default function ClientQuotationPage() {
 
               <button
                 onClick={handleDeleteSelected}
-                disabled={loading}
-                className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={loading || !canEditQuotations}
+                className={`flex items-center gap-1.5 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${canEditQuotations ? 'hover:text-gray-300' : ''}`}
                 style={{ padding: "2px 6px" }}
+                title={!canEditQuotations ? 'You do not have permission to delete quotations' : ''}
               >
                 <Trash2 size={16} />
                 <span className="text-sm">Delete</span>
@@ -2506,7 +2531,7 @@ export default function ClientQuotationPage() {
                   <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>{editingHeaderId ? 'Edit Header' : 'New Header'}</h3>
                   <div className="flex items-center gap-2">
                     {editingHeaderId && (
-                      <button onClick={() => handleDeleteHeaderOption(editingHeaderId)} className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-300 rounded">Delete</button>
+                      <button onClick={() => handleDeleteHeaderOption(editingHeaderId)} disabled={!canEditQuotations} className={`text-xs px-2 py-1 border rounded ${canEditQuotations ? 'text-red-600 hover:text-red-800 border-red-300' : 'text-gray-400 border-gray-200 cursor-not-allowed opacity-50'}`} title={!canEditQuotations ? 'You do not have permission to delete headers' : ''}>Delete</button>
                     )}
                     <button onClick={() => setShowHeaderEditor(false)} className="text-gray-500 hover:text-gray-700 text-xl">×</button>
                   </div>
@@ -2546,7 +2571,7 @@ export default function ClientQuotationPage() {
                   </div>
                 </div>
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-2">
-                  <button onClick={handleSaveHeaderOption} className="flex-1 px-3 py-2 text-white rounded text-sm font-medium hover:opacity-90" style={{ backgroundColor: '#FF5722' }}>{editingHeaderId ? 'Update' : 'Create'}</button>
+                  <button onClick={handleSaveHeaderOption} disabled={!canEditQuotations} className={`flex-1 px-3 py-2 text-white rounded text-sm font-medium ${canEditQuotations ? 'hover:opacity-90' : 'opacity-50 cursor-not-allowed'}`} style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }} title={!canEditQuotations ? 'You do not have permission to edit headers' : ''}>{editingHeaderId ? 'Update' : 'Create'}</button>
                   <button onClick={() => setShowHeaderEditor(false)} className="flex-1 px-3 py-2 border rounded text-sm font-medium hover:bg-gray-50" style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}>Cancel</button>
                 </div>
               </div>
@@ -2561,7 +2586,7 @@ export default function ClientQuotationPage() {
                   <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>{editingFooterId ? 'Edit Footer' : 'New Footer'}</h3>
                   <div className="flex items-center gap-2">
                     {editingFooterId && (
-                      <button onClick={() => handleDeleteFooterOption(editingFooterId)} className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-300 rounded">Delete</button>
+                      <button onClick={() => handleDeleteFooterOption(editingFooterId)} disabled={!canEditQuotations} className={`text-xs px-2 py-1 border rounded ${canEditQuotations ? 'text-red-600 hover:text-red-800 border-red-300' : 'text-gray-400 border-gray-200 cursor-not-allowed opacity-50'}`} title={!canEditQuotations ? 'You do not have permission to delete footers' : ''}>Delete</button>
                     )}
                     <button onClick={() => setShowFooterEditor(false)} className="text-gray-500 hover:text-gray-700 text-xl">×</button>
                   </div>
@@ -2593,7 +2618,7 @@ export default function ClientQuotationPage() {
                   </div>
                 </div>
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-2">
-                  <button onClick={handleSaveFooterOption} className="flex-1 px-3 py-2 text-white rounded text-sm font-medium hover:opacity-90" style={{ backgroundColor: '#FF5722' }}>{editingFooterId ? 'Update' : 'Create'}</button>
+                  <button onClick={handleSaveFooterOption} disabled={!canEditQuotations} className={`flex-1 px-3 py-2 text-white rounded text-sm font-medium ${canEditQuotations ? 'hover:opacity-90' : 'opacity-50 cursor-not-allowed'}`} style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }} title={!canEditQuotations ? 'You do not have permission to edit footers' : ''}>{editingFooterId ? 'Update' : 'Create'}</button>
                   <button onClick={() => setShowFooterEditor(false)} className="flex-1 px-3 py-2 border rounded text-sm font-medium hover:bg-gray-50" style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}>Cancel</button>
                 </div>
               </div>
