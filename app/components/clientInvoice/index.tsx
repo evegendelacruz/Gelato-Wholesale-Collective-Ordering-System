@@ -333,13 +333,27 @@ export default function ClientInvoice({
           {/* Header */}
           <div className="header-section">
             <div className="company-info">
-              <div className="company-name">{selectedHeader?.line1 || 'Momolato Pte Ltd'}</div>
-              <div>{selectedHeader?.line2 || '21 Tampines Street 92, #04-06'}</div>
-              <div>{selectedHeader?.line3 || 'Singapore'}</div>
-              <div>{selectedHeader?.line4 || 'finance@momolato.com'}</div>
-              <div>{selectedHeader?.line5 || 'GST Registration No. : 201319550R'}</div>
-              <div>{selectedHeader?.line6 || 'Company Registration No. UEN:'}</div>
-              <div>{selectedHeader?.line7 || '201319550R'}</div>
+              {selectedHeader ? (
+                <>
+                  {selectedHeader.line1 && <div className="company-name">{selectedHeader.line1}</div>}
+                  {selectedHeader.line2 && <div>{selectedHeader.line2}</div>}
+                  {selectedHeader.line3 && <div>{selectedHeader.line3}</div>}
+                  {selectedHeader.line4 && <div>{selectedHeader.line4}</div>}
+                  {selectedHeader.line5 && <div>{selectedHeader.line5}</div>}
+                  {selectedHeader.line6 && <div>{selectedHeader.line6}</div>}
+                  {selectedHeader.line7 && <div>{selectedHeader.line7}</div>}
+                </>
+              ) : (
+                <>
+                  <div className="company-name">Momolato Pte Ltd</div>
+                  <div>21 Tampines Street 92, #04-06</div>
+                  <div>Singapore</div>
+                  <div>finance@momolato.com</div>
+                  <div>GST Registration No. : 201319550R</div>
+                  <div>Company Registration No. UEN:</div>
+                  <div>201319550R</div>
+                </>
+              )}
             </div>
             <div className="logo-container">
               <Image

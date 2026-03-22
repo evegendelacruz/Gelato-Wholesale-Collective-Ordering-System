@@ -72,13 +72,14 @@ export default function IngredientsPage() {
       const { data, error } = await supabase
         .from('product_list')
         .select('id, product_id, product_name, product_ingredient, product_allergen, product_image, product_created_at')
+        .or('is_deleted.is.null,is_deleted.eq.false')
         .order('id', { ascending: false });
 
       if (error) {
         console.error('Supabase error:', error);
         throw error;
       }
-      
+
       setIngredients(data || []);
     } catch (error) {
       console.error('Error fetching ingredients:', error);

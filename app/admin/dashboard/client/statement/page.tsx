@@ -78,6 +78,7 @@ export default function ClientStatementPage() {
   const [statementInvoices, setStatementInvoices] = useState<Invoice[]>([]);
   const [headerOptions, setHeaderOptions] = useState<HeaderOption[]>([]);
   const [selectedHeaderId, setSelectedHeaderId] = useState<number | null>(null);
+  const [statementHeaders, setStatementHeaders] = useState<Record<string, number>>({});
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
   const [editingHeaderId, setEditingHeaderId] = useState<number | null>(null);
   const [agingCategory, setAgingCategory] = useState('1-30_days');
@@ -152,6 +153,30 @@ export default function ClientStatementPage() {
 
     fetchHeaderOptions();
   }, []);
+
+  // Load saved statement headers from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('statementHeaders');
+      if (saved) {
+        setStatementHeaders(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error('Error loading statement headers from localStorage:', error);
+    }
+  }, []);
+
+  // Function to save header for a specific statement
+  const saveStatementHeader = (statementId: string, headerId: number) => {
+    const updated = { ...statementHeaders, [statementId]: headerId };
+    setStatementHeaders(updated);
+    setSelectedHeaderId(headerId);
+    try {
+      localStorage.setItem('statementHeaders', JSON.stringify(updated));
+    } catch (error) {
+      console.error('Error saving statement headers to localStorage:', error);
+    }
+  };
 
   useEffect(() => {
     const initializeStatements = async () => {
@@ -305,50 +330,69 @@ export default function ClientStatementPage() {
 
           // Generate unique statement_id (format: STM-YYYYMMDD-XXXX)
           const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-          const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-          const newStatementId = `STM-${dateStr}-${randomSuffix}`;
+          const randomSuffix = Math.random().toString(36).substring(2, 8).toUpperCase();
+          const timestamp = Date.now().toString(36).slice(-4).toUpperCase();
+          const newStatementId = `STM-${dateStr}-${randomSuffix}${timestamp}`;
 
-          // Create new statement with all required fields
+          // Create new statement - only include columns that exist in the actual database
+          // Note: company_name, invoice_count, and contact details are fetched via join with client_user
           const { data: newStatement, error: statementError } = await supabase
             .from('client_statement')
             .insert({
               statement_id: newStatementId,
               client_auth_id: firstOrder.client_auth_id,
-              company_name: clientData.client_businessName || 'Unknown Company',
               statement_month: statementMonthStr,
               total_amount: totalAmount,
-              invoice_count: orders.length,
-              date_generated: new Date().toISOString(),
-              client_email: clientData.client_email,
-              client_person_incharge: clientData.client_person_incharge,
-              client_business_contact: clientData.client_business_contact,
-              business_address: [clientData.ad_streetName, clientData.ad_country, clientData.ad_postal].filter(Boolean).join(', ') || null
+              date_generated: new Date().toISOString()
             })
             .select('statement_id')
             .single();
 
           if (statementError) {
-            console.error('Error creating statement:', {
-              error: statementError,
-              details: {
-                statement_id: newStatementId,
-                client_auth_id: firstOrder.client_auth_id,
-                company_name: clientData.client_businessName,
-                statement_month: statementMonthStr,
-                total_amount: totalAmount,
-                invoice_count: orders.length
-              }
-            });
-            continue;
-          }
+            // Handle duplicate key error - statement already exists for this client-month
+            if (statementError.code === '23505') {
+              console.log(`Statement already exists for client ${firstOrder.client_auth_id} month ${statementMonthStr}, fetching existing...`);
 
-          if (!newStatement) {
+              // Fetch the existing statement
+              const { data: existingStmt, error: fetchError } = await supabase
+                .from('client_statement')
+                .select('statement_id')
+                .eq('client_auth_id', firstOrder.client_auth_id)
+                .limit(1)
+                .order('statement_month', { ascending: false });
+
+              if (fetchError || !existingStmt || existingStmt.length === 0) {
+                console.error('Could not fetch existing statement:', fetchError);
+                continue;
+              }
+
+              statementId = existingStmt[0].statement_id;
+              console.log(`Using existing statement: ${statementId}`);
+
+              // Update the total amount
+              const { error: updateError } = await supabase
+                .from('client_statement')
+                .update({
+                  total_amount: totalAmount,
+                  date_generated: new Date().toISOString()
+                })
+                .eq('statement_id', statementId);
+
+              if (updateError) {
+                console.error('Error updating existing statement:', updateError);
+              }
+            } else {
+              console.error('Error creating statement:', statementError.message || statementError);
+              console.error('Error code:', statementError.code);
+              continue;
+            }
+          } else if (!newStatement) {
             console.error('Statement created but no data returned');
             continue;
+          } else {
+            statementId = newStatement.statement_id;
+            console.log(`Created new statement: ${statementId} for month: ${statementMonthStr}`);
           }
-
-          statementId = newStatement.statement_id;
-          console.log(`Created new statement: ${statementId} for month: ${statementMonthStr}`);
         }
 
         // Update all orders in this group with the statement_id
@@ -586,7 +630,7 @@ const handleViewStatement = async (statement: Statement) => {
   try {
     setLoading(true);
     const invoices = await fetchStatementInvoices(statement.statement_id);
-    
+
     if (invoices.length === 0) {
       alert('No invoices found for this statement.');
       setLoading(false);
@@ -596,6 +640,19 @@ const handleViewStatement = async (statement: Statement) => {
     setSelectedStatement(statement);
     setStatementInvoices(invoices);
     setAgingCategory(statement.aging_category || '1-30_days');
+
+    // Load saved header for this specific statement, or use default
+    const savedHeaderId = statementHeaders[statement.statement_id];
+    if (savedHeaderId && headerOptions.some(h => h.id === savedHeaderId)) {
+      setSelectedHeaderId(savedHeaderId);
+    } else {
+      // Use default header
+      const defaultHeader = headerOptions.find(h => h.is_default) || headerOptions[0];
+      if (defaultHeader) {
+        setSelectedHeaderId(defaultHeader.id);
+      }
+    }
+
     setShowStatementModal(true);
     setLoading(false);
   } catch (error) {
@@ -1582,7 +1639,7 @@ const fetchStatements = async () => {
                             name="headerOption"
                             value={header.id}
                             checked={selectedHeaderId === header.id}
-                            onChange={() => setSelectedHeaderId(header.id)}
+                            onChange={() => selectedStatement && saveStatementHeader(selectedStatement.statement_id, header.id)}
                             className="cursor-pointer accent-orange-500"
                           />
                           <span className="text-sm font-medium">{header.option_name}</span>

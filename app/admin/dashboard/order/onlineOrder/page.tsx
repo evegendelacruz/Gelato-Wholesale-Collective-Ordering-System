@@ -147,6 +147,7 @@ export default function OnlineOrderPage() {
     }>
   >([]);
   const [selectedHeaderId, setSelectedHeaderId] = useState<number | null>(null);
+  const [onlineInvoiceHeaders, setOnlineInvoiceHeaders] = useState<Record<string, number>>({});
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
   const [editingHeaderId, setEditingHeaderId] = useState<number | null>(null);
   const [headerFormData, setHeaderFormData] = useState({
@@ -233,6 +234,11 @@ export default function OnlineOrderPage() {
   }>>([]);
   const [applyGstToFutureOrders, setApplyGstToFutureOrders] = useState(false);
   const [isSavingInvoice, setIsSavingInvoice] = useState(false);
+
+  // Edit Invoice Address state
+  const [editBillToAddress, setEditBillToAddress] = useState('');
+  const [editShipToAddress, setEditShipToAddress] = useState('');
+  const [applyAddressToFutureOrders, setApplyAddressToFutureOrders] = useState(false);
 
   // Sticker preview state
   const [showStickerPreview, setShowStickerPreview] = useState(false);
@@ -327,6 +333,30 @@ export default function OnlineOrderPage() {
 
     fetchHeaderOptions();
   }, []);
+
+  // Load saved online invoice headers from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('onlineInvoiceHeaders');
+      if (saved) {
+        setOnlineInvoiceHeaders(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error('Error loading online invoice headers from localStorage:', error);
+    }
+  }, []);
+
+  // Function to save header for a specific online invoice
+  const saveOnlineInvoiceHeader = (invoiceId: string, headerId: number) => {
+    const updated = { ...onlineInvoiceHeaders, [invoiceId]: headerId };
+    setOnlineInvoiceHeaders(updated);
+    setSelectedHeaderId(headerId);
+    try {
+      localStorage.setItem('onlineInvoiceHeaders', JSON.stringify(updated));
+    } catch (error) {
+      console.error('Error saving online invoice headers to localStorage:', error);
+    }
+  };
 
   // Fetch footer options on component mount
   useEffect(() => {
@@ -1317,6 +1347,18 @@ export default function OnlineOrderPage() {
         setCurrentInvoiceGstPercent(!isNaN(defaultGst) ? defaultGst : 9);
       }
 
+      // Load saved header for this specific invoice, or use default
+      const savedHeaderId = onlineInvoiceHeaders[order.invoice_id];
+      if (savedHeaderId && headerOptions.some(h => h.id === savedHeaderId)) {
+        setSelectedHeaderId(savedHeaderId);
+      } else {
+        // Use default header
+        const defaultHeader = headerOptions.find(h => h.is_default) || headerOptions[0];
+        if (defaultHeader) {
+          setSelectedHeaderId(defaultHeader.id);
+        }
+      }
+
       setShowInvoiceModal(true);
     } catch (error) {
       console.error("Error fetching order items for invoice:", error);
@@ -1687,6 +1729,11 @@ export default function OnlineOrderPage() {
     const savedGstValue = savedGst ? parseFloat(savedGst) : 9;
     setApplyGstToFutureOrders(currentInvoiceGstPercent === savedGstValue);
 
+    // Initialize address fields from order (online orders store address directly)
+    setEditBillToAddress(selectedOrder.delivery_address || '');
+    setEditShipToAddress(selectedOrder.delivery_address || '');
+    setApplyAddressToFutureOrders(false);
+
     setShowEditInvoiceModal(true);
   };
 
@@ -1773,6 +1820,24 @@ export default function OnlineOrderPage() {
       if (applyGstToFutureOrders) {
         localStorage.setItem('defaultGstPercent_online', editInvoiceGstPercent.toString());
       }
+
+      // Update this order's delivery_address in database (online orders store address directly)
+      const { error: addressError } = await supabase
+        .from('customer_order')
+        .update({
+          delivery_address: editShipToAddress
+        })
+        .eq('id', selectedOrder.id);
+
+      if (addressError) {
+        console.error('Error updating order address:', addressError);
+      }
+
+      // Update local state with new address
+      setSelectedOrder(prev => prev ? {
+        ...prev,
+        delivery_address: editShipToAddress
+      } : null);
 
       // Refresh orders list
       const { data } = await supabase
@@ -2165,7 +2230,7 @@ export default function OnlineOrderPage() {
                       name="headerOption"
                       value={header.id}
                       checked={selectedHeaderId === header.id}
-                      onChange={() => setSelectedHeaderId(header.id)}
+                      onChange={() => selectedOrder && saveOnlineInvoiceHeader(selectedOrder.invoice_id, header.id)}
                       className="cursor-pointer accent-orange-500"
                     />
                     <span className="text-sm font-medium">
@@ -3356,6 +3421,36 @@ export default function OnlineOrderPage() {
                     </div>
                     <p className="text-xs text-gray-500 mt-2">
                       Note: Changing GST will only affect this order. Previous orders will retain their original GST rates.
+                    </p>
+                  </div>
+
+                  {/* Address Section */}
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <h4 className="text-lg font-semibold mb-4" style={{ color: '#5C2E1F' }}>Invoice Address</h4>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Bill To Address</label>
+                        <textarea
+                          value={editBillToAddress}
+                          onChange={(e) => setEditBillToAddress(e.target.value)}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                          placeholder="Enter billing address"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Ship To Address</label>
+                        <textarea
+                          value={editShipToAddress}
+                          onChange={(e) => setEditShipToAddress(e.target.value)}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                          placeholder="Enter shipping address"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Note: Addresses will be updated for this invoice only.
                     </p>
                   </div>
 

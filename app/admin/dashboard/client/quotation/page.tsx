@@ -136,6 +136,7 @@ export default function ClientQuotationPage() {
   const [footerOptions, setFooterOptions] = useState<FooterOption[]>([]);
   const [selectedHeaderId, setSelectedHeaderId] = useState<number | null>(null);
   const [selectedFooterId, setSelectedFooterId] = useState<number | null>(null);
+  const [quotationHeaders, setQuotationHeaders] = useState<Record<string, number>>({});
 
   // Header/Footer editor states
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
@@ -183,6 +184,30 @@ export default function ClientQuotationPage() {
     fetchHeaderOptions();
     fetchFooterOptions();
   }, []);
+
+  // Load saved quotation headers from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('quotationHeaders');
+      if (saved) {
+        setQuotationHeaders(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error('Error loading quotation headers from localStorage:', error);
+    }
+  }, []);
+
+  // Function to save header for a specific quotation
+  const saveQuotationHeader = (quotationId: string, headerId: number) => {
+    const updated = { ...quotationHeaders, [quotationId]: headerId };
+    setQuotationHeaders(updated);
+    setSelectedHeaderId(headerId);
+    try {
+      localStorage.setItem('quotationHeaders', JSON.stringify(updated));
+    } catch (error) {
+      console.error('Error saving quotation headers to localStorage:', error);
+    }
+  };
 
   const fetchHeaderOptions = async () => {
     try {
@@ -1059,6 +1084,19 @@ export default function ClientQuotationPage() {
 
       setSelectedQuotation(quotation);
       setQuotationItemsView(items || []);
+
+      // Load saved header for this specific quotation, or use default
+      const savedHeaderId = quotationHeaders[quotation.quotation_id];
+      if (savedHeaderId && headerOptions.some(h => h.id === savedHeaderId)) {
+        setSelectedHeaderId(savedHeaderId);
+      } else {
+        // Use default header
+        const defaultHeader = headerOptions.find(h => h.is_default) || headerOptions[0];
+        if (defaultHeader) {
+          setSelectedHeaderId(defaultHeader.id);
+        }
+      }
+
       setShowQuotationModal(true);
     } catch (error) {
       console.error('Error loading quotation:', error);
@@ -1850,7 +1888,7 @@ export default function ClientQuotationPage() {
                             name="headerOption"
                             value={header.id}
                             checked={selectedHeaderId === header.id}
-                            onChange={() => setSelectedHeaderId(header.id)}
+                            onChange={() => selectedQuotation && saveQuotationHeader(selectedQuotation.quotation_id, header.id)}
                             className={`accent-orange-500 w-3 h-3 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed'}`}
                             disabled={!canEditQuotations}
                           />

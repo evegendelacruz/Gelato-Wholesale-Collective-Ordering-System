@@ -123,6 +123,7 @@ export default function OrderPage() {
   const [showEditOrderModal, setShowEditOrderModal] = useState(false);
   const [headerOptions, setHeaderOptions] = useState([]);
   const [selectedHeaderId, setSelectedHeaderId] = useState(null);
+  const [invoiceHeaders, setInvoiceHeaders] = useState<Record<string, number>>({});
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
   const [editingHeaderId, setEditingHeaderId] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -222,6 +223,11 @@ export default function OrderPage() {
   const [applyGstToFutureOrders, setApplyGstToFutureOrders] = useState(false);
   const [isSavingInvoice, setIsSavingInvoice] = useState(false);
 
+  // Edit Invoice Address state
+  const [editBillToAddress, setEditBillToAddress] = useState('');
+  const [editShipToAddress, setEditShipToAddress] = useState('');
+  const [applyAddressToFutureOrders, setApplyAddressToFutureOrders] = useState(false);
+
   // Use ref for GPBN to avoid closure issues - this stores the starting code for current order
   const gpbnStartCodeRef = useRef<string | null>(null);
 
@@ -298,6 +304,30 @@ useEffect(() => {
 
   fetchHeaderOptions();
 }, []);
+
+// Load saved invoice headers from localStorage
+useEffect(() => {
+  try {
+    const saved = localStorage.getItem('clientInvoiceHeaders');
+    if (saved) {
+      setInvoiceHeaders(JSON.parse(saved));
+    }
+  } catch (error) {
+    console.error('Error loading invoice headers from localStorage:', error);
+  }
+}, []);
+
+// Function to save header for a specific invoice
+const saveInvoiceHeader = (invoiceId: string, headerId: number) => {
+  const updated = { ...invoiceHeaders, [invoiceId]: headerId };
+  setInvoiceHeaders(updated);
+  setSelectedHeaderId(headerId);
+  try {
+    localStorage.setItem('clientInvoiceHeaders', JSON.stringify(updated));
+  } catch (error) {
+    console.error('Error saving invoice headers to localStorage:', error);
+  }
+};
 
 useEffect(() => {
   const fetchFooterOptions = async () => {
@@ -2180,6 +2210,19 @@ const handleViewInvoice = async (order) => {
       const defaultGst = savedGst ? parseFloat(savedGst) : 9;
       setCurrentInvoiceGstPercent(!isNaN(defaultGst) ? defaultGst : 9);
     }
+
+    // Load saved header for this specific invoice, or use default
+    const savedHeaderId = invoiceHeaders[order.invoice_id];
+    if (savedHeaderId && headerOptions.some(h => h.id === savedHeaderId)) {
+      setSelectedHeaderId(savedHeaderId);
+    } else {
+      // Use default header
+      const defaultHeader = headerOptions.find(h => h.is_default) || headerOptions[0];
+      if (defaultHeader) {
+        setSelectedHeaderId(defaultHeader.id);
+      }
+    }
+
     setShowInvoiceModal(true);
   } catch (error) {
     console.error('Error loading invoice:', error);
@@ -2217,6 +2260,16 @@ const handleViewInvoice = async (order) => {
     const savedGst = localStorage.getItem('defaultGstPercent_client');
     const savedGstValue = savedGst ? parseFloat(savedGst) : 9;
     setApplyGstToFutureOrders(currentInvoiceGstPercent === savedGstValue);
+
+    // Initialize address fields from clientData
+    if (clientData) {
+      setEditBillToAddress(clientData.client_billing_address || '');
+      const shipToAddress = [clientData.ad_streetName, clientData.ad_country, clientData.ad_postal]
+        .filter(Boolean)
+        .join(', ') || selectedOrder.delivery_address || '';
+      setEditShipToAddress(shipToAddress);
+    }
+    setApplyAddressToFutureOrders(false);
 
     setShowEditInvoiceModal(true);
   };
@@ -2301,6 +2354,42 @@ const handleViewInvoice = async (order) => {
       // If "Apply to future orders" is checked, save to localStorage
       if (applyGstToFutureOrders) {
         localStorage.setItem('defaultGstPercent_client', editInvoiceGstPercent.toString());
+      }
+
+      // Update local clientData with edited addresses for this invoice display
+      setClientData(prev => ({
+        ...prev,
+        client_billing_address: editBillToAddress,
+        ad_streetName: editShipToAddress,
+        ad_country: '',
+        ad_postal: ''
+      }));
+
+      // If "Apply to all upcoming orders" is checked, update client's default addresses in database
+      if (applyAddressToFutureOrders && selectedOrder.client_auth_id) {
+        const { error: clientUpdateError } = await supabase
+          .from('client_user')
+          .update({
+            client_billing_address: editBillToAddress,
+            ad_streetName: editShipToAddress
+          })
+          .eq('client_auth_id', selectedOrder.client_auth_id);
+
+        if (clientUpdateError) {
+          console.error('Error updating client addresses:', clientUpdateError);
+        }
+      }
+
+      // Update this order's delivery_address in database
+      const { error: addressError } = await supabase
+        .from('client_order')
+        .update({
+          delivery_address: editShipToAddress
+        })
+        .eq('id', selectedOrder.id);
+
+      if (addressError) {
+        console.error('Error updating order address:', addressError);
       }
 
       // Refresh orders list
@@ -3241,7 +3330,7 @@ const handleViewInvoice = async (order) => {
                             name="headerOption"
                             value={header.id}
                             checked={selectedHeaderId === header.id}
-                            onChange={() => setSelectedHeaderId(header.id)}
+                            onChange={() => selectedOrder && saveInvoiceHeader(selectedOrder.invoice_id, header.id)}
                             className="cursor-pointer accent-orange-500"
                           />
                           <span className="text-sm font-medium">{header.option_name}</span>
@@ -3457,6 +3546,45 @@ const handleViewInvoice = async (order) => {
                     </div>
                     <p className="text-xs text-gray-500 mt-2">
                       Note: Changing GST will only affect this order. Previous orders will retain their original GST rates.
+                    </p>
+                  </div>
+
+                  {/* Address Section */}
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <h4 className="text-lg font-semibold mb-4" style={{ color: '#5C2E1F' }}>Invoice Address</h4>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Bill To Address</label>
+                        <textarea
+                          value={editBillToAddress}
+                          onChange={(e) => setEditBillToAddress(e.target.value)}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                          placeholder="Enter billing address"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Ship To Address</label>
+                        <textarea
+                          value={editShipToAddress}
+                          onChange={(e) => setEditShipToAddress(e.target.value)}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                          placeholder="Enter shipping address"
+                        />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={applyAddressToFutureOrders}
+                        onChange={(e) => setApplyAddressToFutureOrders(e.target.checked)}
+                        className="w-4 h-4 accent-orange-500"
+                      />
+                      <span className="text-sm text-gray-700">Apply to all upcoming orders (update client default address)</span>
+                    </label>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Note: Addresses will be updated for this invoice. Check the box above to also update the client&apos;s default address for future orders.
                     </p>
                   </div>
 

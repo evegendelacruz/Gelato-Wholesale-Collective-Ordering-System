@@ -2236,7 +2236,7 @@ export default function ProductPage() {
                   ) : (
                     currentProducts.map((product) => (
                       <tr
-                        key={product.product_id}
+                        key={product.id}
                         className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
                         onClick={(e) => {
                           // Don't trigger row click if clicking checkbox
