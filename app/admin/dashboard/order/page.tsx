@@ -202,6 +202,11 @@ export default function OrderPage() {
   const [showStickerDropdown, setShowStickerDropdown] = useState<number | null>(null);
   const [showItemStickerDropdown, setShowItemStickerDropdown] = useState<string | null>(null); // format: "orderId-itemIndex"
 
+  // Xero sync state
+  const [syncingToXero, setSyncingToXero] = useState(false);
+  const [xeroSyncMessage, setXeroSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [syncingRowXero, setSyncingRowXero] = useState<Record<number, boolean>>({});
+
   // Edit Invoice state
   const [showEditInvoiceModal, setShowEditInvoiceModal] = useState(false);
   const [editInvoiceGstPercent, setEditInvoiceGstPercent] = useState<number>(9);
@@ -351,6 +356,11 @@ useEffect(() => {
           tracking_no,
           created_at,
           updated_at,
+          gst_percentage,
+          last_modified_by,
+          last_modified_by_name,
+          xero_invoice_id,
+          xero_synced_at,
           client_user!client_order_client_auth_id_fkey(client_businessName)
         `)
         .order('order_date', { ascending: false });
@@ -1601,9 +1611,27 @@ const handleDelete = async () => {
     try {
       setUpdatingStatus(prev => ({ ...prev, [orderId]: true }));
 
+      // Capture audit trail: who is making this change
+      let modifiedBy = '';
+      let modifiedByName = '';
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.user) {
+        modifiedBy = sessionData.session.user.id;
+        const { data: adminData } = await supabase
+          .from('admin_user')
+          .select('admin_fullName')
+          .eq('admin_auth_id', sessionData.session.user.id)
+          .single();
+        modifiedByName = adminData?.admin_fullName ?? sessionData.session.user.email ?? '';
+      }
+
       const { error: updateError } = await supabase
         .from('client_order')
-        .update({ status: newStatus })
+        .update({
+          status: newStatus,
+          last_modified_by: modifiedBy || null,
+          last_modified_by_name: modifiedByName || null,
+        })
         .eq('id', orderId);
 
       if (updateError) throw updateError;
@@ -1611,7 +1639,15 @@ const handleDelete = async () => {
       // Update local state and sort: completed/cancelled go to bottom
       setOrders(prevOrders => {
         const updatedOrders = prevOrders.map(order =>
-          order.id === orderId ? { ...order, status: newStatus } : order
+          order.id === orderId
+            ? {
+                ...order,
+                status: newStatus,
+                last_modified_by: modifiedBy || order.last_modified_by,
+                last_modified_by_name: modifiedByName || order.last_modified_by_name,
+                updated_at: new Date().toISOString(),
+              }
+            : order
         );
 
         // Sort orders: Pending first, then by delivery_date, Completed/Cancelled at bottom
@@ -1642,6 +1678,61 @@ const handleDelete = async () => {
   const handleCancelStatusChange = () => {
     setShowStatusConfirmModal(false);
     setStatusChangeData(null);
+  };
+
+  // Sync a single order row to Xero directly from the table
+  const handleSyncRowToXero = async (order: Order) => {
+    setSyncingRowXero(prev => ({ ...prev, [order.id]: true }));
+    try {
+      const res = await fetch('/api/xero/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Sync failed');
+      setOrders(prev =>
+        prev.map(o =>
+          o.id === order.id
+            ? { ...o, xero_invoice_id: data.xeroInvoiceId, xero_synced_at: new Date().toISOString() }
+            : o
+        )
+      );
+    } catch (e) {
+      alert(`Xero sync failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setSyncingRowXero(prev => ({ ...prev, [order.id]: false }));
+    }
+  };
+
+  // Sync the currently viewed invoice to Xero
+  const handleSyncToXero = async () => {
+    if (!selectedOrder) return;
+    setSyncingToXero(true);
+    setXeroSyncMessage(null);
+    try {
+      const res = await fetch('/api/xero/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: selectedOrder.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Sync failed');
+      setXeroSyncMessage({ type: 'success', text: `Synced to Xero (ID: ${data.xeroInvoiceId})` });
+      // Refresh orders to get updated xero_invoice_id
+      setOrders(prev =>
+        prev.map(o =>
+          o.id === selectedOrder.id
+            ? { ...o, xero_invoice_id: data.xeroInvoiceId, xero_synced_at: new Date().toISOString() }
+            : o
+        )
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Xero sync failed';
+      setXeroSyncMessage({ type: 'error', text: msg });
+    } finally {
+      setSyncingToXero(false);
+    }
   };
 
   // Legacy function for backward compatibility (now redirects to confirmation)
@@ -2692,6 +2783,9 @@ const handleViewInvoice = async (order) => {
                         <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: '#5C2E1F' }}>
                           STICKER
                         </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[70px]" style={{ color: '#5C2E1F' }}>
+                          XERO
+                        </th>
                         <th className="text-left py-3 px-2 font-bold text-xs w-[50px]" style={{ color: '#5C2E1F' }}>
                           ACTIONS
                         </th>
@@ -2851,6 +2945,26 @@ const handleViewInvoice = async (order) => {
                               </div>
                             )}
                           </div>
+                        </td>
+                        <td className="py-3 px-2 w-[70px]">
+                          <button
+                            onClick={() => handleSyncRowToXero(order)}
+                            disabled={syncingRowXero[order.id]}
+                            title={order.xero_invoice_id ? `Synced to Xero (${order.xero_invoice_id}) — click to re-sync` : 'Sync to Xero'}
+                            className={`flex items-center gap-1 px-2 py-1 text-xs rounded font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                              order.xero_invoice_id
+                                ? 'bg-teal-100 text-teal-700 hover:bg-teal-200'
+                                : 'bg-gray-100 text-gray-600 hover:bg-teal-100 hover:text-teal-700'
+                            }`}
+                          >
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={syncingRowXero[order.id] ? 'animate-spin' : ''}>
+                              <path d="M21 2v6h-6"/>
+                              <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                              <path d="M3 22v-6h6"/>
+                              <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                            </svg>
+                            {syncingRowXero[order.id] ? '...' : order.xero_invoice_id ? 'Synced' : 'Sync'}
+                          </button>
                         </td>
                         <td className="py-3 px-2 w-[50px]">
                           <button
@@ -3384,6 +3498,21 @@ const handleViewInvoice = async (order) => {
                     {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
                   </button>
                   <button
+                    onClick={handleSyncToXero}
+                    disabled={syncingToXero}
+                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    style={{ backgroundColor: '#1AB4B4' }}
+                    title="Sync this invoice to Xero"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 2v6h-6"/>
+                      <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                      <path d="M3 22v-6h6"/>
+                      <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                    </svg>
+                    {syncingToXero ? 'Syncing...' : 'Sync to Xero'}
+                  </button>
+                  <button
                     onClick={() => setShowInvoiceModal(false)}
                     className="flex-1 px-4 py-3 rounded-lg border-2 font-medium hover:bg-gray-50 transition-colors"
                     style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}
@@ -3391,6 +3520,14 @@ const handleViewInvoice = async (order) => {
                     Close
                   </button>
                 </div>
+                {/* Xero sync result message */}
+                {xeroSyncMessage && (
+                  <div className={`mt-2 px-4 py-2 rounded-lg text-sm text-center font-medium ${
+                    xeroSyncMessage.type === 'success' ? 'bg-teal-50 text-teal-700' : 'bg-red-50 text-red-600'
+                  }`}>
+                    {xeroSyncMessage.text}
+                  </div>
+                )}
               </div>
             </div>
           )}
