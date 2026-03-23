@@ -18,7 +18,7 @@ const SCOPES = [
   'profile',
   'email',
   'offline_access',
-  'accounting.transactions',
+  'accounting.invoices',
   'accounting.contacts',
 ].join(' ');
 
