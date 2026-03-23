@@ -20,7 +20,6 @@ const SCOPES = [
   'offline_access',
   'accounting.transactions',
   'accounting.contacts',
-  'accounting.settings',
 ].join(' ');
 
 function getAdminSupabase() {
