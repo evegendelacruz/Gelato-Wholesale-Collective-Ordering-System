@@ -13,7 +13,7 @@ import {
   ChevronUp,
   ChevronLeft,
   ChevronRight,
-  Link,
+  Link as LinkIcon,
 } from 'lucide-react';
 import supabase from '@/lib/client';
 
@@ -154,7 +154,7 @@ export default function Sidepanel() {
     {
       id: 'xero',
       label: 'Xero Integration',
-      icon: Link,
+      icon: LinkIcon,
       path: '/admin/dashboard/xero'
     }
   ];
