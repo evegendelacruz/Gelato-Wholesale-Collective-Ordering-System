@@ -27,7 +27,12 @@ interface OrderItem {
   product_description: string;
   add_to_product_list: boolean;
   is_from_product_list?: boolean;
+  is_manual?: boolean; // True if user modified product_name, product_type, or gelato_type
   product_list_id?: number;
+  // Track original values to determine if item became manual
+  original_product_name?: string | null;
+  original_product_type?: string | null;
+  original_gelato_type?: string | null;
   // Barcode fields from product_list
   sticker_bbd_code: string | null;
   sticker_pbn_code: string | null;
@@ -142,6 +147,16 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
   const [deliveryDate, setDeliveryDate] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [notes, setNotes] = useState('');
+
+  // Business Address (Ship To)
+  const [businessStreet, setBusinessStreet] = useState('');
+  const [businessCountry, setBusinessCountry] = useState('');
+  const [businessPostal, setBusinessPostal] = useState('');
+
+  // Billing Address (Bill To)
+  const [billingStreet, setBillingStreet] = useState('');
+  const [billingCountry, setBillingCountry] = useState('');
+  const [billingPostal, setBillingPostal] = useState('');
   
   // Step 2: Order Items
   const [orderItems, setOrderItems] = useState<OrderItem[]>([
@@ -162,6 +177,10 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
       product_description: '',
       add_to_product_list: false,
       is_from_product_list: false,
+      is_manual: true,
+      original_product_name: null,
+      original_product_type: null,
+      original_gelato_type: null,
       sticker_bbd_code: null,
       sticker_pbn_code: null,
       sticker_barcode: null,
@@ -190,6 +209,10 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
         product_description: '',
         add_to_product_list: false,
         is_from_product_list: false,
+        is_manual: true,
+        original_product_name: null,
+        original_product_type: null,
+        original_gelato_type: null,
         sticker_bbd_code: null,
         sticker_pbn_code: null,
         sticker_barcode: null,
@@ -219,7 +242,12 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
       product_description: product.product_description ?? '',
       add_to_product_list: false,
       is_from_product_list: true,
+      is_manual: false,
       product_list_id: product.id,
+      // Track original values to detect manual changes
+      original_product_name: product.product_name,
+      original_product_type: product.product_type ?? '',
+      original_gelato_type: product.product_gelato_type ?? '',
       // Copy barcode fields from product
       sticker_bbd_code: product.sticker_bbd_code ?? null,
       sticker_pbn_code: product.sticker_pbn_code ?? null,
@@ -418,12 +446,43 @@ const handleRemoveGelatoType = async (option: string) => {
 
   const handleItemChange = (index: number, field: keyof OrderItem, value: string | number | boolean) => {
     const newItems = [...orderItems];
+    const currentItem = newItems[index];
+
+    // Special handling for product_type and gelato_type - check if item becomes manual
+    if (field === 'product_type' || field === 'gelato_type') {
+      const newProductType = field === 'product_type' ? value as string : currentItem.product_type;
+      const newGelatoType = field === 'gelato_type' ? value as string : currentItem.gelato_type;
+
+      // Check if any key fields differ from original
+      const nameChanged = currentItem.original_product_name !== null &&
+        currentItem.product_name !== currentItem.original_product_name;
+      const typeChanged = currentItem.original_product_type !== null &&
+        newProductType !== currentItem.original_product_type;
+      const gelatoChanged = currentItem.original_gelato_type !== null &&
+        newGelatoType !== currentItem.original_gelato_type;
+
+      // Item becomes manual if any of product_name, product_type, or gelato_type changed
+      const isNowManual = nameChanged || typeChanged || gelatoChanged;
+
+      newItems[index] = {
+        ...currentItem,
+        [field]: value,
+        is_manual: currentItem.original_product_name === null ? currentItem.is_manual : isNowManual,
+        is_from_product_list: currentItem.original_product_name === null ? currentItem.is_from_product_list : !isNowManual,
+        product_list_id: isNowManual ? undefined : currentItem.product_list_id,
+        // Reset add_to_product_list based on manual state
+        add_to_product_list: isNowManual ? currentItem.add_to_product_list : false
+      };
+      setOrderItems(newItems);
+      return;
+    }
+
     newItems[index] = {
-        ...newItems[index],
+        ...currentItem,
         [field]: value
     };
     setOrderItems(newItems);
-    };
+  };
 
   const validateStep1 = () => {
     if (!customerName.trim()) {
@@ -434,8 +493,30 @@ const handleRemoveGelatoType = async (option: string) => {
       alert('Please select delivery date');
       return false;
     }
-    if (!deliveryAddress.trim()) {
-      alert('Please enter delivery address');
+    // Validate Business Address (Ship To)
+    if (!businessStreet.trim()) {
+      alert('Please enter business address (Block/Street Name/City)');
+      return false;
+    }
+    if (!businessCountry.trim()) {
+      alert('Please enter business address country');
+      return false;
+    }
+    if (!businessPostal.trim()) {
+      alert('Please enter business address postal code');
+      return false;
+    }
+    // Validate Billing Address (Bill To)
+    if (!billingStreet.trim()) {
+      alert('Please enter billing address (Block/Street Name/City)');
+      return false;
+    }
+    if (!billingCountry.trim()) {
+      alert('Please enter billing address country');
+      return false;
+    }
+    if (!billingPostal.trim()) {
+      alert('Please enter billing address postal code');
       return false;
     }
     return true;
@@ -646,6 +727,10 @@ const handleRemoveGelatoType = async (option: string) => {
       // Get current date in YYYY-MM-DD format
       const currentDate = new Date().toISOString().split('T')[0];
 
+      // Combine address fields
+      const fullBusinessAddress = [businessStreet.trim(), businessCountry.trim(), businessPostal.trim()].filter(Boolean).join(', ');
+      const fullBillingAddress = [billingStreet.trim(), billingCountry.trim(), billingPostal.trim()].filter(Boolean).join(', ');
+
       // Insert customer order - database will auto-generate id
       const { data: orderData, error: orderError } = await supabase
         .from('customer_order')
@@ -654,7 +739,11 @@ const handleRemoveGelatoType = async (option: string) => {
           customer_name: customerName.trim(),
           order_date: currentDate,
           delivery_date: deliveryDate,
-          delivery_address: deliveryAddress.trim(),
+          delivery_address: fullBusinessAddress,
+          billing_address: fullBillingAddress,
+          ad_streetName: businessStreet.trim(),
+          ad_country: businessCountry.trim(),
+          ad_postal: businessPostal.trim(),
           status: 'Pending',
           notes: notes.trim() || null,
           tracking_no: trackingNo
@@ -747,6 +836,14 @@ const handleRemoveGelatoType = async (option: string) => {
     setDeliveryDate('');
     setDeliveryAddress('');
     setNotes('');
+    // Reset Business Address
+    setBusinessStreet('');
+    setBusinessCountry('');
+    setBusinessPostal('');
+    // Reset Billing Address
+    setBillingStreet('');
+    setBillingCountry('');
+    setBillingPostal('');
     setOrderItems([
       {
         product_id: null,
@@ -765,6 +862,10 @@ const handleRemoveGelatoType = async (option: string) => {
         product_description: '',
         add_to_product_list: false,
         is_from_product_list: false,
+        is_manual: true,
+        original_product_name: null,
+        original_product_type: null,
+        original_gelato_type: null,
         sticker_bbd_code: null,
         sticker_pbn_code: null,
         sticker_barcode: null,
@@ -881,17 +982,94 @@ const handleRemoveGelatoType = async (option: string) => {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Delivery Address <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={deliveryAddress}
-                  onChange={(e) => setDeliveryAddress(e.target.value)}
-                  rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
-                  placeholder="Enter delivery address"
-                />
+              {/* Business Address (Ship To) */}
+              <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Business Address (Ship To) <span className="text-red-500">*</span></h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Block/Street Name/City <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={businessStreet}
+                      onChange={(e) => setBusinessStreet(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Enter block, street name, city"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Country <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={businessCountry}
+                        onChange={(e) => setBusinessCountry(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        placeholder="Enter country"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Postal Code <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={businessPostal}
+                        onChange={(e) => setBusinessPostal(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        placeholder="Enter postal code"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Billing Address (Bill To) */}
+              <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Billing Address (Bill To) <span className="text-red-500">*</span></h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Block/Street Name/City <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={billingStreet}
+                      onChange={(e) => setBillingStreet(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Enter block, street name, city"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Country <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={billingCountry}
+                        onChange={(e) => setBillingCountry(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        placeholder="Enter country"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Postal Code <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={billingPostal}
+                        onChange={(e) => setBillingPostal(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        placeholder="Enter postal code"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -960,8 +1138,11 @@ const handleRemoveGelatoType = async (option: string) => {
                     <div className="col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                         Product Name <span className="text-red-500">*</span>
-                        {item.is_from_product_list && (
+                        {item.is_from_product_list && !item.is_manual && (
                           <span className="ml-2 text-xs text-green-600 font-normal">(From Product List)</span>
+                        )}
+                        {item.is_manual && item.original_product_name !== null && (
+                          <span className="ml-2 text-xs text-purple-600 font-normal">(Modified - Manual)</span>
                         )}
                         </label>
                         <div className="flex gap-2">
@@ -970,11 +1151,28 @@ const handleRemoveGelatoType = async (option: string) => {
                             value={item.product_name}
                             onChange={(e) => {
                               const updatedItems = [...orderItems];
+                              const currentItem = updatedItems[index];
+                              const newProductName = e.target.value;
+
+                              // Check if product_name differs from original (making it manual)
+                              const nameChanged = currentItem.original_product_name !== null &&
+                                newProductName !== currentItem.original_product_name;
+                              const typeChanged = currentItem.original_product_type !== null &&
+                                currentItem.product_type !== currentItem.original_product_type;
+                              const gelatoChanged = currentItem.original_gelato_type !== null &&
+                                currentItem.gelato_type !== currentItem.original_gelato_type;
+
+                              // Item becomes manual if any of product_name, product_type, or gelato_type changed
+                              const isNowManual = nameChanged || typeChanged || gelatoChanged;
+
                               updatedItems[index] = {
-                                ...updatedItems[index],
-                                product_name: e.target.value,
-                                is_from_product_list: false,
-                                product_list_id: undefined
+                                ...currentItem,
+                                product_name: newProductName,
+                                is_manual: currentItem.original_product_name === null ? true : isNowManual,
+                                is_from_product_list: currentItem.original_product_name === null ? false : !isNowManual,
+                                product_list_id: isNowManual ? undefined : currentItem.product_list_id,
+                                // Reset add_to_product_list based on manual state
+                                add_to_product_list: isNowManual ? currentItem.add_to_product_list : false
                               };
                               setOrderItems(updatedItems);
                             }}
@@ -1169,21 +1367,35 @@ const handleRemoveGelatoType = async (option: string) => {
                     </div>
                     </div>
 
-                    {/* Add to Product List Option */}
-                    <div className="flex items-center gap-6 mt-3 pt-3 border-t border-gray-200">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={item.add_to_product_list}
-                          onChange={(e) => handleItemChange(index, 'add_to_product_list', e.target.checked)}
-                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                        />
-                        <span className="text-xs text-gray-600">
-                          Add to Product List
-                          <span className="text-gray-400 ml-1">(Save as new product)</span>
+                    {/* Add to Product List Option - Only show for manual items */}
+                    {item.is_manual && (
+                      <div className="flex items-center gap-6 mt-3 pt-3 border-t border-gray-200">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={item.add_to_product_list}
+                            onChange={(e) => handleItemChange(index, 'add_to_product_list', e.target.checked)}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <span className="text-xs text-gray-600">
+                            Add to Product List
+                            <span className="text-gray-400 ml-1">(Save as new product)</span>
+                          </span>
+                        </label>
+                      </div>
+                    )}
+
+                    {/* Show info message if product is from product list (not modified) */}
+                    {item.is_from_product_list && !item.is_manual && (
+                      <div className="mt-3 pt-3 border-t border-gray-200">
+                        <span className="text-xs text-green-600 flex items-center gap-1">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                          </svg>
+                          Product from list - no changes to key fields
                         </span>
-                      </label>
-                    </div>
+                      </div>
+                    )}
                 </div>
               ))}
               {/* Buttons for Step 2 */}

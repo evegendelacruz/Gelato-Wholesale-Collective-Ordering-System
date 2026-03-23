@@ -2066,7 +2066,7 @@ const handleUpdate = async () => {
                         .map((product) => {
                           const isChecked = selectedProducts.has(product.id.toString());
                           return (
-                            <tr key={product.product_id} className={`border-b border-orange-100 hover:bg-orange-50 ${isChecked ? 'bg-orange-100' : 'bg-white'}`}>
+                            <tr key={product.id} className={`border-b border-orange-100 hover:bg-orange-50 ${isChecked ? 'bg-orange-100' : 'bg-white'}`}>
                               <td className="py-3 px-4">
                                 <input
                                   type="checkbox"

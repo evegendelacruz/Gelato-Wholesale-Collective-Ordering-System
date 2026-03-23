@@ -70,6 +70,11 @@ interface OrderItem {
   is_from_product_list: boolean;
   publish_to_client: boolean;  // Add product to client's assigned products
   add_to_product_list: boolean; // For manual items: add to product_list table
+  is_already_assigned_to_client: boolean; // Track if product is already in client's assigned products
+  // Track original values to determine if item became manual
+  original_product_name: string | null;
+  original_product_type: string | null;
+  original_gelato_type: string | null;
   // Barcode fields from product_list
   sticker_bbd_code: string | null;
   sticker_pbn_code: string | null;
@@ -204,12 +209,19 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
 
   // Step 2: Order Details
   const [deliveryDate, setDeliveryDate] = useState('');
+  // Ship To (Business Address)
   const [deliveryAddress, setDeliveryAddress] = useState('');
-  const [notes, setNotes] = useState('');
   const [country, setCountry] = useState('Singapore');
   const [postalCode, setPostalCode] = useState('');
+  // Bill To (Billing Address)
+  const [billingStreet, setBillingStreet] = useState('');
+  const [billingCountry, setBillingCountry] = useState('Singapore');
+  const [billingPostal, setBillingPostal] = useState('');
+  // Other fields
+  const [notes, setNotes] = useState('');
   const [publishToClient, setPublishToClient] = useState(true);
   const [defaultGstPercent, setDefaultGstPercent] = useState(9);
+  const [applyToFutureOrders, setApplyToFutureOrders] = useState(false);
 
   // Step 3: Product Selection
   const [availableProducts, setAvailableProducts] = useState<ClientProduct[]>([]);
@@ -456,19 +468,24 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       if (productsError) throw productsError;
       setAvailableProducts(productsData || []);
 
-      // Fetch client address data
+      // Fetch client address data (Ship To and Bill To)
       const { data: clientData, error: clientError } = await supabase
         .from('client_user')
-        .select('ad_streetName, ad_country, ad_postal')
+        .select('"ad_streetName", ad_country, ad_postal, "ad_billing_streetName", ad_billing_country, ad_billing_postal, client_billing_address')
         .eq('client_auth_id', clientAuthId)
         .single();
 
       if (clientError) throw clientError;
-      
-      // Set address fields with fetched data or defaults
+
+      // Set Ship To (Business Address) fields
       setDeliveryAddress(clientData?.ad_streetName || '');
       setCountry(clientData?.ad_country || 'Singapore');
       setPostalCode(clientData?.ad_postal || '');
+
+      // Set Bill To (Billing Address) fields - use billing fields if available, otherwise use Ship To
+      setBillingStreet(clientData?.ad_billing_streetName || clientData?.ad_streetName || '');
+      setBillingCountry(clientData?.ad_billing_country || clientData?.ad_country || 'Singapore');
+      setBillingPostal(clientData?.ad_billing_postal || clientData?.ad_postal || '');
 
     } catch (error) {
       console.error('Error fetching client data:', error);
@@ -549,6 +566,11 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       is_from_product_list: true,
       publish_to_client: false, // Already assigned to client
       add_to_product_list: false,
+      is_already_assigned_to_client: true, // Product is already in client's assigned products
+      // Track original values to detect manual changes
+      original_product_name: clientProduct.product_list.product_name,
+      original_product_type: clientProduct.product_list.product_type || '',
+      original_gelato_type: clientProduct.product_list.product_gelato_type || '',
       // Barcode fields from product_list
       sticker_bbd_code: clientProduct.product_list.sticker_bbd_code || null,
       sticker_pbn_code: clientProduct.product_list.sticker_pbn_code || null,
@@ -586,6 +608,10 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       is_from_product_list: false,
       publish_to_client: false, // Default to false - user must explicitly enable via confirmation modal
       add_to_product_list: true, // Default to true for manual items
+      is_already_assigned_to_client: false,
+      original_product_name: null, // Manual items don't have original values
+      original_product_type: null,
+      original_gelato_type: null,
       // Manual items don't have barcodes yet - they'll get them when added to product_list
       sticker_bbd_code: null,
       sticker_pbn_code: null,
@@ -650,7 +676,19 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     // Special handling for publish_to_client checkbox
     if (field === 'publish_to_client' && value === true) {
       const item = orderItems[index];
-      // If Add to Product List is not checked, show confirmation modal
+      // If product is already from the product list (not manual), allow publish directly
+      // Only show confirmation modal for manual items that need to be added to product list first
+      if (item.is_from_product_list && !item.is_manual) {
+        // Product already exists in product list, just enable publish_to_client
+        const newItems = [...orderItems];
+        newItems[index] = {
+          ...newItems[index],
+          publish_to_client: true
+        };
+        setOrderItems(newItems);
+        return;
+      }
+      // For manual items, if Add to Product List is not checked, show confirmation modal
       if (!item.add_to_product_list) {
         setPublishConfirmItemIndex(index);
         setShowPublishConfirmModal(true);
@@ -671,8 +709,40 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
     }
 
     const newItems = [...orderItems];
+    const currentItem = newItems[index];
+
+    // Special handling for product_type and gelato_type - check if item becomes manual
+    if (field === 'product_type' || field === 'gelato_type') {
+      const newProductType = field === 'product_type' ? value as string : currentItem.product_type;
+      const newGelatoType = field === 'gelato_type' ? value as string : currentItem.gelato_type;
+
+      // Check if any key fields differ from original
+      const nameChanged = currentItem.original_product_name !== null &&
+        currentItem.product_name !== currentItem.original_product_name;
+      const typeChanged = currentItem.original_product_type !== null &&
+        newProductType !== currentItem.original_product_type;
+      const gelatoChanged = currentItem.original_gelato_type !== null &&
+        newGelatoType !== currentItem.original_gelato_type;
+
+      // Item becomes manual if any of product_name, product_type, or gelato_type changed
+      const isNowManual = nameChanged || typeChanged || gelatoChanged;
+
+      newItems[index] = {
+        ...currentItem,
+        [field]: value,
+        is_manual: currentItem.original_product_name === null ? currentItem.is_manual : isNowManual,
+        is_from_product_list: currentItem.original_product_name === null ? currentItem.is_from_product_list : !isNowManual,
+        product_id: isNowManual ? null : currentItem.product_id,
+        // Reset checkboxes based on manual state
+        add_to_product_list: isNowManual ? currentItem.add_to_product_list : false,
+        publish_to_client: isNowManual ? false : currentItem.publish_to_client
+      };
+      setOrderItems(newItems);
+      return;
+    }
+
     newItems[index] = {
-      ...newItems[index],
+      ...currentItem,
       [field]: value
     };
     if (field === 'quantity' || field === 'unit_price') {
@@ -729,6 +799,10 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       is_from_product_list: false,
       publish_to_client: false, // Default to false - user must explicitly enable via confirmation modal
       add_to_product_list: false,
+      is_already_assigned_to_client: false,
+      original_product_name: null,
+      original_product_type: null,
+      original_gelato_type: null,
       // Empty items don't have barcodes
       sticker_bbd_code: null,
       sticker_pbn_code: null,
@@ -757,6 +831,11 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       setGelatoTypeOptions(prev => [...prev, gelatoType]);
     }
 
+    // Check if product is already assigned to the client
+    const isAlreadyAssigned = availableProducts.some(
+      cp => cp.product_list.id === product.id
+    );
+
     const updatedItem = {
       ...newItems[index],
       product_id: product.id,
@@ -775,6 +854,12 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
       is_manual: false,
       is_from_product_list: true,
       publish_to_client: false, // Default to false - user must explicitly enable via confirmation modal
+      add_to_product_list: false,
+      is_already_assigned_to_client: isAlreadyAssigned,
+      // Track original values to detect manual changes
+      original_product_name: product.product_name,
+      original_product_type: productType,
+      original_gelato_type: gelatoType,
       // Copy barcode fields from product
       sticker_bbd_code: product.sticker_bbd_code || null,
       sticker_pbn_code: product.sticker_pbn_code || null,
@@ -992,6 +1077,9 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
         let orderData = null;
         let orderError = null;
 
+        // Combine billing address
+        const fullBillingAddress = [billingStreet, billingCountry, billingPostal].filter(Boolean).join(', ');
+
         // First try with published_to_client column
         const { data: data1, error: error1 } = await supabase
           .from('client_order')
@@ -1000,10 +1088,11 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
             client_auth_id: selectedClient.client_auth_id,
             order_date: currentTimestamp,
             delivery_date: deliveryDate,
-            delivery_address: deliveryAddress,
-            ad_streetName: deliveryAddress,
+            delivery_address: [deliveryAddress, country, postalCode].filter(Boolean).join(', '),
+            "ad_streetName": deliveryAddress,
             ad_country: country,
             ad_postal: postalCode,
+            billing_address: fullBillingAddress,
             total_amount: totalAmount,
             status: 'Pending',
             notes: notes || null,
@@ -1022,10 +1111,11 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
               client_auth_id: selectedClient.client_auth_id,
               order_date: currentTimestamp,
               delivery_date: deliveryDate,
-              delivery_address: deliveryAddress,
-              ad_streetName: deliveryAddress,
+              delivery_address: [deliveryAddress, country, postalCode].filter(Boolean).join(', '),
+              "ad_streetName": deliveryAddress,
               ad_country: country,
               ad_postal: postalCode,
+              billing_address: fullBillingAddress,
               total_amount: totalAmount,
               status: 'Pending',
               notes: notes || null
@@ -1038,6 +1128,25 @@ export default function ClientOrderModal({ isOpen, onClose, onSuccess }: ClientO
         } else {
           orderData = data1;
           orderError = error1;
+        }
+
+        // If applyToFutureOrders is checked, update client_user with the addresses
+        if (applyToFutureOrders && selectedClient) {
+          const { error: updateClientError } = await supabase
+            .from('client_user')
+            .update({
+              "ad_streetName": deliveryAddress,
+              ad_country: country,
+              ad_postal: postalCode,
+              "ad_billing_streetName": billingStreet,
+              ad_billing_country: billingCountry,
+              ad_billing_postal: billingPostal
+            })
+            .eq('client_auth_id', selectedClient.client_auth_id);
+
+          if (updateClientError) {
+            console.error('Error updating client addresses:', updateClientError);
+          }
         }
 
         if (orderError) {
@@ -1232,11 +1341,18 @@ const handleClose = () => {
   setStep(1);
   setSelectedClient(null);
   setDeliveryDate('');
+  // Reset Ship To
   setDeliveryAddress('');
   setCountry('Singapore');
   setPostalCode('');
+  // Reset Bill To
+  setBillingStreet('');
+  setBillingCountry('Singapore');
+  setBillingPostal('');
+  // Reset other fields
   setNotes('');
   setPublishToClient(true);
+  setApplyToFutureOrders(false);
   setOrderItems([]);
   setClientSearch('');
   setProductSearch('');
@@ -1421,19 +1537,23 @@ const handleClose = () => {
                   />
                 </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-700">
-                  Preferred Delivery Address <span className="text-red-500">*</span>
+              {/* Ship To (Business Address) */}
+              <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                <label className="block text-sm font-semibold mb-3 text-gray-700">
+                  Ship To (Business Address) <span className="text-red-500">*</span>
                 </label>
-                
+
                 {/* Street Name */}
                 <div className="mb-3">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Block/Street Name/City <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     value={deliveryAddress}
                     onChange={(e) => setDeliveryAddress(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    placeholder="Block/Home Number/Street Name/City"
+                    placeholder="Enter block, street name, city"
                     required
                   />
                 </div>
@@ -1441,6 +1561,9 @@ const handleClose = () => {
                 {/* Country and Postal Code in Grid */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Country <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="text"
                       value={country}
@@ -1451,6 +1574,9 @@ const handleClose = () => {
                     />
                   </div>
                   <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Postal Code <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="text"
                       value={postalCode}
@@ -1461,6 +1587,75 @@ const handleClose = () => {
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Bill To (Billing Address) */}
+              <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                <label className="block text-sm font-semibold mb-3 text-gray-700">
+                  Bill To (Billing Address) <span className="text-red-500">*</span>
+                </label>
+
+                {/* Street Name */}
+                <div className="mb-3">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Block/Street Name/City <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={billingStreet}
+                    onChange={(e) => setBillingStreet(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="Enter block, street name, city"
+                    required
+                  />
+                </div>
+
+                {/* Country and Postal Code in Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Country <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={billingCountry}
+                      onChange={(e) => setBillingCountry(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Country"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Postal Code <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={billingPostal}
+                      onChange={(e) => setBillingPostal(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Postal Code"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Apply to Future Orders Checkbox */}
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="applyToFutureOrders"
+                  checked={applyToFutureOrders}
+                  onChange={(e) => setApplyToFutureOrders(e.target.checked)}
+                  className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500 cursor-pointer"
+                />
+                <label
+                  htmlFor="applyToFutureOrders"
+                  className="ml-2 text-sm text-gray-700 cursor-pointer"
+                >
+                  Apply to all future orders
+                </label>
               </div>
 
               <div>
@@ -1685,12 +1880,29 @@ const handleClose = () => {
                                 value={item.product_name}
                                 onChange={(e) => {
                                   const newItems = [...orderItems];
+                                  const newProductName = e.target.value;
+                                  const currentItem = newItems[index];
+
+                                  // Check if product_name differs from original (making it manual)
+                                  const nameChanged = currentItem.original_product_name !== null &&
+                                    newProductName !== currentItem.original_product_name;
+                                  const typeChanged = currentItem.original_product_type !== null &&
+                                    currentItem.product_type !== currentItem.original_product_type;
+                                  const gelatoChanged = currentItem.original_gelato_type !== null &&
+                                    currentItem.gelato_type !== currentItem.original_gelato_type;
+
+                                  // Item becomes manual if any of product_name, product_type, or gelato_type changed
+                                  const isNowManual = nameChanged || typeChanged || gelatoChanged;
+
                                   newItems[index] = {
-                                    ...newItems[index],
-                                    product_name: e.target.value,
-                                    is_manual: true,
-                                    is_from_product_list: false,
-                                    product_id: null
+                                    ...currentItem,
+                                    product_name: newProductName,
+                                    is_manual: currentItem.original_product_name === null ? true : isNowManual,
+                                    is_from_product_list: currentItem.original_product_name === null ? false : !isNowManual,
+                                    product_id: isNowManual ? null : currentItem.product_id,
+                                    // Reset checkboxes based on manual state
+                                    add_to_product_list: isNowManual ? currentItem.add_to_product_list : false,
+                                    publish_to_client: isNowManual ? false : currentItem.publish_to_client
                                   };
                                   setOrderItems(newItems);
                                 }}
@@ -1908,36 +2120,54 @@ const handleClose = () => {
                           </div>
                         </div>
 
-                        {/* Options Row */}
-                        <div className="flex items-center gap-6 mt-3 pt-3 border-t border-gray-200">
-                          {/* Publish to Client Option */}
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.publish_to_client}
-                              onChange={(e) => handleUpdateItemField(index, 'publish_to_client', e.target.checked)}
-                              className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
-                            />
-                            <span className="text-xs text-gray-600">
-                              Publish to Client
-                              <span className="text-gray-400 ml-1">(Add to client&apos;s assigned products)</span>
-                            </span>
-                          </label>
+                        {/* Options Row - Conditional display based on item state */}
+                        {!item.is_already_assigned_to_client && (
+                          <div className="flex items-center gap-6 mt-3 pt-3 border-t border-gray-200">
+                            {/* Publish to Client Option - Only show for items from list that are not already assigned */}
+                            {item.is_from_product_list && !item.is_manual && (
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={item.publish_to_client}
+                                  onChange={(e) => handleUpdateItemField(index, 'publish_to_client', e.target.checked)}
+                                  className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                                />
+                                <span className="text-xs text-gray-600">
+                                  Publish to Client
+                                  <span className="text-gray-400 ml-1">(Add to client&apos;s assigned products)</span>
+                                </span>
+                              </label>
+                            )}
 
-                          {/* Add to Product List Option */}
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.add_to_product_list}
-                              onChange={(e) => handleUpdateItemField(index, 'add_to_product_list', e.target.checked)}
-                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                            />
-                            <span className="text-xs text-gray-600">
-                              Add to Product List
-                              <span className="text-gray-400 ml-1">(Save as new product)</span>
+                            {/* Add to Product List Option - Only show for manual items */}
+                            {item.is_manual && (
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={item.add_to_product_list}
+                                  onChange={(e) => handleUpdateItemField(index, 'add_to_product_list', e.target.checked)}
+                                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                />
+                                <span className="text-xs text-gray-600">
+                                  Add to Product List
+                                  <span className="text-gray-400 ml-1">(Save as new product)</span>
+                                </span>
+                              </label>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Show info message if product is already assigned to client */}
+                        {item.is_already_assigned_to_client && (
+                          <div className="mt-3 pt-3 border-t border-gray-200">
+                            <span className="text-xs text-green-600 flex items-center gap-1">
+                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                              </svg>
+                              Already published to this client
                             </span>
-                          </label>
-                        </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
