@@ -192,17 +192,16 @@ export async function syncInvoiceToXero(
   const subtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
   const gstAmount = subtotal * (gstRate / 100);
 
-  // Build line items — matches GWC invoice exactly
+  // Build line items — GST-inclusive amounts to match GWC invoice
+  const gstMultiplier = 1 + gstRate / 100;
   const lineItems = items.map((item) => ({
     Description: item.product_description
       ? `${item.product_name} – ${item.product_description}`
       : item.product_name,
     Quantity: item.quantity,
-    UnitAmount: item.unit_price,
-    LineAmount: item.subtotal,
-    AccountCode: '200', // Sales account – update to match your Xero chart of accounts
-    TaxType: gstRate > 0 ? 'OUTPUT2' : 'NONE', // OUTPUT2 = GST on Sales
-    TaxAmount: parseFloat((item.subtotal * (gstRate / 100)).toFixed(2)),
+    UnitAmount: parseFloat((item.unit_price * gstMultiplier).toFixed(2)),
+    LineAmount: parseFloat((item.subtotal * gstMultiplier).toFixed(2)),
+    TaxType: gstRate > 0 ? 'OUTPUT' : 'NONE',
   }));
 
   // Due date: invoice_due_date or 30 days from order_date
@@ -226,7 +225,7 @@ export async function syncInvoiceToXero(
     Date: order.order_date,
     DueDate: dueDate,
     Status: mapStatusToXero(order.status),
-    LineAmountTypes: 'EXCLUSIVE',              // Amounts are tax-exclusive
+    LineAmountTypes: 'INCLUSIVE',              // Amounts include GST
     LineItems: lineItems,
     SubTotal: subtotal,
     TotalTax: gstAmount,
