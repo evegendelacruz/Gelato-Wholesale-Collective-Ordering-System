@@ -6,6 +6,7 @@ import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
 import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import supabase from "@/lib/client";
+import { useAccessControl } from '@/lib/accessControl';
 
 
 interface OrderItem {
@@ -37,6 +38,8 @@ interface DeliveryDateData {
     invoice: string;
     order_type?: 'client' | 'customer';
     items?: OrderItem[];
+    operating_hours?: string;
+    remarks?: string;
   }>;
 }
 
@@ -62,6 +65,8 @@ interface ReportDataFromDB {
 }
 
 export default function DeliveryReportPage() {
+  const { canEdit } = useAccessControl();
+  const canEditReports = canEdit('report', 'delivery-list');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [reports, setReports] = useState<Report[]>([]);
@@ -74,6 +79,10 @@ export default function DeliveryReportPage() {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'created-desc' | 'created-asc'>('date-desc');
   const [showSortDropdown, setShowSortDropdown] = useState(false);
+  const [editableData, setEditableData] = useState<{ [invoice: string]: { operating_hours: string; remarks: string } }>({});
+  const [savingPreview, setSavingPreview] = useState(false);
+  const [showSaveSuccessModal, setShowSaveSuccessModal] = useState(false);
+  const [showSaveErrorModal, setShowSaveErrorModal] = useState(false);
   const itemsPerPage = 10;
 
   useEffect(() => {
@@ -267,6 +276,20 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       return;
     }
 
+    // Get existing operating_hours and remarks from saved report data
+    const existingOrderData: { [invoice: string]: { operating_hours?: string; remarks?: string } } = {};
+    if (existingYearReport && existingYearReport.report_data[deliveryDate]) {
+      const existingDateData = existingYearReport.report_data[deliveryDate];
+      if (existingDateData && existingDateData.orders) {
+        existingDateData.orders.forEach((order: { invoice: string; operating_hours?: string; remarks?: string }) => {
+          existingOrderData[order.invoice] = {
+            operating_hours: order.operating_hours || '',
+            remarks: order.remarks || ''
+          };
+        });
+      }
+    }
+
     const clientOrdersList = validClientOrders.map((order) => {
       const clientData = Array.isArray(order.client_user)
         ? order.client_user[0]
@@ -293,12 +316,17 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       // Aggregate items by gelato type (product_type)
       const aggregatedItems = aggregateItemsByType(rawItems);
 
+      // Preserve existing operating_hours and remarks
+      const existingData = existingOrderData[order.invoice_id] || {};
+
       return {
         company: clientData?.client_businessName || 'N/A',
         address: combinedAddress,
         invoice: order.invoice_id,
         order_type: 'client' as const,
-        items: aggregatedItems
+        items: aggregatedItems,
+        operating_hours: existingData.operating_hours || '',
+        remarks: existingData.remarks || ''
       };
     });
 
@@ -315,12 +343,17 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       // Aggregate items by gelato type (product_type)
       const aggregatedItems = aggregateItemsByType(rawItems);
 
+      // Preserve existing operating_hours and remarks
+      const existingData = existingOrderData[order.invoice_id] || {};
+
       return {
         company: order.customer_name || 'N/A',
         address: order.delivery_address || 'N/A',
         invoice: order.invoice_id,
         order_type: 'customer' as const,
-        items: aggregatedItems
+        items: aggregatedItems,
+        operating_hours: existingData.operating_hours || '',
+        remarks: existingData.remarks || ''
       };
     });
 
@@ -477,19 +510,29 @@ const generateAndSaveReport = async (deliveryDate: string) => {
 
  const handlePreview = async (report: Report) => {
   const validPreviewData: { [deliveryDate: string]: DeliveryDateData } = {};
-  
+  const initialEditableData: { [invoice: string]: { operating_hours: string; remarks: string } } = {};
+
   Object.keys(report.report_data).forEach((dateKey) => {
     const dateData = report.report_data[dateKey];
     if (dateData && dateData.orders && dateData.orders.length > 0) {
       validPreviewData[dateKey] = dateData;
+
+      // Initialize editable data with existing values
+      dateData.orders.forEach((order) => {
+        initialEditableData[order.invoice] = {
+          operating_hours: order.operating_hours || '',
+          remarks: order.remarks || ''
+        };
+      });
     }
   });
-  
+
   if (Object.keys(validPreviewData).length === 0) {
     alert('No valid delivery data available for preview');
     return;
   }
-  
+
+  setEditableData(initialEditableData);
   setPreviewData(validPreviewData);
   setPreviewDate(Object.keys(validPreviewData).sort()[0]);
   setShowPreview(true);
@@ -647,10 +690,10 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         no: index + 1,
         company: order.company,
         address: order.address,
-        operatingHours: '',
+        operatingHours: order.operating_hours || '',
         invoice: order.invoice,
         items: itemsText,
-        remarks: '',
+        remarks: order.remarks || '',
         temp: '',
         route: ''
       });
@@ -700,6 +743,86 @@ const generateAndSaveReport = async (deliveryDate: string) => {
   link.click();
   window.URL.revokeObjectURL(url);
 };
+
+  // Handle editable field changes
+  const handleFieldChange = (invoice: string, field: 'operating_hours' | 'remarks', value: string) => {
+    setEditableData(prev => ({
+      ...prev,
+      [invoice]: {
+        ...prev[invoice],
+        [field]: value
+      }
+    }));
+  };
+
+  // Save editable data to database
+  const handleSavePreviewData = async () => {
+    try {
+      setSavingPreview(true);
+
+      // Get the year from preview date
+      const year = new Date(previewDate).getFullYear();
+
+      // Find the report for this year
+      const { data: existingReports, error: fetchError } = await supabase
+        .from('delivery_reports')
+        .select('*')
+        .gte('delivery_date', `${year}-01-01`)
+        .lte('delivery_date', `${year}-12-31`);
+
+      if (fetchError) throw fetchError;
+
+      if (!existingReports || existingReports.length === 0) {
+        setShowSaveErrorModal(true);
+        return;
+      }
+
+      const existingReport = existingReports[0];
+      const updatedReportData = { ...existingReport.report_data };
+
+      // Update each delivery date's orders with the editable data
+      Object.keys(updatedReportData).forEach((dateKey) => {
+        const dateData = updatedReportData[dateKey];
+        if (dateData && dateData.orders) {
+          dateData.orders = dateData.orders.map((order: { invoice: string; operating_hours?: string; remarks?: string }) => {
+            const editedData = editableData[order.invoice];
+            if (editedData) {
+              return {
+                ...order,
+                operating_hours: editedData.operating_hours || order.operating_hours || '',
+                remarks: editedData.remarks || order.remarks || ''
+              };
+            }
+            return order;
+          });
+        }
+      });
+
+      // Update the database
+      const { error: updateError } = await supabase
+        .from('delivery_reports')
+        .update({
+          report_data: updatedReportData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingReport.id);
+
+      if (updateError) throw updateError;
+
+      // Update local preview data
+      setPreviewData(updatedReportData);
+
+      // Refresh reports list
+      await fetchReports();
+
+      setShowSaveSuccessModal(true);
+    } catch (err) {
+      console.error('Error saving preview data:', err);
+      setShowSaveErrorModal(true);
+    } finally {
+      setSavingPreview(false);
+    }
+  };
 
   const filteredReports = reports
     .filter(report => {
@@ -831,7 +954,11 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
                     <th className="text-left py-3 px-4">
-                      <input type="checkbox" className="w-4 h-4" />
+                      <input
+                        type="checkbox"
+                        className={`w-4 h-4 ${canEditReports ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                        disabled={!canEditReports}
+                      />
                     </th>
                     <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
                       SUMMARY ID
@@ -876,7 +1003,11 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                     return (
                         <tr key={report.id} className="border-b border-gray-200 hover:bg-gray-50">
                         <td className="py-3 px-4">
-                            <input type="checkbox" className="w-4 h-4" />
+                            <input
+                              type="checkbox"
+                              className={`w-4 h-4 ${canEditReports ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                              disabled={!canEditReports}
+                            />
                         </td>
                         <td className="py-3 px-4 text-sm font-medium">{report.summary_id}</td>
                         <td className="py-3 px-4 text-sm">{year} ({deliveryDatesCount} dates)</td>
@@ -968,7 +1099,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
 
           {/* Error Modal */}
           {showErrorModal && (
-            <div 
+            <div
               className="fixed inset-0 flex items-center justify-center z-50"
               style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
             >
@@ -988,6 +1119,67 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                 </p>
                 <button
                   onClick={() => setShowErrorModal(false)}
+                  className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity bg-red-600"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Save Success Modal */}
+          {showSaveSuccessModal && (
+            <div
+              className="fixed inset-0 flex items-center justify-center z-[60]"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
+              <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center">
+                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
+                  Saved!
+                </h2>
+                <p className="text-gray-600 mb-6">
+                  Operating hours and remarks have been saved successfully.
+                </p>
+                <button
+                  onClick={() => setShowSaveSuccessModal(false)}
+                  className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: '#10B981' }}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Save Error Modal */}
+          {showSaveErrorModal && (
+            <div
+              className="fixed inset-0 flex items-center justify-center z-[60]"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
+              <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center">
+                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold mb-2" style={{ color: '#5C2E1F' }}>
+                  Error
+                </h2>
+                <p className="text-gray-600 mb-6">
+                  Failed to save changes. Please try again.
+                </p>
+                <button
+                  onClick={() => setShowSaveErrorModal(false)}
                   className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity bg-red-600"
                 >
                   OK
@@ -1139,8 +1331,14 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                                     <td className="border border-black text-left px-2 py-2" style={{ fontSize: '9px' }}>
                                     {order.address}
                                     </td>
-                                    <td className="border border-black text-center px-2 py-2" style={{ fontSize: '9px' }}>
-                                    {/* Empty for manual entry */}
+                                    <td className="border border-black text-center px-1 py-1" style={{ fontSize: '9px' }}>
+                                    <input
+                                      type="text"
+                                      value={editableData[order.invoice]?.operating_hours || ''}
+                                      onChange={(e) => handleFieldChange(order.invoice, 'operating_hours', e.target.value)}
+                                      className="w-full px-1 py-1 text-center border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                      placeholder="e.g. 9AM-6PM"
+                                    />
                                     </td>
                                     <td className="border border-black text-center px-2 py-2" style={{ fontSize: '9px' }}>
                                     {order.invoice}
@@ -1152,8 +1350,14 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                                         ))
                                       : '-'}
                                     </td>
-                                    <td className="border border-black text-center px-2 py-2" style={{ fontSize: '9px' }}>
-                                    {/* Empty for manual entry */}
+                                    <td className="border border-black text-center px-1 py-1" style={{ fontSize: '9px' }}>
+                                    <input
+                                      type="text"
+                                      value={editableData[order.invoice]?.remarks || ''}
+                                      onChange={(e) => handleFieldChange(order.invoice, 'remarks', e.target.value)}
+                                      className="w-full px-1 py-1 text-center border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                      placeholder="Add remarks"
+                                    />
                                     </td>
                                     <td className="border border-black text-center px-2 py-2" style={{ fontSize: '9px' }}>
                                     {/* Empty for manual entry */}
@@ -1173,6 +1377,25 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                     
                 {/* Action Buttons */}
                 <div className="px-6 pt-6 pb-6 flex gap-3 shrink-0 border-t border-gray-200">
+                    <button
+                    onClick={handleSavePreviewData}
+                    disabled={savingPreview}
+                    className="flex-1 px-6 py-3 rounded font-medium transition-colors text-white hover:opacity-90 disabled:opacity-50"
+                    style={{ backgroundColor: '#FF5722' }}
+                    >
+                    <div className="flex items-center justify-center gap-2">
+                        {savingPreview ? (
+                          <RefreshCw size={20} className="animate-spin" />
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                            <polyline points="7 3 7 8 15 8"></polyline>
+                          </svg>
+                        )}
+                        <span>{savingPreview ? 'Saving...' : 'Save Changes'}</span>
+                    </div>
+                    </button>
                     <button
                     onClick={() => {
                         const report = reports.find(r => new Date(r.delivery_date).getFullYear() === new Date(previewDate).getFullYear());

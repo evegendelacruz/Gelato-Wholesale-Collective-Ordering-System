@@ -19,9 +19,14 @@ export interface OrderFormData {
   deliveryDate: string;
   clientName: string;
   companyName: string;
+  // Ship To (Business Address)
   streetName: string;
   country: string;
   postalCode: string;
+  // Bill To (Billing Address)
+  billingStreet: string;
+  billingCountry: string;
+  billingPostal: string;
   additionalNotes: string;
   saveAsPreferred: boolean;
 }
@@ -37,9 +42,14 @@ export default function OrderForm({
     deliveryDate: '',
     clientName: '',
     companyName: '',
+    // Ship To (Business Address)
     streetName: '',
     country: 'Singapore',
     postalCode: '',
+    // Bill To (Billing Address)
+    billingStreet: '',
+    billingCountry: 'Singapore',
+    billingPostal: '',
     additionalNotes: '',
     saveAsPreferred: false
   });
@@ -61,10 +71,10 @@ export default function OrderForm({
         throw new Error('Not authenticated');
       }
 
-      // Fetch client data including preferred address fields
+      // Fetch client data including preferred address and billing address fields
       const { data: clientData, error: clientError } = await supabase
         .from('client_user')
-        .select('client_person_incharge, client_businessName, ad_streetName, ad_country, ad_postal')
+        .select('client_person_incharge, "client_businessName", "ad_streetName", ad_country, ad_postal, client_billing_address, "ad_billing_streetName", ad_billing_country, ad_billing_postal')
         .eq('client_auth_id', user.id)
         .single();
 
@@ -74,13 +84,20 @@ export default function OrderForm({
       }
 
       // Set form data with fetched values or defaults
+      // Ship To uses ad_streetName, ad_country, ad_postal
+      // Bill To uses ad_billing fields or falls back to Ship To fields
       setFormData(prev => ({
         ...prev,
         clientName: clientData?.client_person_incharge || '',
         companyName: clientData?.client_businessName || '',
+        // Ship To (Business Address)
         streetName: clientData?.ad_streetName || '',
         country: clientData?.ad_country || 'Singapore',
-        postalCode: clientData?.ad_postal || ''
+        postalCode: clientData?.ad_postal || '',
+        // Bill To (Billing Address) - use billing fields if available, otherwise use ship to fields
+        billingStreet: clientData?.ad_billing_streetName || clientData?.ad_streetName || '',
+        billingCountry: clientData?.ad_billing_country || clientData?.ad_country || 'Singapore',
+        billingPostal: clientData?.ad_billing_postal || clientData?.ad_postal || ''
       }));
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -129,27 +146,32 @@ export default function OrderForm({
       return;
     }
 
-    // If saveAsPreferred is checked, save to client_user table
+    // If saveAsPreferred is checked, save both addresses to client_user table for future orders
     if (formData.saveAsPreferred) {
       try {
         const { data: { user }, error: authError } = await supabase.auth.getUser();
-        
+
         if (!authError && user) {
           const { error: updateError } = await supabase
             .from('client_user')
             .update({
-              ad_streetName: formData.streetName,
+              // Ship To (Business Address)
+              "ad_streetName": formData.streetName,
               ad_country: formData.country,
-              ad_postal: formData.postalCode
+              ad_postal: formData.postalCode,
+              // Bill To (Billing Address)
+              "ad_billing_streetName": formData.billingStreet,
+              ad_billing_country: formData.billingCountry,
+              ad_billing_postal: formData.billingPostal
             })
             .eq('client_auth_id', user.id);
 
           if (updateError) {
-            console.error('Error saving preferred address:', updateError);
+            console.error('Error saving preferred addresses:', updateError);
           }
         }
       } catch (error) {
-        console.error('Failed to save preferred address:', error);
+        console.error('Failed to save preferred addresses:', error);
       }
     }
 
@@ -270,14 +292,17 @@ export default function OrderForm({
                   />
                 </div>
 
-                {/* Preferred Delivery Address Section */}
-                <div>
-                  <label className="block text-sm font-semibold mb-2" style={{ color: '#7d3c3c' }}>
-                    Preferred Delivery Address <span className="text-red-500">*</span>
+                {/* Ship To (Business Address) Section */}
+                <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                  <label className="block text-sm font-semibold mb-3" style={{ color: '#7d3c3c' }}>
+                    Ship To (Business Address) <span className="text-red-500">*</span>
                   </label>
-                  
+
                   {/* Block/Home Number/Street Name */}
                   <div className="mb-3">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Block/Street Name/City <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="text"
                       name="streetName"
@@ -285,7 +310,7 @@ export default function OrderForm({
                       onChange={handleInputChange}
                       required
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                      placeholder="Block/Home Number/Street Name/City"
+                      placeholder="Enter block, street name, city"
                       disabled={loading}
                     />
                   </div>
@@ -294,6 +319,9 @@ export default function OrderForm({
                   <div className="grid grid-cols-2 gap-3">
                     {/* Country */}
                     <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Country <span className="text-red-500">*</span>
+                      </label>
                       <input
                         type="text"
                         name="country"
@@ -308,6 +336,9 @@ export default function OrderForm({
 
                     {/* Postal Code */}
                     <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Postal Code <span className="text-red-500">*</span>
+                      </label>
                       <input
                         type="text"
                         name="postalCode"
@@ -320,24 +351,85 @@ export default function OrderForm({
                       />
                     </div>
                   </div>
+                </div>
 
-                  {/* Save as Preferred Address Checkbox */}
-                  <div className="mt-3 flex items-center">
-                    <input
-                      type="checkbox"
-                      id="saveAsPreferred"
-                      checked={formData.saveAsPreferred}
-                      onChange={handleCheckboxChange}
-                      disabled={loading}
-                      className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500 cursor-pointer"
-                    />
-                    <label 
-                      htmlFor="saveAsPreferred" 
-                      className="ml-2 text-sm text-gray-700 cursor-pointer"
-                    >
-                      Save as preferred address for future orders
+                {/* Bill To (Billing Address) Section */}
+                <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                  <label className="block text-sm font-semibold mb-3" style={{ color: '#7d3c3c' }}>
+                    Bill To (Billing Address) <span className="text-red-500">*</span>
+                  </label>
+
+                  {/* Block/Home Number/Street Name */}
+                  <div className="mb-3">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Block/Street Name/City <span className="text-red-500">*</span>
                     </label>
+                    <input
+                      type="text"
+                      name="billingStreet"
+                      value={formData.billingStreet}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Enter block, street name, city"
+                      disabled={loading}
+                    />
                   </div>
+
+                  {/* Country and Postal Code in Grid */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Country */}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Country <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        name="billingCountry"
+                        value={formData.billingCountry}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        placeholder="Country"
+                        disabled={loading}
+                      />
+                    </div>
+
+                    {/* Postal Code */}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Postal Code <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        name="billingPostal"
+                        value={formData.billingPostal}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        placeholder="Postal Code"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Apply to Future Orders Checkbox */}
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="saveAsPreferred"
+                    checked={formData.saveAsPreferred}
+                    onChange={handleCheckboxChange}
+                    disabled={loading}
+                    className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500 cursor-pointer"
+                  />
+                  <label
+                    htmlFor="saveAsPreferred"
+                    className="ml-2 text-sm text-gray-700 cursor-pointer"
+                  >
+                    Apply to all future orders
+                  </label>
                 </div>
 
                 {/* Additional Notes */}
@@ -384,14 +476,17 @@ export default function OrderForm({
               <button
                 type="submit"
                 disabled={
-                  loading || 
-                  loadingUserData || 
+                  loading ||
+                  loadingUserData ||
                   !formData.deliveryDate.trim() ||
                   !formData.clientName.trim() ||
                   !formData.companyName.trim() ||
                   !formData.streetName.trim() ||
                   !formData.country.trim() ||
-                  !formData.postalCode.trim() 
+                  !formData.postalCode.trim() ||
+                  !formData.billingStreet.trim() ||
+                  !formData.billingCountry.trim() ||
+                  !formData.billingPostal.trim()
                 }
                 className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: '#e84e1b' }}

@@ -78,6 +78,7 @@ export default function ClientStatementPage() {
   const [statementInvoices, setStatementInvoices] = useState<Invoice[]>([]);
   const [headerOptions, setHeaderOptions] = useState<HeaderOption[]>([]);
   const [selectedHeaderId, setSelectedHeaderId] = useState<number | null>(null);
+  const [statementHeaders, setStatementHeaders] = useState<Record<string, number>>({});
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
   const [editingHeaderId, setEditingHeaderId] = useState<number | null>(null);
   const [agingCategory, setAgingCategory] = useState('1-30_days');
@@ -153,11 +154,188 @@ export default function ClientStatementPage() {
     fetchHeaderOptions();
   }, []);
 
+  // Load saved statement headers from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('statementHeaders');
+      if (saved) {
+        setStatementHeaders(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error('Error loading statement headers from localStorage:', error);
+    }
+  }, []);
+
+  // Function to save header for a specific statement
+  const saveStatementHeader = (statementId: string, headerId: number) => {
+    const updated = { ...statementHeaders, [statementId]: headerId };
+    setStatementHeaders(updated);
+    setSelectedHeaderId(headerId);
+    try {
+      localStorage.setItem('statementHeaders', JSON.stringify(updated));
+    } catch (error) {
+      console.error('Error saving statement headers to localStorage:', error);
+    }
+  };
+
+  // Function to migrate only non-numeric statement IDs to sequential format starting from 2030
+  const migrateStatementIds = async () => {
+    try {
+      // Fetch all statements
+      const { data: existingStatements, error } = await supabase
+        .from('client_statement')
+        .select('*')
+        .order('date_generated', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching statements for migration:', error);
+        return;
+      }
+
+      if (!existingStatements || existingStatements.length === 0) {
+        console.log('No existing statements to migrate');
+        return;
+      }
+
+      // Filter only non-numeric statement IDs (the random format ones)
+      const statementsToMigrate = existingStatements.filter(s => isNaN(parseInt(s.statement_id, 10)));
+
+      if (statementsToMigrate.length === 0) {
+        console.log('All statement IDs are already numeric');
+        return;
+      }
+
+      // Get existing numeric IDs to avoid conflicts
+      const existingNumericIds = new Set(
+        existingStatements
+          .map(s => parseInt(s.statement_id, 10))
+          .filter(n => !isNaN(n))
+      );
+
+      // Find starting number (2030 or next available)
+      let nextId = 2030;
+      while (existingNumericIds.has(nextId)) {
+        nextId++;
+      }
+
+      console.log(`Migrating ${statementsToMigrate.length} statement IDs starting from ${nextId}...`);
+      console.log('Statements to migrate:', statementsToMigrate.map(s => s.statement_id));
+
+      // Update each non-numeric statement with sequential ID
+      for (const stmt of statementsToMigrate) {
+        // Find next available ID
+        while (existingNumericIds.has(nextId)) {
+          nextId++;
+        }
+
+        const newId = nextId.toString();
+        const oldStatementId = stmt.statement_id;
+
+        console.log(`Attempting to update ${oldStatementId} -> ${newId}`);
+
+        // Use RPC or direct SQL approach via delete and insert
+        // First, get all orders with this statement
+        const { data: orders } = await supabase
+          .from('client_order')
+          .select('id')
+          .eq('statement_id', oldStatementId);
+
+        // Update orders first - set to null temporarily
+        if (orders && orders.length > 0) {
+          const orderIds = orders.map(o => o.id);
+          await supabase
+            .from('client_order')
+            .update({ statement_id: null })
+            .in('id', orderIds);
+
+          // Delete old statement
+          await supabase
+            .from('client_statement')
+            .delete()
+            .eq('statement_id', oldStatementId);
+
+          // Insert new statement with new ID
+          const { error: insertError } = await supabase
+            .from('client_statement')
+            .insert({
+              statement_id: newId,
+              client_auth_id: stmt.client_auth_id,
+              statement_month: stmt.statement_month,
+              total_amount: stmt.total_amount,
+              date_generated: stmt.date_generated,
+              aging_category: stmt.aging_category
+            });
+
+          if (insertError) {
+            console.error(`Error inserting new statement:`, insertError.message || insertError);
+            // Restore old statement
+            await supabase
+              .from('client_statement')
+              .insert({
+                statement_id: oldStatementId,
+                client_auth_id: stmt.client_auth_id,
+                statement_month: stmt.statement_month,
+                total_amount: stmt.total_amount,
+                date_generated: stmt.date_generated,
+                aging_category: stmt.aging_category
+              });
+            // Restore order references
+            await supabase
+              .from('client_order')
+              .update({ statement_id: oldStatementId })
+              .in('id', orderIds);
+          } else {
+            // Update orders with new statement ID
+            await supabase
+              .from('client_order')
+              .update({ statement_id: newId })
+              .in('id', orderIds);
+
+            console.log(`Successfully migrated ${oldStatementId} -> ${newId}`);
+            existingNumericIds.add(nextId);
+          }
+        } else {
+          // No orders reference this statement, just update directly
+          await supabase
+            .from('client_statement')
+            .delete()
+            .eq('statement_id', oldStatementId);
+
+          const { error: insertError } = await supabase
+            .from('client_statement')
+            .insert({
+              statement_id: newId,
+              client_auth_id: stmt.client_auth_id,
+              statement_month: stmt.statement_month,
+              total_amount: stmt.total_amount,
+              date_generated: stmt.date_generated,
+              aging_category: stmt.aging_category
+            });
+
+          if (insertError) {
+            console.error(`Error inserting new statement:`, insertError.message || insertError);
+          } else {
+            console.log(`Successfully migrated ${oldStatementId} -> ${newId} (no orders)`);
+            existingNumericIds.add(nextId);
+          }
+        }
+
+        nextId++;
+      }
+
+      console.log('Statement ID migration complete');
+    } catch (err) {
+      console.error('Error during statement ID migration:', err);
+    }
+  };
+
   useEffect(() => {
     const initializeStatements = async () => {
-      // First, generate statements for any orders without them
+      // First, migrate existing statement IDs to sequential format
+      await migrateStatementIds();
+      // Then, generate statements for any orders without them
       await generateStatementsForOrders();
-      // Then fetch all statements
+      // Finally fetch all statements
       await fetchStatements();
     };
 
@@ -291,50 +469,97 @@ export default function ClientStatementPage() {
             }
           }
         } else {
-          // Verify client exists before creating statement
-          const { data: clientExists, error: clientError } = await supabase
+          // Verify client exists and get client data before creating statement
+          const { data: clientData, error: clientError } = await supabase
             .from('client_user')
-            .select('client_auth_id')
+            .select('client_auth_id, client_businessName, client_email, client_person_incharge, client_business_contact, ad_streetName, ad_country, ad_postal')
             .eq('client_auth_id', firstOrder.client_auth_id)
             .single();
 
-          if (clientError || !clientExists) {
+          if (clientError || !clientData) {
             console.error(`Client ${firstOrder.client_auth_id} does not exist, skipping statement creation`);
             continue;
           }
 
-          // Create new statement
+          // Generate sequential statement_id starting from 2000
+          // Get the highest existing statement number
+          const { data: maxStatement } = await supabase
+            .from('client_statement')
+            .select('statement_id')
+            .order('statement_id', { ascending: false })
+            .limit(100);
+
+          let nextNumber = 2000;
+          if (maxStatement && maxStatement.length > 0) {
+            // Find the highest numeric statement ID
+            const numericIds = maxStatement
+              .map(s => parseInt(s.statement_id, 10))
+              .filter(n => !isNaN(n));
+            if (numericIds.length > 0) {
+              nextNumber = Math.max(...numericIds) + 1;
+            }
+          }
+          const newStatementId = nextNumber.toString();
+
+          // Create new statement - only include columns that exist in the actual database
+          // Note: company_name, invoice_count, and contact details are fetched via join with client_user
           const { data: newStatement, error: statementError } = await supabase
             .from('client_statement')
             .insert({
+              statement_id: newStatementId,
               client_auth_id: firstOrder.client_auth_id,
               statement_month: statementMonthStr,
               total_amount: totalAmount,
-              date_generated: new Date().toISOString(),
-              aging_category: '1-30_days' // Set default aging category
+              date_generated: new Date().toISOString()
             })
             .select('statement_id')
             .single();
 
           if (statementError) {
-            console.error('Error creating statement:', {
-              error: statementError,
-              details: {
-                client_auth_id: firstOrder.client_auth_id,
-                statement_month: statementMonthStr,
-                total_amount: totalAmount
-              }
-            });
-            continue;
-          }
+            // Handle duplicate key error - statement already exists for this client-month
+            if (statementError.code === '23505') {
+              console.log(`Statement already exists for client ${firstOrder.client_auth_id} month ${statementMonthStr}, fetching existing...`);
 
-          if (!newStatement) {
+              // Fetch the existing statement
+              const { data: existingStmt, error: fetchError } = await supabase
+                .from('client_statement')
+                .select('statement_id')
+                .eq('client_auth_id', firstOrder.client_auth_id)
+                .limit(1)
+                .order('statement_month', { ascending: false });
+
+              if (fetchError || !existingStmt || existingStmt.length === 0) {
+                console.error('Could not fetch existing statement:', fetchError);
+                continue;
+              }
+
+              statementId = existingStmt[0].statement_id;
+              console.log(`Using existing statement: ${statementId}`);
+
+              // Update the total amount
+              const { error: updateError } = await supabase
+                .from('client_statement')
+                .update({
+                  total_amount: totalAmount,
+                  date_generated: new Date().toISOString()
+                })
+                .eq('statement_id', statementId);
+
+              if (updateError) {
+                console.error('Error updating existing statement:', updateError);
+              }
+            } else {
+              console.error('Error creating statement:', statementError.message || statementError);
+              console.error('Error code:', statementError.code);
+              continue;
+            }
+          } else if (!newStatement) {
             console.error('Statement created but no data returned');
             continue;
+          } else {
+            statementId = newStatement.statement_id;
+            console.log(`Created new statement: ${statementId} for month: ${statementMonthStr}`);
           }
-
-          statementId = newStatement.statement_id;
-          console.log(`Created new statement: ${statementId} for month: ${statementMonthStr}`);
         }
 
         // Update all orders in this group with the statement_id
@@ -528,20 +753,20 @@ useEffect(() => {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const renderHeaderInPDF = (doc: any, selectedHeader: HeaderOption | undefined, logoBase64?: string) => {
-  if (!selectedHeader) return;
+const renderHeaderInPDF = (doc: any, selectedHeader: HeaderOption | undefined, logoBase64?: string, startY: number = 20): number => {
+  if (!selectedHeader) return startY;
 
   // Add logo in upper right corner
   if (logoBase64) {
     try {
-      doc.addImage(logoBase64, 'PNG', 165, 10, 30, 20);
+      doc.addImage(logoBase64, 'PNG', 165, startY - 10, 30, 20);
     } catch (e) {
       console.error('Failed to add logo to PDF:', e);
     }
   }
 
   doc.setFontSize(10);
-  let yPos = 20;
+  let yPos = startY;
   const lineHeight = 5;
 
   if (selectedHeader.line1) {
@@ -566,13 +791,29 @@ const renderHeaderInPDF = (doc: any, selectedHeader: HeaderOption | undefined, l
       yPos += lineHeight;
     }
   });
+
+  return yPos; // Return the Y position after header for content positioning
+};
+
+// Count filled header lines for dynamic positioning
+const countHeaderLines = (header: HeaderOption | undefined): number => {
+  if (!header) return 0;
+  let count = 0;
+  if (header.line1) count++;
+  if (header.line2) count++;
+  if (header.line3) count++;
+  if (header.line4) count++;
+  if (header.line5) count++;
+  if (header.line6) count++;
+  if (header.line7) count++;
+  return count;
 };
 
 const handleViewStatement = async (statement: Statement) => {
   try {
     setLoading(true);
     const invoices = await fetchStatementInvoices(statement.statement_id);
-    
+
     if (invoices.length === 0) {
       alert('No invoices found for this statement.');
       setLoading(false);
@@ -582,6 +823,19 @@ const handleViewStatement = async (statement: Statement) => {
     setSelectedStatement(statement);
     setStatementInvoices(invoices);
     setAgingCategory(statement.aging_category || '1-30_days');
+
+    // Load saved header for this specific statement, or use default
+    const savedHeaderId = statementHeaders[statement.statement_id];
+    if (savedHeaderId && headerOptions.some(h => h.id === savedHeaderId)) {
+      setSelectedHeaderId(savedHeaderId);
+    } else {
+      // Use default header
+      const defaultHeader = headerOptions.find(h => h.is_default) || headerOptions[0];
+      if (defaultHeader) {
+        setSelectedHeaderId(defaultHeader.id);
+      }
+    }
+
     setShowStatementModal(true);
     setLoading(false);
   } catch (error) {
@@ -641,124 +895,181 @@ const handlePrintStatement = async () => {
     }
 
     const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-    renderHeaderInPDF(doc, selectedHeader, logoBase64);
+    const headerLines = countHeaderLines(selectedHeader);
+
+    // Calculate dynamic Y positions based on header lines
+    const headerEndY = renderHeaderInPDF(doc, selectedHeader, logoBase64, 20);
+    const titleY = headerEndY + 8;
 
     // Title
     doc.setFontSize(16);
     doc.setTextColor("#0D909A");
     doc.setFont('helvetica', 'normal');
-    doc.text('Statement', 20, 58);
+    doc.text('Statement', 20, titleY);
 
     doc.setTextColor(0, 0, 0);
+
+    // Dynamic positioning based on header size
+    const detailsStartY = titleY + 9;
 
     // Statement Details - Right Side
     const labelX = 155;
     const valueX = 157;
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text('STATEMENT NO.', labelX, 67, { align: 'right' });
+    doc.text('STATEMENT NO.', labelX, detailsStartY, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(selectedStatement.statement_id, valueX, 67);
+    doc.text(selectedStatement.statement_id, valueX, detailsStartY);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('DATE', labelX, 72, { align: 'right' });
+    doc.text('DATE', labelX, detailsStartY + 5, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(new Date(selectedStatement.date_generated).toLocaleDateString('en-GB'), valueX, 72);
+    doc.text(new Date(selectedStatement.date_generated).toLocaleDateString('en-GB'), valueX, detailsStartY + 5);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('TOTAL DUE', labelX, 77, { align: 'right' });
+    doc.text('TOTAL DUE', labelX, detailsStartY + 10, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(`S$${selectedStatement.total_amount.toFixed(2)}`, valueX, 77);
+    doc.text(`S$${selectedStatement.total_amount.toFixed(2)}`, valueX, detailsStartY + 10);
 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text('ENCLOSED', labelX, 82, { align: 'right' });
+    doc.text('ENCLOSED', labelX, detailsStartY + 15, { align: 'right' });
 
     // TO Section
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text('TO', 20, 67);
+    doc.text('TO', 20, detailsStartY);
     doc.setFont('helvetica', 'normal');
-    doc.text(selectedStatement.company_name, 20, 72);
+    doc.text(selectedStatement.company_name, 20, detailsStartY + 5);
     const address = doc.splitTextToSize(selectedStatement.business_address, 60);
-    doc.text(address, 20, 77);
+    doc.text(address, 20, detailsStartY + 10);
 
-    // Enclosed Invoices
-    const invoicesY = 83;
+    // Calculate address height
+    const addressHeight = address.length * 4;
+
+    // Invoice table starts after TO section
+    const tableY = detailsStartY + 15 + Math.max(addressHeight - 10, 0) + 5;
 
     // Invoice table header
-    const tableY = invoicesY + 5;
     doc.setFillColor(184, 230, 231);
     doc.rect(20, tableY, 170, 7, 'F');
     doc.setTextColor("#0D909A");
-    
+
     doc.setFontSize(9);
     doc.text('DATE', 22, tableY + 5);
     doc.text('DESCRIPTION', 50, tableY + 5);
     doc.text('AMOUNT', 150, tableY + 5, { align: 'right' });
     doc.text('OPEN AMOUNT', 185, tableY + 5, { align: 'right' });
 
-    // Invoice rows
+    // Invoice rows with pagination
     doc.setFont('helvetica', 'normal');
     let yPos = tableY + 13;
     doc.setTextColor(0, 0, 0);
 
-    // In handlePrintStatement - Invoice rows section
+    const pageHeight = 297; // A4 height in mm
+    const footerHeight = 25; // Space needed for aging footer
+    const maxContentY = pageHeight - 20 - footerHeight; // 20mm bottom margin + footer
+    let currentPage = 1;
+
+    // Function to add new page with header
+    const addNewPage = () => {
+      doc.addPage();
+      currentPage++;
+
+      // Add header to new page
+      renderHeaderInPDF(doc, selectedHeader, logoBase64, 20);
+
+      // Add table header on new page
+      const newTableY = headerEndY + 15;
+      doc.setFillColor(184, 230, 231);
+      doc.rect(20, newTableY, 170, 7, 'F');
+      doc.setTextColor("#0D909A");
+      doc.setFontSize(9);
+      doc.text('DATE', 22, newTableY + 5);
+      doc.text('DESCRIPTION', 50, newTableY + 5);
+      doc.text('AMOUNT', 150, newTableY + 5, { align: 'right' });
+      doc.text('OPEN AMOUNT', 185, newTableY + 5, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'normal');
+
+      return newTableY + 13;
+    };
+
     statementInvoices.forEach((invoice) => {
       const deliveryDate = new Date(invoice.delivery_date).toLocaleDateString('en-GB');
-      doc.text(deliveryDate, 22, yPos);
-      
       const description = `Invoice No. ${invoice.invoice_id}: Due ${deliveryDate}`;
       const descLines = doc.splitTextToSize(description, 90);
+      const rowHeight = Math.max(descLines.length * 4, 6);
+
+      // Check if we need a new page
+      if (yPos + rowHeight > maxContentY) {
+        yPos = addNewPage();
+      }
+
+      doc.text(deliveryDate, 22, yPos);
       doc.text(descLines, 50, yPos);
-      
+
       const amount = invoice.total_amount.toFixed(2);
-      
       doc.text(amount, 150, yPos, { align: 'right' });
       doc.text(amount, 185, yPos, { align: 'right' });
-      
-      yPos += Math.max(descLines.length * 4, 6);
-    });
-    
-    const footerY = 270;
-    doc.setFontSize(9);
 
+      yPos += rowHeight;
+    });
+
+    // Calculate footer position - place it after content with some spacing
+    // Footer needs about 25mm of space (header row + values row + margins)
+    const footerNeededSpace = 25;
+    const bottomMargin = 15;
+
+    // Check if footer fits on current page
+    let finalFooterY: number;
+    if (yPos + footerNeededSpace + bottomMargin > pageHeight) {
+      // Footer doesn't fit, add new page
+      doc.addPage();
+      renderHeaderInPDF(doc, selectedHeader, logoBase64, 20);
+      finalFooterY = headerEndY + 20; // Place footer near top of new page
+    } else {
+      // Footer fits on current page - place it at bottom
+      finalFooterY = pageHeight - bottomMargin - 20;
+    }
+
+    doc.setFontSize(9);
     doc.setFillColor(184, 230, 231);
-    doc.rect(20, footerY, 170, 8, 'F');
+    doc.rect(20, finalFooterY, 170, 8, 'F');
 
     doc.setTextColor(13, 144, 154);
     doc.setFont('helvetica', 'normal');
-    doc.text('Current', 23, footerY + 3);
-    doc.text('Due', 23, footerY + 6.5);
+    doc.text('Current', 23, finalFooterY + 3);
+    doc.text('Due', 23, finalFooterY + 6.5);
 
-    doc.text('1-30 Days', 45, footerY + 3);
-    doc.text('Past Due', 45, footerY + 6.5);
+    doc.text('1-30 Days', 45, finalFooterY + 3);
+    doc.text('Past Due', 45, finalFooterY + 6.5);
 
-    doc.text('31-60 Days', 80, footerY + 3);
-    doc.text('Past Due', 80, footerY + 6.5);
+    doc.text('31-60 Days', 80, finalFooterY + 3);
+    doc.text('Past Due', 80, finalFooterY + 6.5);
 
-    doc.text('61-90 Days', 115, footerY + 3);
-    doc.text('Past Due', 115, footerY + 6.5);
+    doc.text('61-90 Days', 115, finalFooterY + 3);
+    doc.text('Past Due', 115, finalFooterY + 6.5);
 
-    doc.text('90+ Days', 150, footerY + 3);
-    doc.text('Past Due', 150, footerY + 6.5);
+    doc.text('90+ Days', 150, finalFooterY + 3);
+    doc.text('Past Due', 150, finalFooterY + 6.5);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Amount', 185, footerY + 3, { align: 'right' });
-    doc.text('Due', 185, footerY + 6.5, { align: 'right' });
+    doc.text('Amount', 185, finalFooterY + 3, { align: 'right' });
+    doc.text('Due', 185, finalFooterY + 6.5, { align: 'right' });
 
     // Get aging amounts
     const agingAmounts = getAgingAmounts();
 
     doc.setTextColor(0, 0, 0);
     doc.setFont('helvetica', 'normal');
-    doc.text(agingAmounts.current.toFixed(2), 23, footerY + 12, { align: 'left' });
-    doc.text(agingAmounts['1-30'].toFixed(2), 45, footerY + 12, { align: 'left' });
-    doc.text(agingAmounts['31-60'].toFixed(2), 80, footerY + 12, { align: 'left' });
-    doc.text(agingAmounts['61-90'].toFixed(2), 115, footerY + 12, { align: 'left' });
-    doc.text(agingAmounts['90plus'].toFixed(2), 150, footerY + 12, { align: 'left' });
+    doc.text(agingAmounts.current.toFixed(2), 23, finalFooterY + 12, { align: 'left' });
+    doc.text(agingAmounts['1-30'].toFixed(2), 45, finalFooterY + 12, { align: 'left' });
+    doc.text(agingAmounts['31-60'].toFixed(2), 80, finalFooterY + 12, { align: 'left' });
+    doc.text(agingAmounts['61-90'].toFixed(2), 115, finalFooterY + 12, { align: 'left' });
+    doc.text(agingAmounts['90plus'].toFixed(2), 150, finalFooterY + 12, { align: 'left' });
     doc.setFont('helvetica', 'bold');
-    doc.text(`S$${selectedStatement.total_amount.toFixed(2)}`, 186, footerY + 12, { align: 'right' });
+    doc.text(`S$${selectedStatement.total_amount.toFixed(2)}`, 186, finalFooterY + 12, { align: 'right' });
     doc.autoPrint();
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
@@ -793,137 +1104,194 @@ const handleDownloadStatement = async () => {
     }
 
     const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-    renderHeaderInPDF(doc, selectedHeader, logoBase64);
+    const headerLines = countHeaderLines(selectedHeader);
+
+    // Calculate dynamic Y positions based on header lines
+    const headerEndY = renderHeaderInPDF(doc, selectedHeader, logoBase64, 20);
+    const titleY = headerEndY + 8;
 
     // Title
     doc.setFontSize(16);
     doc.setTextColor("#0D909A");
     doc.setFont('helvetica', 'normal');
-    doc.text('Statement', 20, 58);
+    doc.text('Statement', 20, titleY);
 
     doc.setTextColor(0, 0, 0);
+
+    // Dynamic positioning based on header size
+    const detailsStartY = titleY + 9;
 
     // Statement Details - Right Side
     const labelX = 155;
     const valueX = 157;
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text('STATEMENT NO.', labelX, 67, { align: 'right' });
+    doc.text('STATEMENT NO.', labelX, detailsStartY, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(selectedStatement.statement_id, valueX, 67);
+    doc.text(selectedStatement.statement_id, valueX, detailsStartY);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('DATE', labelX, 72, { align: 'right' });
+    doc.text('DATE', labelX, detailsStartY + 5, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(new Date(selectedStatement.date_generated).toLocaleDateString('en-GB'), valueX, 72);
+    doc.text(new Date(selectedStatement.date_generated).toLocaleDateString('en-GB'), valueX, detailsStartY + 5);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('TOTAL DUE', labelX, 77, { align: 'right' });
+    doc.text('TOTAL DUE', labelX, detailsStartY + 10, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    doc.text(`S$${selectedStatement.total_amount.toFixed(2)}`, valueX, 77);
+    doc.text(`S$${selectedStatement.total_amount.toFixed(2)}`, valueX, detailsStartY + 10);
 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text('ENCLOSED', labelX, 82, { align: 'right' });
+    doc.text('ENCLOSED', labelX, detailsStartY + 15, { align: 'right' });
 
     // TO Section
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text('TO', 20, 67);
+    doc.text('TO', 20, detailsStartY);
     doc.setFont('helvetica', 'normal');
-    doc.text(selectedStatement.company_name, 20, 72);
+    doc.text(selectedStatement.company_name, 20, detailsStartY + 5);
     const address = doc.splitTextToSize(selectedStatement.business_address, 60);
-    doc.text(address, 20, 77);
+    doc.text(address, 20, detailsStartY + 10);
 
-    // Enclosed Invoices
-    const invoicesY = 83;
+    // Calculate address height
+    const addressHeight = address.length * 4;
+
+    // Invoice table starts after TO section
+    const tableY = detailsStartY + 15 + Math.max(addressHeight - 10, 0) + 5;
 
     // Invoice table header
-    const tableY = invoicesY + 5;
     doc.setFillColor(184, 230, 231);
     doc.rect(20, tableY, 170, 7, 'F');
     doc.setTextColor("#0D909A");
-    
+
     doc.setFontSize(9);
     doc.text('DATE', 22, tableY + 5);
     doc.text('DESCRIPTION', 50, tableY + 5);
     doc.text('AMOUNT', 150, tableY + 5, { align: 'right' });
     doc.text('OPEN AMOUNT', 185, tableY + 5, { align: 'right' });
 
-    // Invoice rows
+    // Invoice rows with pagination
     doc.setFont('helvetica', 'normal');
     let yPos = tableY + 13;
     doc.setTextColor(0, 0, 0);
 
-    // In handlePrintStatement - Invoice rows section
+    const pageHeight = 297; // A4 height in mm
+    const footerHeight = 25; // Space needed for aging footer
+    const maxContentY = pageHeight - 20 - footerHeight; // 20mm bottom margin + footer
+    let currentPage = 1;
+
+    // Function to add new page with header
+    const addNewPage = () => {
+      doc.addPage();
+      currentPage++;
+
+      // Add header to new page
+      renderHeaderInPDF(doc, selectedHeader, logoBase64, 20);
+
+      // Add table header on new page
+      const newTableY = headerEndY + 15;
+      doc.setFillColor(184, 230, 231);
+      doc.rect(20, newTableY, 170, 7, 'F');
+      doc.setTextColor("#0D909A");
+      doc.setFontSize(9);
+      doc.text('DATE', 22, newTableY + 5);
+      doc.text('DESCRIPTION', 50, newTableY + 5);
+      doc.text('AMOUNT', 150, newTableY + 5, { align: 'right' });
+      doc.text('OPEN AMOUNT', 185, newTableY + 5, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'normal');
+
+      return newTableY + 13;
+    };
+
     statementInvoices.forEach((invoice) => {
       const deliveryDate = new Date(invoice.delivery_date).toLocaleDateString('en-GB');
-      doc.text(deliveryDate, 22, yPos);
-      
       const description = `Invoice No. ${invoice.invoice_id}: Due ${deliveryDate}`;
       const descLines = doc.splitTextToSize(description, 90);
+      const rowHeight = Math.max(descLines.length * 4, 6);
+
+      // Check if we need a new page
+      if (yPos + rowHeight > maxContentY) {
+        yPos = addNewPage();
+      }
+
+      doc.text(deliveryDate, 22, yPos);
       doc.text(descLines, 50, yPos);
-      
+
       const amount = invoice.total_amount.toFixed(2);
-      
       doc.text(amount, 150, yPos, { align: 'right' });
       doc.text(amount, 185, yPos, { align: 'right' });
-      
-      yPos += Math.max(descLines.length * 4, 6);
-    });
-        
-    const footerY = 270;
-    doc.setFontSize(9);
 
+      yPos += rowHeight;
+    });
+
+    // Calculate footer position - place it after content with some spacing
+    // Footer needs about 25mm of space (header row + values row + margins)
+    const footerNeededSpace = 25;
+    const bottomMargin = 15;
+
+    // Check if footer fits on current page
+    let finalFooterY: number;
+    if (yPos + footerNeededSpace + bottomMargin > pageHeight) {
+      // Footer doesn't fit, add new page
+      doc.addPage();
+      renderHeaderInPDF(doc, selectedHeader, logoBase64, 20);
+      finalFooterY = headerEndY + 20; // Place footer near top of new page
+    } else {
+      // Footer fits on current page - place it at bottom
+      finalFooterY = pageHeight - bottomMargin - 20;
+    }
+
+    doc.setFontSize(9);
     doc.setFillColor(184, 230, 231);
-    doc.rect(20, footerY, 170, 8, 'F');
+    doc.rect(20, finalFooterY, 170, 8, 'F');
 
     doc.setTextColor(13, 144, 154);
     doc.setFont('helvetica', 'normal');
-    doc.text('Current', 23, footerY + 3);
-    doc.text('Due', 23, footerY + 6.5);
+    doc.text('Current', 23, finalFooterY + 3);
+    doc.text('Due', 23, finalFooterY + 6.5);
 
-    doc.text('1-30 Days', 45, footerY + 3);
-    doc.text('Past Due', 45, footerY + 6.5);
+    doc.text('1-30 Days', 45, finalFooterY + 3);
+    doc.text('Past Due', 45, finalFooterY + 6.5);
 
-    doc.text('31-60 Days', 80, footerY + 3);
-    doc.text('Past Due', 80, footerY + 6.5);
+    doc.text('31-60 Days', 80, finalFooterY + 3);
+    doc.text('Past Due', 80, finalFooterY + 6.5);
 
-    doc.text('61-90 Days', 115, footerY + 3);
-    doc.text('Past Due', 115, footerY + 6.5);
+    doc.text('61-90 Days', 115, finalFooterY + 3);
+    doc.text('Past Due', 115, finalFooterY + 6.5);
 
-    doc.text('90+ Days', 150, footerY + 3);
-    doc.text('Past Due', 150, footerY + 6.5);
+    doc.text('90+ Days', 150, finalFooterY + 3);
+    doc.text('Past Due', 150, finalFooterY + 6.5);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Amount', 185, footerY + 3, { align: 'right' });
-    doc.text('Due', 185, footerY + 6.5, { align: 'right' });
+    doc.text('Amount', 185, finalFooterY + 3, { align: 'right' });
+    doc.text('Due', 185, finalFooterY + 6.5, { align: 'right' });
 
     // Get aging amounts
     const agingAmounts = getAgingAmounts();
 
     doc.setTextColor(0, 0, 0);
     doc.setFont('helvetica', 'normal');
-    doc.text(agingAmounts.current.toFixed(2), 23, footerY + 12, { align: 'left' });
-    doc.text(agingAmounts['1-30'].toFixed(2), 45, footerY + 12, { align: 'left' });
-    doc.text(agingAmounts['31-60'].toFixed(2), 80, footerY + 12, { align: 'left' });
-    doc.text(agingAmounts['61-90'].toFixed(2), 115, footerY + 12, { align: 'left' });
-    doc.text(agingAmounts['90plus'].toFixed(2), 150, footerY + 12, { align: 'left' });
+    doc.text(agingAmounts.current.toFixed(2), 23, finalFooterY + 12, { align: 'left' });
+    doc.text(agingAmounts['1-30'].toFixed(2), 45, finalFooterY + 12, { align: 'left' });
+    doc.text(agingAmounts['31-60'].toFixed(2), 80, finalFooterY + 12, { align: 'left' });
+    doc.text(agingAmounts['61-90'].toFixed(2), 115, finalFooterY + 12, { align: 'left' });
+    doc.text(agingAmounts['90plus'].toFixed(2), 150, finalFooterY + 12, { align: 'left' });
     doc.setFont('helvetica', 'bold');
-    doc.text(`S$${selectedStatement.total_amount.toFixed(2)}`, 186, footerY + 12, { align: 'right' });
+    doc.text(`S$${selectedStatement.total_amount.toFixed(2)}`, 186, finalFooterY + 12, { align: 'right' });
 
     const fileName = `Statement_${selectedStatement.statement_id}_${selectedStatement.statement_month.replace(/\s+/g, '_')}.pdf`;
 
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
-    
+
     const link = document.createElement('a');
     link.href = blobUrl;
     link.download = fileName;
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
-    
+
     setTimeout(() => {
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
@@ -1568,7 +1936,7 @@ const fetchStatements = async () => {
                             name="headerOption"
                             value={header.id}
                             checked={selectedHeaderId === header.id}
-                            onChange={() => setSelectedHeaderId(header.id)}
+                            onChange={() => selectedStatement && saveStatementHeader(selectedStatement.statement_id, header.id)}
                             className="cursor-pointer accent-orange-500"
                           />
                           <span className="text-sm font-medium">{header.option_name}</span>
@@ -1607,153 +1975,184 @@ const fetchStatements = async () => {
                   </div>
                 </div>
 
-                {/* A4 Paper Preview */}
+                {/* A4 Paper Preview with Pagination */}
                 <div className="flex-1 overflow-auto px-6 py-6" style={{ backgroundColor: '#e5e7eb' }}>
-                  <div
-                    className="mx-auto bg-white shadow-lg"
-                    style={{
-                      width: '210mm',
-                      minHeight: '297mm',
-                      padding: '20mm',
-                      position: 'relative',
-                      fontFamily: 'Helvetica, Arial, sans-serif',
-                    }}
-                  >
-                    {/* PDF Header */}
-                    {(() => {
-                      const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-                      if (!selectedHeader) return null;
-                      return (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <div style={{ fontSize: '10pt', lineHeight: '1.6' }}>
-                            {selectedHeader.line1 && (
-                              <div style={{ fontWeight: 'bold' }}>{selectedHeader.line1}</div>
+                  {(() => {
+                    const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
+                    const headerLineCount = countHeaderLines(selectedHeader);
+                    const agingAmounts = getAgingAmounts();
+
+                    // Calculate items per page based on header size
+                    // Fewer header lines = more space for invoices
+                    const baseItemsPerPage = 25;
+                    const extraItemsFromHeader = Math.max(0, 7 - headerLineCount) * 2;
+                    const itemsPerPageCalc = baseItemsPerPage + extraItemsFromHeader;
+
+                    // Split invoices into pages
+                    const pages: Invoice[][] = [];
+                    for (let i = 0; i < statementInvoices.length; i += itemsPerPageCalc) {
+                      pages.push(statementInvoices.slice(i, i + itemsPerPageCalc));
+                    }
+
+                    // Ensure at least one page
+                    if (pages.length === 0) {
+                      pages.push([]);
+                    }
+
+                    return (
+                      <div className="space-y-8">
+                        {pages.map((pageInvoices, pageIndex) => (
+                          <div
+                            key={pageIndex}
+                            className="mx-auto bg-white shadow-lg"
+                            style={{
+                              width: '210mm',
+                              minHeight: '297mm',
+                              padding: '20mm',
+                              position: 'relative',
+                              fontFamily: 'Helvetica, Arial, sans-serif',
+                              pageBreakAfter: pageIndex < pages.length - 1 ? 'always' : 'auto',
+                            }}
+                          >
+                            {/* PDF Header */}
+                            {selectedHeader && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <div style={{ fontSize: '10pt', lineHeight: '1.6' }}>
+                                  {selectedHeader.line1 && (
+                                    <div style={{ fontWeight: 'bold' }}>{selectedHeader.line1}</div>
+                                  )}
+                                  {selectedHeader.line2 && <div>{selectedHeader.line2}</div>}
+                                  {selectedHeader.line3 && <div>{selectedHeader.line3}</div>}
+                                  {selectedHeader.line4 && <div>{selectedHeader.line4}</div>}
+                                  {selectedHeader.line5 && <div>{selectedHeader.line5}</div>}
+                                  {selectedHeader.line6 && <div>{selectedHeader.line6}</div>}
+                                  {selectedHeader.line7 && <div>{selectedHeader.line7}</div>}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end' }}>
+                                  <Image
+                                    src="/assets/file_logo.png"
+                                    alt="Company Logo"
+                                    width={80}
+                                    height={60}
+                                    style={{ objectFit: 'contain' }}
+                                  />
+                                </div>
+                              </div>
                             )}
-                            {selectedHeader.line2 && <div>{selectedHeader.line2}</div>}
-                            {selectedHeader.line3 && <div>{selectedHeader.line3}</div>}
-                            {selectedHeader.line4 && <div>{selectedHeader.line4}</div>}
-                            {selectedHeader.line5 && <div>{selectedHeader.line5}</div>}
-                            {selectedHeader.line6 && <div>{selectedHeader.line6}</div>}
-                            {selectedHeader.line7 && <div>{selectedHeader.line7}</div>}
+
+                            {/* Title - dynamic margin based on header lines */}
+                            <div style={{
+                              fontSize: '16pt',
+                              color: '#0D909A',
+                              marginTop: headerLineCount <= 3 ? '8px' : '16px',
+                              marginBottom: '12px'
+                            }}>
+                              Statement {pages.length > 1 && `(Page ${pageIndex + 1} of ${pages.length})`}
+                            </div>
+
+                            {/* TO + Statement Details Row - only on first page */}
+                            {pageIndex === 0 && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10pt', marginBottom: '8px' }}>
+                                {/* TO Section */}
+                                <div style={{ maxWidth: '55%' }}>
+                                  <div style={{ fontWeight: 'bold' }}>TO</div>
+                                  <div>{selectedStatement.company_name}</div>
+                                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                    {selectedStatement.business_address}
+                                  </div>
+                                </div>
+
+                                {/* Statement Details */}
+                                <div style={{ textAlign: 'left', minWidth: '200px' }}>
+                                  <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
+                                    <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>STATEMENT NO.</span>
+                                    <span>{selectedStatement.statement_id}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
+                                    <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>DATE</span>
+                                    <span>{new Date(selectedStatement.date_generated).toLocaleDateString('en-GB')}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
+                                    <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>TOTAL DUE</span>
+                                    <span>S${selectedStatement.total_amount.toFixed(2)}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '8px' }}>
+                                    <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>ENCLOSED</span>
+                                    <span></span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Invoice Table */}
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9pt', marginTop: pageIndex === 0 ? '8px' : '0' }}>
+                              <thead>
+                                <tr style={{ backgroundColor: '#B8E6E7' }}>
+                                  <th style={{ padding: '6px 8px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal' }}>DATE</th>
+                                  <th style={{ padding: '6px 8px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal' }}>DESCRIPTION</th>
+                                  <th style={{ padding: '6px 8px', textAlign: 'right', color: '#0D909A', fontWeight: 'normal' }}>AMOUNT</th>
+                                  <th style={{ padding: '6px 8px', textAlign: 'right', color: '#0D909A', fontWeight: 'normal' }}>OPEN AMOUNT</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {pageInvoices.map((invoice, idx) => {
+                                  const deliveryDate = new Date(invoice.delivery_date).toLocaleDateString('en-GB');
+                                  return (
+                                    <tr key={idx} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                                      <td style={{ padding: '5px 8px' }}>{deliveryDate}</td>
+                                      <td style={{ padding: '5px 8px' }}>Invoice No. {invoice.invoice_id}: Due {deliveryDate}</td>
+                                      <td style={{ padding: '5px 8px', textAlign: 'right' }}>{invoice.total_amount.toFixed(2)}</td>
+                                      <td style={{ padding: '5px 8px', textAlign: 'right' }}>{invoice.total_amount.toFixed(2)}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+
+                            {/* Aging Summary Footer - only on last page */}
+                            {pageIndex === pages.length - 1 && (
+                              <div style={{ position: 'absolute', bottom: '20mm', left: '20mm', right: '20mm' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9pt' }}>
+                                  <thead>
+                                    <tr style={{ backgroundColor: '#B8E6E7' }}>
+                                      <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                        <div>Current</div><div>Due</div>
+                                      </th>
+                                      <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                        <div>1-30 Days</div><div>Past Due</div>
+                                      </th>
+                                      <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                        <div>31-60 Days</div><div>Past Due</div>
+                                      </th>
+                                      <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                        <div>61-90 Days</div><div>Past Due</div>
+                                      </th>
+                                      <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
+                                        <div>90+ Days</div><div>Past Due</div>
+                                      </th>
+                                      <th style={{ padding: '4px 6px', textAlign: 'right', color: '#0D909A', fontWeight: 'bold', lineHeight: '1.2' }}>
+                                        <div>Amount</div><div>Due</div>
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr>
+                                      <td style={{ padding: '6px 6px' }}>{agingAmounts.current.toFixed(2)}</td>
+                                      <td style={{ padding: '6px 6px' }}>{agingAmounts['1-30'].toFixed(2)}</td>
+                                      <td style={{ padding: '6px 6px' }}>{agingAmounts['31-60'].toFixed(2)}</td>
+                                      <td style={{ padding: '6px 6px' }}>{agingAmounts['61-90'].toFixed(2)}</td>
+                                      <td style={{ padding: '6px 6px' }}>{agingAmounts['90plus'].toFixed(2)}</td>
+                                      <td style={{ padding: '6px 6px', textAlign: 'right', fontWeight: 'bold' }}>S${selectedStatement.total_amount.toFixed(2)}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end' }}>
-                            <Image
-                              src="/assets/file_logo.png"
-                              alt="Company Logo"
-                              width={80}
-                              height={60}
-                              style={{ objectFit: 'contain' }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Title */}
-                    <div style={{ fontSize: '16pt', color: '#0D909A', marginTop: '16px', marginBottom: '12px' }}>
-                      Statement
-                    </div>
-
-                    {/* TO + Statement Details Row */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10pt', marginBottom: '8px' }}>
-                      {/* TO Section */}
-                      <div style={{ maxWidth: '55%' }}>
-                        <div style={{ fontWeight: 'bold' }}>TO</div>
-                        <div>{selectedStatement.company_name}</div>
-                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                          {selectedStatement.business_address}
-                        </div>
+                        ))}
                       </div>
-
-                      {/* Statement Details */}
-                      <div style={{ textAlign: 'left', minWidth: '200px' }}>
-                        <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
-                          <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>STATEMENT NO.</span>
-                          <span>{selectedStatement.statement_id}</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
-                          <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>DATE</span>
-                          <span>{new Date(selectedStatement.date_generated).toLocaleDateString('en-GB')}</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
-                          <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>TOTAL DUE</span>
-                          <span>S${selectedStatement.total_amount.toFixed(2)}</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <span style={{ fontWeight: 'bold', minWidth: '110px', textAlign: 'right' }}>ENCLOSED</span>
-                          <span></span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Invoice Table */}
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9pt', marginTop: '8px' }}>
-                      <thead>
-                        <tr style={{ backgroundColor: '#B8E6E7' }}>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal' }}>DATE</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal' }}>DESCRIPTION</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'right', color: '#0D909A', fontWeight: 'normal' }}>AMOUNT</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'right', color: '#0D909A', fontWeight: 'normal' }}>OPEN AMOUNT</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {statementInvoices.map((invoice, idx) => {
-                          const deliveryDate = new Date(invoice.delivery_date).toLocaleDateString('en-GB');
-                          return (
-                            <tr key={idx} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                              <td style={{ padding: '5px 8px' }}>{deliveryDate}</td>
-                              <td style={{ padding: '5px 8px' }}>Invoice No. {invoice.invoice_id}: Due {deliveryDate}</td>
-                              <td style={{ padding: '5px 8px', textAlign: 'right' }}>{invoice.total_amount.toFixed(2)}</td>
-                              <td style={{ padding: '5px 8px', textAlign: 'right' }}>{invoice.total_amount.toFixed(2)}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-
-                    {/* Aging Summary Footer */}
-                    {(() => {
-                      const agingAmounts = getAgingAmounts();
-                      return (
-                        <div style={{ position: 'absolute', bottom: '20mm', left: '20mm', right: '20mm' }}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9pt' }}>
-                            <thead>
-                              <tr style={{ backgroundColor: '#B8E6E7' }}>
-                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
-                                  <div>Current</div><div>Due</div>
-                                </th>
-                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
-                                  <div>1-30 Days</div><div>Past Due</div>
-                                </th>
-                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
-                                  <div>31-60 Days</div><div>Past Due</div>
-                                </th>
-                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
-                                  <div>61-90 Days</div><div>Past Due</div>
-                                </th>
-                                <th style={{ padding: '4px 6px', textAlign: 'left', color: '#0D909A', fontWeight: 'normal', lineHeight: '1.2' }}>
-                                  <div>90+ Days</div><div>Past Due</div>
-                                </th>
-                                <th style={{ padding: '4px 6px', textAlign: 'right', color: '#0D909A', fontWeight: 'bold', lineHeight: '1.2' }}>
-                                  <div>Amount</div><div>Due</div>
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr>
-                                <td style={{ padding: '6px 6px' }}>{agingAmounts.current.toFixed(2)}</td>
-                                <td style={{ padding: '6px 6px' }}>{agingAmounts['1-30'].toFixed(2)}</td>
-                                <td style={{ padding: '6px 6px' }}>{agingAmounts['31-60'].toFixed(2)}</td>
-                                <td style={{ padding: '6px 6px' }}>{agingAmounts['61-90'].toFixed(2)}</td>
-                                <td style={{ padding: '6px 6px' }}>{agingAmounts['90plus'].toFixed(2)}</td>
-                                <td style={{ padding: '6px 6px', textAlign: 'right', fontWeight: 'bold' }}>S${selectedStatement.total_amount.toFixed(2)}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-                      );
-                    })()}
-                  </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Aging Category Selection */}

@@ -6,6 +6,7 @@ import supabase from "@/lib/client";
 import Image from "next/image";
 import { useState, useEffect, Fragment, useCallback, useRef } from "react";
 import { Search, Filter, Plus, X, Check, ChevronDown, Tag } from "lucide-react";
+import { useAccessControl } from "@/lib/accessControl";
 import {
   downloadMultiStickerPDF,
   downloadAllOrderStickersPDF,
@@ -33,6 +34,10 @@ interface Order {
   order_date: string;
   delivery_date: string;
   delivery_address: string;
+  billing_address?: string;
+  ad_streetName?: string;
+  ad_country?: string;
+  ad_postal?: string;
   status: string;
   notes: string | null;
   tracking_no: string;
@@ -91,6 +96,10 @@ const loadImageAsBase64 = (src: string): Promise<string> => {
 };
 
 export default function OnlineOrderPage() {
+  // Access Control
+  const { canEdit } = useAccessControl();
+  const canEditOnlineOrders = canEdit('orders', 'online-order');
+
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -142,6 +151,7 @@ export default function OnlineOrderPage() {
     }>
   >([]);
   const [selectedHeaderId, setSelectedHeaderId] = useState<number | null>(null);
+  const [onlineInvoiceHeaders, setOnlineInvoiceHeaders] = useState<Record<string, number>>({});
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
   const [editingHeaderId, setEditingHeaderId] = useState<number | null>(null);
   const [headerFormData, setHeaderFormData] = useState({
@@ -228,6 +238,11 @@ export default function OnlineOrderPage() {
   }>>([]);
   const [applyGstToFutureOrders, setApplyGstToFutureOrders] = useState(false);
   const [isSavingInvoice, setIsSavingInvoice] = useState(false);
+
+  // Edit Invoice Address state
+  const [editBillToAddress, setEditBillToAddress] = useState('');
+  const [editShipToAddress, setEditShipToAddress] = useState('');
+  const [applyAddressToFutureOrders, setApplyAddressToFutureOrders] = useState(false);
 
   // Sticker preview state
   const [showStickerPreview, setShowStickerPreview] = useState(false);
@@ -322,6 +337,30 @@ export default function OnlineOrderPage() {
 
     fetchHeaderOptions();
   }, []);
+
+  // Load saved online invoice headers from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('onlineInvoiceHeaders');
+      if (saved) {
+        setOnlineInvoiceHeaders(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error('Error loading online invoice headers from localStorage:', error);
+    }
+  }, []);
+
+  // Function to save header for a specific online invoice
+  const saveOnlineInvoiceHeader = (invoiceId: string, headerId: number) => {
+    const updated = { ...onlineInvoiceHeaders, [invoiceId]: headerId };
+    setOnlineInvoiceHeaders(updated);
+    setSelectedHeaderId(headerId);
+    try {
+      localStorage.setItem('onlineInvoiceHeaders', JSON.stringify(updated));
+    } catch (error) {
+      console.error('Error saving online invoice headers to localStorage:', error);
+    }
+  };
 
   // Fetch footer options on component mount
   useEffect(() => {
@@ -1312,6 +1351,18 @@ export default function OnlineOrderPage() {
         setCurrentInvoiceGstPercent(!isNaN(defaultGst) ? defaultGst : 9);
       }
 
+      // Load saved header for this specific invoice, or use default
+      const savedHeaderId = onlineInvoiceHeaders[order.invoice_id];
+      if (savedHeaderId && headerOptions.some(h => h.id === savedHeaderId)) {
+        setSelectedHeaderId(savedHeaderId);
+      } else {
+        // Use default header
+        const defaultHeader = headerOptions.find(h => h.is_default) || headerOptions[0];
+        if (defaultHeader) {
+          setSelectedHeaderId(defaultHeader.id);
+        }
+      }
+
       setShowInvoiceModal(true);
     } catch (error) {
       console.error("Error fetching order items for invoice:", error);
@@ -1682,6 +1733,16 @@ export default function OnlineOrderPage() {
     const savedGstValue = savedGst ? parseFloat(savedGst) : 9;
     setApplyGstToFutureOrders(currentInvoiceGstPercent === savedGstValue);
 
+    // Initialize address fields from order (online orders store address directly)
+    // Bill To uses billing_address, Ship To uses individual address fields or delivery_address
+    const billToAddr = selectedOrder.billing_address || selectedOrder.delivery_address || '';
+    const shipToAddr = selectedOrder.ad_streetName
+      ? [selectedOrder.ad_streetName, selectedOrder.ad_country, selectedOrder.ad_postal].filter(Boolean).join(', ')
+      : selectedOrder.delivery_address || '';
+    setEditBillToAddress(billToAddr);
+    setEditShipToAddress(shipToAddr);
+    setApplyAddressToFutureOrders(false);
+
     setShowEditInvoiceModal(true);
   };
 
@@ -1768,6 +1829,26 @@ export default function OnlineOrderPage() {
       if (applyGstToFutureOrders) {
         localStorage.setItem('defaultGstPercent_online', editInvoiceGstPercent.toString());
       }
+
+      // Update this order's addresses in database (online orders store address directly)
+      const { error: addressError } = await supabase
+        .from('customer_order')
+        .update({
+          delivery_address: editShipToAddress,
+          billing_address: editBillToAddress
+        })
+        .eq('id', selectedOrder.id);
+
+      if (addressError) {
+        console.error('Error updating order address:', addressError);
+      }
+
+      // Update local state with new addresses
+      setSelectedOrder(prev => prev ? {
+        ...prev,
+        delivery_address: editShipToAddress,
+        billing_address: editBillToAddress
+      } : null);
 
       // Refresh orders list
       const { data } = await supabase
@@ -1918,20 +1999,18 @@ export default function OnlineOrderPage() {
       doc.text("BILL TO", 20, 67);
       doc.setFont("helvetica", "normal");
       doc.text(order.customer_name || "N/A", 20, 72);
-      const billAddress = doc.splitTextToSize(
-        order.delivery_address || "N/A",
-        45,
-      );
+      const billAddressText = order.billing_address || order.delivery_address || "N/A";
+      const billAddress = doc.splitTextToSize(billAddressText, 45);
       doc.text(billAddress, 20, 77);
 
       doc.setFont("helvetica", "bold");
       doc.text("SHIP TO", 75, 67);
       doc.setFont("helvetica", "normal");
       doc.text(order.customer_name || "N/A", 75, 72);
-      const shipAddress = doc.splitTextToSize(
-        order.delivery_address || "N/A",
-        45,
-      );
+      const shipAddressText = order.ad_streetName
+        ? [order.ad_streetName, order.ad_country, order.ad_postal].filter(Boolean).join(', ')
+        : order.delivery_address || "N/A";
+      const shipAddress = doc.splitTextToSize(shipAddressText, 45);
       doc.text(shipAddress, 75, 77);
 
       const labelX = 155;
@@ -2160,7 +2239,7 @@ export default function OnlineOrderPage() {
                       name="headerOption"
                       value={header.id}
                       checked={selectedHeaderId === header.id}
-                      onChange={() => setSelectedHeaderId(header.id)}
+                      onChange={() => selectedOrder && saveOnlineInvoiceHeader(selectedOrder.invoice_id, header.id)}
                       className="cursor-pointer accent-orange-500"
                     />
                     <span className="text-sm font-medium">
@@ -2202,240 +2281,250 @@ export default function OnlineOrderPage() {
           </div>
 
           <div className="flex-1 overflow-auto p-6 bg-gray-100">
-            <div
-              className="bg-white shadow-lg mx-auto"
-              style={{
-                fontFamily: "Arial, sans-serif",
-                width: "210mm",
-                minHeight: "297mm",
-                padding: "20mm",
-                boxSizing: "border-box",
-              }}
-            >
-              {/* Header Section */}
-              {headerOptions.find((h) => h.id === selectedHeaderId) &&
-                (() => {
-                  const header = headerOptions.find(
-                    (h) => h.id === selectedHeaderId,
-                  );
-                  return (
-                    <div className="mb-2 flex justify-between items-start">
-                      <div>
-                        {header?.line1 && (
-                          <div className="font-bold text-[10px]">
-                            {header.line1}
+            {(() => {
+              const selectedHeader = headerOptions.find((h) => h.id === selectedHeaderId);
+              const selectedFooter = footerOptions.find((f) => f.id === selectedFooterId);
+
+              // Calculate footer lines count
+              const footerLineCount = selectedFooter
+                ? [selectedFooter.line1, selectedFooter.line2, selectedFooter.line3, selectedFooter.line4, selectedFooter.line5].filter(Boolean).length
+                : 0;
+
+              // Calculate header lines count
+              const headerLineCount = selectedHeader
+                ? [selectedHeader.line1, selectedHeader.line2, selectedHeader.line3, selectedHeader.line4, selectedHeader.line5, selectedHeader.line6, selectedHeader.line7].filter(Boolean).length
+                : 0;
+
+              // Calculate items per page based on available space
+              const baseItemsFirstPage = 8;
+              const baseItemsOtherPages = 18;
+              const extraFromHeader = Math.max(0, 7 - headerLineCount);
+              const extraFromFooter = Math.max(0, 5 - footerLineCount);
+
+              const itemsFirstPage = baseItemsFirstPage + extraFromHeader + Math.floor(extraFromFooter / 2);
+              const itemsOtherPages = baseItemsOtherPages + Math.floor(extraFromFooter / 2);
+
+              // Split items into pages
+              const pages: OrderItem[][] = [];
+              const allItems = orderItems;
+
+              if (allItems.length === 0) {
+                pages.push([]);
+              } else if (allItems.length <= itemsFirstPage) {
+                pages.push(allItems);
+              } else {
+                pages.push(allItems.slice(0, itemsFirstPage));
+                let remaining = allItems.slice(itemsFirstPage);
+                while (remaining.length > 0) {
+                  pages.push(remaining.slice(0, itemsOtherPages));
+                  remaining = remaining.slice(itemsOtherPages);
+                }
+              }
+
+              const totalPages = pages.length;
+
+              // Render footer component - centered at bottom with same font as header
+              const renderFooter = () => (
+                <div style={{
+                  position: 'absolute',
+                  bottom: '15mm',
+                  left: '20mm',
+                  right: '20mm',
+                  textAlign: 'center',
+                  fontFamily: 'Arial, sans-serif',
+                  fontSize: '10px',
+                  lineHeight: '1.6'
+                }}>
+                  {selectedFooter && (
+                    <>
+                      {selectedFooter.line1 && <p style={{ margin: '4px 0' }}>{selectedFooter.line1}</p>}
+                      {selectedFooter.line2 && <p style={{ margin: '4px 0' }}>{selectedFooter.line2}</p>}
+                      {selectedFooter.line3 && <p style={{ margin: '4px 0' }}>{selectedFooter.line3}</p>}
+                      {selectedFooter.line4 && <p style={{ margin: '4px 0' }}>{selectedFooter.line4}</p>}
+                      {selectedFooter.line5 && <p style={{ margin: '4px 0' }}>{selectedFooter.line5}</p>}
+                    </>
+                  )}
+                </div>
+              );
+
+              return (
+                <div className="space-y-8">
+                  {pages.map((pageItems, pageIndex) => (
+                    <div
+                      key={pageIndex}
+                      className="bg-white shadow-lg mx-auto"
+                      style={{
+                        fontFamily: "Arial, sans-serif",
+                        width: "210mm",
+                        height: "297mm",
+                        padding: "20mm",
+                        boxSizing: "border-box",
+                        position: "relative",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {/* First page - full header */}
+                      {pageIndex === 0 && (
+                        <>
+                          {/* Header Section */}
+                          {selectedHeader && (
+                            <div className="mb-2 flex justify-between items-start">
+                              <div>
+                                {selectedHeader.line1 && <div className="font-bold text-[10px]">{selectedHeader.line1}</div>}
+                                {selectedHeader.line2 && <div className="text-[10px]">{selectedHeader.line2}</div>}
+                                {selectedHeader.line3 && <div className="text-[10px]">{selectedHeader.line3}</div>}
+                                {selectedHeader.line4 && <div className="text-[10px]">{selectedHeader.line4}</div>}
+                                {selectedHeader.line5 && <div className="text-[10px]">{selectedHeader.line5}</div>}
+                                {selectedHeader.line6 && <div className="text-[10px]">{selectedHeader.line6}</div>}
+                                {selectedHeader.line7 && <div className="text-[10px]">{selectedHeader.line7}</div>}
+                              </div>
+                              <div>
+                                <Image
+                                  src="/assets/file_logo.png"
+                                  alt="Company Logo"
+                                  width={80}
+                                  height={60}
+                                  style={{ objectFit: 'contain' }}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Tax Invoice Title */}
+                          <h2 className="text-xl font-light mb-3" style={{ color: "#0D909A" }}>
+                            Invoice {totalPages > 1 && `(Page ${pageIndex + 1} of ${totalPages})`}
+                          </h2>
+
+                          {/* Three Column Section */}
+                          <div className="grid grid-cols-3 gap-4 mb-3">
+                            <div>
+                              <h3 className="font-bold text-[10px] mb-1">BILL TO</h3>
+                              <p className="text-[10px] font-bold">{order.customer_name || "N/A"}</p>
+                              <p className="text-[10px] text-gray-700 max-w-150px wrap-break-words">{order.billing_address || order.delivery_address || "N/A"}</p>
+                            </div>
+                            <div>
+                              <h3 className="font-bold text-[10px] mb-1">SHIP TO</h3>
+                              <p className="text-[10px] font-bold">{order.customer_name || "N/A"}</p>
+                              <p className="text-[10px] text-gray-700 max-w-150px wrap-break-words">
+                                {order.ad_streetName
+                                  ? [order.ad_streetName, order.ad_country, order.ad_postal].filter(Boolean).join(', ')
+                                  : order.delivery_address || "N/A"}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] mb-0.5"><strong>INVOICE NO.</strong> {order.invoice_id || "N/A"}</p>
+                              <p className="text-[10px] mb-0.5"><strong>DATE</strong> {formatDate(order.delivery_date)}</p>
+                              <p className="text-[10px] mb-0.5"><strong>DUE DATE</strong> {formatDate(order.delivery_date)}</p>
+                              <p className="text-[10px]"><strong>TERMS</strong> Due on receipt</p>
+                            </div>
                           </div>
-                        )}
-                        {header?.line2 && (
-                          <div className="text-[10px]">{header.line2}</div>
-                        )}
-                        {header?.line3 && (
-                          <div className="text-[10px]">{header.line3}</div>
-                        )}
-                        {header?.line4 && (
-                          <div className="text-[10px]">{header.line4}</div>
-                        )}
-                        {header?.line5 && (
-                          <div className="text-[10px]">{header.line5}</div>
-                        )}
-                        {header?.line6 && (
-                          <div className="text-[10px]">{header.line6}</div>
-                        )}
-                        {header?.line7 && (
-                          <div className="text-[10px]">{header.line7}</div>
-                        )}
+
+                          {/* Horizontal Divider */}
+                          <div className="border-t mb-3" style={{ borderColor: "#4db8ba" }}></div>
+
+                          {/* Shipping Section */}
+                          <div className="flex justify-between px-3 py-2 mb-3 pr-[25%]">
+                            <div className="text-[10px]">
+                              <strong className="block mb-1">SHIP DATE</strong>
+                              <span>{formatDate(order.delivery_date)}</span>
+                            </div>
+                            <div className="text-[10px]">
+                              <strong className="block mb-1">TRACKING NO.</strong>
+                              <span>{order.tracking_no || "N/A"}</span>
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Continuation pages - minimal header */}
+                      {pageIndex > 0 && (
+                        <div className="mb-4 pb-2 border-b border-gray-200">
+                          <div className="flex justify-between items-center text-[10px]">
+                            <div><strong>Invoice #{order.invoice_id}</strong> - {order.customer_name || "N/A"}</div>
+                            <div className="text-gray-500">Page {pageIndex + 1} of {totalPages}</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Table */}
+                      <div className="mb-3">
+                        <div
+                          className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px] font-bold"
+                          style={{ background: "rgba(184, 230, 231, 0.5)", color: "#4db8ba" }}
+                        >
+                          <div>PRODUCT / SERVICES</div>
+                          <div>DESCRIPTION</div>
+                          <div className="text-center">QTY</div>
+                          <div className="text-right">UNIT PRICE</div>
+                          <div className="text-right">AMOUNT</div>
+                        </div>
+                        {pageItems.map((item, index) => (
+                          <div
+                            key={index}
+                            className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px]"
+                          >
+                            <div>{item.product_type || item.product_name}</div>
+                            <div className="text-gray-700">{item.product_name}</div>
+                            <div className="text-center">{item.quantity}</div>
+                            <div className="text-right">{formatCurrency(item.product_price)}</div>
+                            <div className="text-right font-medium">{formatCurrency(item.product_price * item.quantity)}</div>
+                          </div>
+                        ))}
                       </div>
-                      <div>
-                        <Image
-                          src="/assets/file_logo.png"
-                          alt="Company Logo"
-                          width={80}
-                          height={60}
-                          style={{ objectFit: 'contain' }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })()}
 
-              {/* Tax Invoice Title */}
-              <h2
-                className="text-xl font-light mb-3"
-                style={{ color: "#0D909A" }}
-              >
-                Invoice
-              </h2>
+                      {/* Bottom Section - only on last page */}
+                      {pageIndex === totalPages - 1 && (
+                        <div className="grid grid-cols-2 gap-8 mt-2 pt-2 border-t-2 border-dashed border-gray-300">
+                          {/* Terms & Conditions */}
+                          <div className="pr-4">
+                            <h3 className="font-bold text-[10px] mb-2 mt-1">Terms & Conditions</h3>
+                            <p className="text-[10px] leading-relaxed mb-2 text-gray-700">
+                              We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.
+                            </p>
+                            <p className="text-[10px] leading-relaxed mb-4 text-gray-700">
+                              We are not liable for any damage to products once stored at your premises. Please keep frozen products (gelato and / or popsicles) frozen at -18 degree Celsius and below.
+                            </p>
+                            <div className="border-t border-black pt-1 w-250px mt-8">
+                              <p className="text-[10px]">Client&apos;s Signature & Company Stamp</p>
+                            </div>
+                          </div>
 
-              {/* Three Column Section */}
-              <div className="grid grid-cols-3 gap-4 mb-3">
-                <div>
-                  <h3 className="font-bold text-[10px] mb-1">BILL TO</h3>
-                  <p className="text-[10px] font-bold">
-                    {order.customer_name || "N/A"}
-                  </p>
-                  <p className="text-[10px] text-gray-700 max-w-150px wrap-break-words">
-                    {order.delivery_address || "N/A"}
-                  </p>
-                </div>
-                <div>
-                  <h3 className="font-bold text-[10px] mb-1">SHIP TO</h3>
-                  <p className="text-[10px] font-bold">
-                    {order.customer_name || "N/A"}
-                  </p>
-                  <p className="text-[10px] text-gray-700 max-w-150px wrap-break-words">
-                    {order.delivery_address || "N/A"}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] mb-0.5">
-                    <strong>INVOICE NO.</strong> {order.invoice_id || "N/A"}
-                  </p>
-                  <p className="text-[10px] mb-0.5">
-                    <strong>DATE</strong> {formatDate(order.delivery_date)}
-                  </p>
-                  <p className="text-[10px] mb-0.5">
-                    <strong>DUE DATE</strong> {formatDate(order.delivery_date)}
-                  </p>
-                  <p className="text-[10px]">
-                    <strong>TERMS</strong> Due on receipt
-                  </p>
-                </div>
-              </div>
+                          {/* Totals */}
+                          <div className="text-right">
+                            <div className="flex justify-end mb-1.5 text-[10px]">
+                              <div className="w-32 text-right pr-4 font-bold">SUBTOTAL</div>
+                              <div className="w-24 text-right">{formatCurrency(subtotal)}</div>
+                            </div>
+                            <div className="flex justify-end mb-1.5 text-[10px]">
+                              <div className="w-32 text-right pr-4 font-bold">GST {currentInvoiceGstPercent}%</div>
+                              <div className="w-24 text-right">{formatCurrency(gst)}</div>
+                            </div>
+                            <div className="flex justify-end mb-1.5 text-[10px]">
+                              <div className="w-32 text-right pr-4 font-bold">TOTAL</div>
+                              <div className="w-24 text-right font-medium">{formatCurrency(total)}</div>
+                            </div>
+                            <div className="flex justify-end mt-2 pt-0">
+                              <div className="w-32 text-right pr-4 font-bold text-[10px]">BALANCE DUE</div>
+                              <div className="w-24 text-right text-base font-bold">${formatCurrency(total)}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
-              {/* Horizontal Divider */}
-              <div
-                className="border-t mb-3"
-                style={{ borderColor: "#4db8ba" }}
-              ></div>
+                      {/* Footer - centered at bottom of each page */}
+                      {renderFooter()}
 
-              {/* Shipping Section */}
-              <div className="flex justify-between px-3 py-2 mb-3">
-                <div className="text-[10px]">
-                  <strong className="block mb-1">SHIP DATE</strong>
-                  <span>{formatDate(order.delivery_date)}</span>
+                      {/* Page continuation indicator */}
+                      {totalPages > 1 && pageIndex < totalPages - 1 && (
+                        <div style={{ position: 'absolute', bottom: '8mm', right: '20mm' }} className="text-[9px] text-gray-400">
+                          Continued on next page...
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-                <div className="text-[10px]">
-                  <strong className="block mb-1">TRACKING NO.</strong>
-                  <span>{order.tracking_no || "N/A"}</span>
-                </div>
-              </div>
-
-              {/* Table */}
-              <div className="mb-3">
-                <div
-                  className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px] font-bold"
-                  style={{
-                    background: "rgba(184, 230, 231, 0.5)",
-                    color: "#4db8ba",
-                  }}
-                >
-                  <div>PRODUCT / SERVICES</div>
-                  <div>DESCRIPTION</div>
-                  <div className="text-center">QTY</div>
-                  <div className="text-right">UNIT PRICE</div>
-                  <div className="text-right">AMOUNT</div>
-                </div>
-                {orderItems.map((item, index) => (
-                  <div
-                    key={index}
-                    className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px]"
-                  >
-                    <div>{item.product_type || item.product_name}</div>
-                    <div className="text-gray-700">{item.product_name}</div>
-                    <div className="text-center">{item.quantity}</div>
-                    <div className="text-right">
-                      {formatCurrency(item.product_price)}
-                    </div>
-                    <div className="text-right font-medium">
-                      {formatCurrency(item.product_price * item.quantity)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Bottom Section */}
-              <div className="grid grid-cols-2 gap-8 mt-2 pt-2 border-t-2 border-dashed border-gray-300">
-                {/* Terms & Conditions */}
-                <div className="pr-4">
-                  <h3 className="font-bold text-[10px] mb-2 mt-1">
-                    Terms & Conditions
-                  </h3>
-                  <p className="text-[10px] leading-relaxed mb-2 text-gray-700">
-                    We acknowledge that the above goods are received in good
-                    condition. Please inform us of any issues within 24 hours.
-                    Otherwise, kindly note no return or refunds accepted.
-                  </p>
-                  <p className="text-[10px] leading-relaxed mb-4 text-gray-700">
-                    We are not liable for any damage to products once stored at
-                    your premises. Please keep frozen products (gelato and / or
-                    popsicles) frozen at -18 degree Celsius and below.
-                  </p>
-                  <div className="border-t border-black pt-1 w-250px mt-8">
-                    <p className="text-[10px]">
-                      Client&apos;s Signature & Company Stamp
-                    </p>
-                  </div>
-                </div>
-
-                {/* Totals */}
-                <div className="text-right">
-                  <div className="flex justify-end mb-1.5 text-[10px]">
-                    <div className="w-32 text-right pr-4 font-bold">
-                      SUBTOTAL
-                    </div>
-                    <div className="w-24 text-right">
-                      {formatCurrency(subtotal)}
-                    </div>
-                  </div>
-                  <div className="flex justify-end mb-1.5 text-[10px]">
-                    <div className="w-32 text-right pr-4 font-bold">GST {currentInvoiceGstPercent}%</div>
-                    <div className="w-24 text-right">{formatCurrency(gst)}</div>
-                  </div>
-                  <div className="flex justify-end mb-1.5 text-[10px]">
-                    <div className="w-32 text-right pr-4 font-bold">TOTAL</div>
-                    <div className="w-24 text-right font-medium">
-                      {formatCurrency(total)}
-                    </div>
-                  </div>
-                  <div className="flex justify-end mt-2 pt-0">
-                    <div className="w-32 text-right pr-4 font-bold text-[10px]">
-                      BALANCE DUE
-                    </div>
-                    <div className="w-24 text-right text-base font-bold">
-                      ${formatCurrency(total)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              {/* Footer */}
-              <div className="mt-16 text-center text-[10px] leading-relaxed text-gray-700">
-                {footerOptions.find((f) => f.id === selectedFooterId) &&
-                  (() => {
-                    const footer = footerOptions.find(
-                      (f) => f.id === selectedFooterId,
-                    );
-                    return (
-                      <>
-                        {footer?.line1 && (
-                          <p className="mb-1">{footer.line1}</p>
-                        )}
-                        {footer?.line2 && (
-                          <p className="mb-1">{footer.line2}</p>
-                        )}
-                        {footer?.line3 && (
-                          <p className="mb-1">{footer.line3}</p>
-                        )}
-                        {footer?.line4 && (
-                          <p className="mb-1">{footer.line4}</p>
-                        )}
-                        {footer?.line5 && (
-                          <p className="mb-1">{footer.line5}</p>
-                        )}
-                      </>
-                    );
-                  })()}
-              </div>
-            </div>
+              );
+            })()}
           </div>
 
           {/* Footer Selector */}
@@ -2779,8 +2868,14 @@ export default function OnlineOrderPage() {
                 {/* Create Order Button */}
                 <button
                   onClick={() => setIsCreateModalOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: "#FF5722" }}
+                  disabled={!canEditOnlineOrders}
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-opacity"
+                  style={{
+                    backgroundColor: canEditOnlineOrders ? "#FF5722" : "#ccc",
+                    cursor: canEditOnlineOrders ? "pointer" : "not-allowed",
+                    opacity: canEditOnlineOrders ? 1 : 0.6
+                  }}
+                  title={!canEditOnlineOrders ? "You do not have permission to create orders" : ""}
                 >
                   <Plus size={20} />
                   <span>Create Online Order</span>
@@ -2835,12 +2930,13 @@ export default function OnlineOrderPage() {
                         <th className="text-left py-3 px-2 w-[40px]">
                           <input
                             type="checkbox"
-                            className="w-4 h-4 cursor-pointer"
+                            className={`w-4 h-4 ${canEditOnlineOrders ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                             checked={
                               selectedRows.size === currentOrders.length &&
                               currentOrders.length > 0
                             }
                             onChange={(e) => handleSelectAll(e.target.checked)}
+                            disabled={!canEditOnlineOrders}
                           />
                         </th>
                         <th className="text-left py-3 px-2 font-bold text-xs w-[180px]" style={{ color: "#5C2E1F" }}>
@@ -2945,11 +3041,12 @@ export default function OnlineOrderPage() {
                             <td className="py-3 px-2 w-[40px]">
                               <input
                                 type="checkbox"
-                                className="w-4 h-4 cursor-pointer"
+                                className={`w-4 h-4 ${canEditOnlineOrders ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                                 checked={selectedRows.has(order.id)}
                                 onChange={(e) =>
                                   handleSelectRow(order.id, e.target.checked)
                                 }
+                                disabled={!canEditOnlineOrders}
                               />
                             </td>
                             <td className="py-3 px-2 text-xs w-[180px]" title={order.customer_name}>
@@ -2973,8 +3070,9 @@ export default function OnlineOrderPage() {
                                 onChange={(e) =>
                                   handleStatusUpdate(order.id, e.target.value)
                                 }
-                                disabled={updatingStatus[order.id]}
-                                className={`px-2 py-1 text-xs font-semibold rounded border-0 cursor-pointer ${getStatusBadge(order.status)} ${updatingStatus[order.id] ? "opacity-50 cursor-wait" : ""}`}
+                                disabled={updatingStatus[order.id] || !canEditOnlineOrders}
+                                className={`px-2 py-1 text-xs font-semibold rounded border-0 ${getStatusBadge(order.status)} ${updatingStatus[order.id] ? "opacity-50 cursor-wait" : ""} ${!canEditOnlineOrders ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+                                title={!canEditOnlineOrders ? "You do not have permission to change status" : ""}
                               >
                                 <option value="Pending">Pending</option>
                                 <option value="Completed">Completed</option>
@@ -3345,6 +3443,36 @@ export default function OnlineOrderPage() {
                     </p>
                   </div>
 
+                  {/* Address Section */}
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <h4 className="text-lg font-semibold mb-4" style={{ color: '#5C2E1F' }}>Invoice Address</h4>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Bill To Address</label>
+                        <textarea
+                          value={editBillToAddress}
+                          onChange={(e) => setEditBillToAddress(e.target.value)}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                          placeholder="Enter billing address"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Ship To Address</label>
+                        <textarea
+                          value={editShipToAddress}
+                          onChange={(e) => setEditShipToAddress(e.target.value)}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                          placeholder="Enter shipping address"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Note: Addresses will be updated for this invoice only.
+                    </p>
+                  </div>
+
                   {/* Order Items Table */}
                   <div className="mb-6">
                     <h4 className="text-lg font-semibold mb-4" style={{ color: '#5C2E1F' }}>Order Items</h4>
@@ -3542,9 +3670,10 @@ export default function OnlineOrderPage() {
                         setShowEditOrderModal(true);
                       }
                     }}
-                    disabled={loading}
+                    disabled={loading || !canEditOnlineOrders}
                     className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ padding: "2px 6px" }}
+                    title={!canEditOnlineOrders ? "You do not have permission to edit orders" : ""}
                   >
                     <svg
                       width="16"
@@ -3574,9 +3703,10 @@ export default function OnlineOrderPage() {
 
               <button
                 onClick={() => setIsDeleteConfirmOpen(true)}
-                disabled={loading}
+                disabled={loading || !canEditOnlineOrders}
                 className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ padding: "2px 6px" }}
+                title={!canEditOnlineOrders ? "You do not have permission to delete orders" : ""}
               >
                 <X size={16} />
                 <span className="text-sm">Remove</span>

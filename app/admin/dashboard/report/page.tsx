@@ -6,6 +6,7 @@ import ExcelJS from 'exceljs';
 import { useState, useEffect } from 'react';
 import { Search, Filter, Download, FileSpreadsheet, RefreshCw, ChevronDown } from 'lucide-react';
 import supabase from '@/lib/client';
+import { useAccessControl } from '@/lib/accessControl';
 interface ReportDataItem {
   deliveryDate: string;
   customerName: string;
@@ -108,6 +109,8 @@ interface SupabaseReportResponse {
 }
 
 export default function ReportPage() {
+  const { canEdit } = useAccessControl();
+  const canEditReports = canEdit('report', 'product-analysis');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [reports, setReports] = useState<Report[]>([]);
@@ -1057,7 +1060,11 @@ const handleDownload = async (report: Report) => {
                 <thead>
                   <tr className="border-b-2" style={{ borderColor: '#5C2E1F' }}>
                     <th className="text-left py-3 px-4">
-                      <input type="checkbox" className="w-4 h-4" />
+                      <input
+                        type="checkbox"
+                        className={`w-4 h-4 ${canEditReports ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                        disabled={!canEditReports}
+                      />
                     </th>
                     <th className="text-left py-3 px-4 font-bold text-sm" style={{ color: '#5C2E1F' }}>
                       SUMMARY ID
@@ -1094,7 +1101,11 @@ const handleDownload = async (report: Report) => {
                     currentReports.map((report) => (
                       <tr key={report.id} className="border-b border-gray-200 hover:bg-gray-50">
                         <td className="py-3 px-4">
-                          <input type="checkbox" className="w-4 h-4" />
+                          <input
+                            type="checkbox"
+                            className={`w-4 h-4 ${canEditReports ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                            disabled={!canEditReports}
+                          />
                         </td>
                         <td className="py-3 px-4 text-sm font-medium">{report.summary_id}</td>
                         <td className="py-3 px-4 text-sm">{report.year}</td>

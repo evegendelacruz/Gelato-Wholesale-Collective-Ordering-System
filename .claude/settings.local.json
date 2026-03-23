@@ -20,7 +20,11 @@
       "Bash(npm run lint:*)",
       "Bash(npx next build:*)",
       "Bash(curl:*)",
-      "Bash(npx supabase:*)"
+      "Bash(npx supabase:*)",
+      "Bash(psql:*)",
+      "Bash(npx prisma db execute:*)",
+      "Bash(node -e:*)",
+      "Bash(node:*)"
     ]
   }
 }

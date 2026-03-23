@@ -9,6 +9,7 @@ import LabelGenerator from '@/app/components/orderLabel/page';
 import EditOrderModal from '@/app/components/editOrder/page';
 import { useState, useEffect, Fragment, useRef } from 'react';
 import { Search, Filter, Plus, X, Check, ChevronDown, Tag } from 'lucide-react';
+import { useAccessControl } from '@/lib/accessControl';
 import {
   downloadMultiStickerPDF,
   downloadAllOrderStickersPDF,
@@ -42,6 +43,10 @@ interface Order {
   updated_at: string;
   company_name: string;
   gst_percentage?: number;
+  billing_address?: string;
+  ad_streetName?: string;
+  ad_country?: string;
+  ad_postal?: string;
 }
 
 interface SupabaseOrderResponse {
@@ -59,6 +64,10 @@ interface SupabaseOrderResponse {
   created_at: string;
   updated_at: string;
   client_user?: { client_businessName?: string } | Array<{ client_businessName?: string }>;
+  billing_address?: string;
+  ad_streetName?: string;
+  ad_country?: string;
+  ad_postal?: string;
 }
 
 // Helper function to load image as base64 for PDF
@@ -84,6 +93,10 @@ const loadImageAsBase64 = (src: string): Promise<string> => {
 };
 
 export default function OrderPage() {
+  // Access Control
+  const { canEdit } = useAccessControl();
+  const canEditOrders = canEdit('orders', 'order');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [orders, setOrders] = useState([]);
@@ -118,6 +131,7 @@ export default function OrderPage() {
   const [showEditOrderModal, setShowEditOrderModal] = useState(false);
   const [headerOptions, setHeaderOptions] = useState([]);
   const [selectedHeaderId, setSelectedHeaderId] = useState(null);
+  const [invoiceHeaders, setInvoiceHeaders] = useState<Record<string, number>>({});
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
   const [editingHeaderId, setEditingHeaderId] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -222,6 +236,11 @@ export default function OrderPage() {
   const [applyGstToFutureOrders, setApplyGstToFutureOrders] = useState(false);
   const [isSavingInvoice, setIsSavingInvoice] = useState(false);
 
+  // Edit Invoice Address state
+  const [editBillToAddress, setEditBillToAddress] = useState('');
+  const [editShipToAddress, setEditShipToAddress] = useState('');
+  const [applyAddressToFutureOrders, setApplyAddressToFutureOrders] = useState(false);
+
   // Use ref for GPBN to avoid closure issues - this stores the starting code for current order
   const gpbnStartCodeRef = useRef<string | null>(null);
 
@@ -299,6 +318,30 @@ useEffect(() => {
   fetchHeaderOptions();
 }, []);
 
+// Load saved invoice headers from localStorage
+useEffect(() => {
+  try {
+    const saved = localStorage.getItem('clientInvoiceHeaders');
+    if (saved) {
+      setInvoiceHeaders(JSON.parse(saved));
+    }
+  } catch (error) {
+    console.error('Error loading invoice headers from localStorage:', error);
+  }
+}, []);
+
+// Function to save header for a specific invoice
+const saveInvoiceHeader = (invoiceId: string, headerId: number) => {
+  const updated = { ...invoiceHeaders, [invoiceId]: headerId };
+  setInvoiceHeaders(updated);
+  setSelectedHeaderId(headerId);
+  try {
+    localStorage.setItem('clientInvoiceHeaders', JSON.stringify(updated));
+  } catch (error) {
+    console.error('Error saving invoice headers to localStorage:', error);
+  }
+};
+
 useEffect(() => {
   const fetchFooterOptions = async () => {
     try {
@@ -349,6 +392,10 @@ useEffect(() => {
           order_date,
           delivery_date,
           delivery_address,
+          billing_address,
+          ad_streetName,
+          ad_country,
+          ad_postal,
           total_amount,
           status,
           notes,
@@ -875,6 +922,10 @@ const handleDelete = async () => {
         order_date,
         delivery_date,
         delivery_address,
+        billing_address,
+        ad_streetName,
+        ad_country,
+        ad_postal,
         total_amount,
         status,
         notes,
@@ -1769,175 +1820,239 @@ const handlePrintInvoice = async () => {
     }
 
     const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-    renderHeaderInPDF(doc, selectedHeader, logoBase64);
+    const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
 
-    // Title
-    doc.setFontSize(16);
-    doc.setTextColor("#0D909A");
-    doc.text('Invoice', 20, 57);
-    doc.setTextColor(0, 0, 0);
+    // Calculate header lines for responsive spacing
+    const getHeaderLineCount = () => {
+      if (!selectedHeader) return 7;
+      const lines = [
+        selectedHeader.line1,
+        selectedHeader.line2,
+        selectedHeader.line3,
+        selectedHeader.line4,
+        selectedHeader.line5,
+        selectedHeader.line6,
+        selectedHeader.line7
+      ];
+      return lines.filter(line => line && line.trim() !== '').length;
+    };
+    const headerLineCount = getHeaderLineCount();
+    // Each line is approximately 4mm in PDF
+    const headerOffset = (7 - headerLineCount) * 4;
 
-    // Bill To, Ship To, Invoice Details
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('BILL TO', 20, 67);
-    doc.setFont('helvetica', 'normal');
-    doc.text(clientData.client_businessName || 'N/A', 20, 72);
-    const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
-    doc.text(billAddress, 20, 77);
+    // Pagination thresholds
+    const maxItemsSinglePage = 10;
+    const maxItemsFirstPage = 15;
+    const maxItemsPerContinuationPage = 20;
+    const totalItems = orderItems.length;
 
-    doc.setFont('helvetica', 'bold');
-    doc.text('SHIP TO', 75, 67);
-    doc.setFont('helvetica', 'normal');
-    doc.text(clientData.client_businessName || 'N/A', 75, 72);
-    const shipAddressParts = [
-      clientData.ad_streetName,
-      clientData.ad_country,
-      clientData.ad_postal
-    ].filter(Boolean).join(', ') || selectedOrder.delivery_address || 'N/A';
-    const shipAddress = doc.splitTextToSize(shipAddressParts, 45);
-    doc.text(shipAddress, 75, 77);
+    // Determine page structure
+    interface PageStructure {
+      items: typeof orderItems;
+      showHeader: boolean;
+      showTerms: boolean;
+    }
+    const pages: PageStructure[] = [];
 
-    // Invoice Details
-    const labelX = 155;
-    const valueX = 157;
-    doc.setFont('helvetica', 'bold');
-    doc.text('INVOICE NO.', labelX, 67, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(selectedOrder.invoice_id, valueX, 67);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('DATE', labelX, 72, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.delivery_date), valueX, 72);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('DUE DATE', labelX, 77, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.delivery_date), valueX, 77);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('TERMS', labelX, 82, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text('Due on receipt', valueX, 82);
-
-    // Horizontal line
-    doc.setDrawColor(77, 184, 186);
-    doc.line(20, 87, 190, 87);
-
-    // Shipping info
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('SHIP DATE', 20, 93);
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.delivery_date), 20, 98);
-    doc.setFont('helvetica', 'bold');
-    doc.text('TRACKING NO.', 100, 93);
-    doc.setFont('helvetica', 'normal');
-    doc.text(selectedOrder.tracking_no, 100, 98);
-
-    // Table Header
-    const tableStartY = 104;
-    doc.setFillColor(184, 230, 231);
-    doc.rect(20, tableStartY, 170, 8, 'F');
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor("#0D909A");
-    doc.setFontSize(9);
-    doc.text('PRODUCT /', 22, tableStartY + 3);
-    doc.text('SERVICES', 22, tableStartY + 6);
-    doc.text('DESCRIPTION', 60, tableStartY + 5);
-    doc.text('QTY', 150, tableStartY + 5, { align: 'center' });
-    doc.text('UNIT', 168, tableStartY + 3, { align: 'right' });
-    doc.text('PRICE', 168, tableStartY + 6, { align: 'right' });
-    doc.text('AMOUNT', 185, tableStartY + 5, { align: 'right' });
-
-    // Table Rows
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    let yPos = tableStartY + 13;
-
-    orderItems.forEach((item) => {
-      const productText = `${item.product_type || item.product_name}`;
-      
-      doc.setFont('helvetica', 'bold');
-      const productLines = doc.splitTextToSize(productText, 30);
-      const descriptionText = item.product_billingName || productText;
-      doc.text(productLines, 22, yPos);
-      
-      doc.setFont('helvetica', 'normal');
-      const descLines = doc.splitTextToSize(descriptionText, 50);
-      doc.text(descLines, 60, yPos);
-      
-      const maxLines = Math.max(productLines.length, descLines.length);
-      const centerY = yPos + ((maxLines - 1) * 4) / 2;
-      
-      doc.text(item.quantity.toString(), 150, centerY, { align: 'center' });
-      doc.text(item.unit_price.toFixed(2), 168, centerY, { align: 'right' });
-      doc.text(item.subtotal.toFixed(2), 185, centerY, { align: 'right' });
-      
-      yPos += (maxLines * 4) + 1;
-    });
-
-    doc.setDrawColor('#e0e0e0');
-    doc.setLineWidth(0.2);
-    for (let i = 20; i < 190; i += 1.5) {
-      doc.line(i, yPos + 2, i + 0.75, yPos + 2);
+    if (totalItems <= maxItemsSinglePage) {
+      pages.push({ items: orderItems, showHeader: true, showTerms: true });
+    } else if (totalItems <= maxItemsFirstPage) {
+      pages.push({ items: orderItems, showHeader: true, showTerms: false });
+      pages.push({ items: [], showHeader: false, showTerms: true });
+    } else {
+      pages.push({ items: orderItems.slice(0, maxItemsFirstPage), showHeader: true, showTerms: false });
+      let remaining = orderItems.slice(maxItemsFirstPage);
+      while (remaining.length > 0) {
+        const isLastBatch = remaining.length <= maxItemsPerContinuationPage;
+        pages.push({
+          items: remaining.slice(0, maxItemsPerContinuationPage),
+          showHeader: false,
+          showTerms: isLastBatch
+        });
+        remaining = remaining.slice(maxItemsPerContinuationPage);
+      }
     }
 
-    // Terms & Conditions
-    yPos += 7;
-    doc.setFont('helvetica', 'normal');
-    doc.text('Terms & Conditions', 20, yPos);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    const terms1 = doc.splitTextToSize(
-      'We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.',
-      70
-    );
-    doc.text(terms1, 20, yPos + 5);
+    // Helper function to render table header
+    const renderTableHeader = (startY: number) => {
+      doc.setFillColor(184, 230, 231);
+      doc.rect(20, startY, 170, 8, 'F');
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor("#0D909A");
+      doc.setFontSize(9);
+      doc.text('PRODUCT /', 22, startY + 3);
+      doc.text('SERVICES', 22, startY + 6);
+      doc.text('DESCRIPTION', 60, startY + 5);
+      doc.text('QTY', 150, startY + 5, { align: 'center' });
+      doc.text('UNIT', 168, startY + 3, { align: 'right' });
+      doc.text('PRICE', 168, startY + 6, { align: 'right' });
+      doc.text('AMOUNT', 185, startY + 5, { align: 'right' });
+    };
 
-    const terms2 = doc.splitTextToSize(
-      'We are not liable for any damage to products once stored at your premises. Please keep frozen products (gelato and / or popsicles) frozen at -18 degree Celsius and below.',
-      70
-    );
-    doc.text(terms2, 20, yPos + 25);
+    // Helper function to render terms and totals
+    const renderTermsAndTotals = (startY: number) => {
+      doc.setDrawColor('#e0e0e0');
+      doc.setLineWidth(0.2);
+      for (let i = 20; i < 190; i += 1.5) {
+        doc.line(i, startY, i + 0.75, startY);
+      }
 
-    // Signature line
-    doc.setDrawColor(0, 0, 0);
-    doc.line(20, yPos + 50, 85, yPos + 50);
-    doc.setFontSize(10);
-    doc.text("Client's Signature & Company Stamp", 20, yPos + 55);
+      const yPos = startY + 5;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(0, 0, 0);
+      doc.text('Terms & Conditions', 20, yPos);
 
-    const totalsLabelX = 100;
-    const totalsValueX = 185;
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('SUBTOTAL', totalsLabelX, yPos + 5);
-    doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: 'right' });
+      const terms1 = doc.splitTextToSize(
+        'We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.',
+        70
+      );
+      doc.text(terms1, 20, yPos + 5);
 
-    doc.setFont('helvetica', 'normal');
-    doc.text(`GST ${currentInvoiceGstPercent}%`, totalsLabelX, yPos + 10);
-    doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: 'right' });
+      const terms2 = doc.splitTextToSize(
+        'We are not liable for any damage to products once stored at your premises. Please keep frozen products (gelato and / or popsicles) frozen at -18 degree Celsius and below.',
+        70
+      );
+      doc.text(terms2, 20, yPos + 25);
 
-    doc.setFont('helvetica', 'normal');
-    doc.text('TOTAL', totalsLabelX, yPos + 15);
-    doc.text(selectedOrder.total_amount.toFixed(2), totalsValueX, yPos + 15, { align: 'right' });
+      doc.setDrawColor(0, 0, 0);
+      doc.line(20, yPos + 50, 85, yPos + 50);
+      doc.text("Client's Signature & Company Stamp", 20, yPos + 55);
 
-    doc.setFont('helvetica', 'normal');
-    doc.text('BALANCE DUE', totalsLabelX, yPos + 23);
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+      const totalsLabelX = 100;
+      const totalsValueX = 185;
+      doc.text('SUBTOTAL', totalsLabelX, yPos + 5);
+      doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: 'right' });
 
-    // Footer
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
-    renderFooterInPDF(doc, selectedFooter);
-        // Enable auto-print
+      doc.text(`GST ${currentInvoiceGstPercent}%`, totalsLabelX, yPos + 10);
+      doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: 'right' });
+
+      doc.text('TOTAL', totalsLabelX, yPos + 15);
+      doc.text(selectedOrder.total_amount.toFixed(2), totalsValueX, yPos + 15, { align: 'right' });
+
+      doc.text('BALANCE DUE', totalsLabelX, yPos + 23);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+    };
+
+    // Render each page
+    pages.forEach((page, pageIndex) => {
+      if (pageIndex > 0) {
+        doc.addPage();
+      }
+
+      let yPos: number;
+
+      if (page.showHeader) {
+        renderHeaderInPDF(doc, selectedHeader, logoBase64);
+
+        doc.setFontSize(16);
+        doc.setTextColor("#0D909A");
+        doc.text('Invoice', 20, 57 - headerOffset);
+        doc.setTextColor(0, 0, 0);
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('BILL TO', 20, 67 - headerOffset);
+        doc.setFont('helvetica', 'normal');
+        doc.text(clientData.client_businessName || 'N/A', 20, 72 - headerOffset);
+        const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
+        doc.text(billAddress, 20, 77 - headerOffset);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('SHIP TO', 75, 67 - headerOffset);
+        doc.setFont('helvetica', 'normal');
+        doc.text(clientData.client_businessName || 'N/A', 75, 72 - headerOffset);
+        const shipAddressParts = [
+          clientData.ad_streetName,
+          clientData.ad_country,
+          clientData.ad_postal
+        ].filter(Boolean).join(', ') || selectedOrder.delivery_address || 'N/A';
+        const shipAddress = doc.splitTextToSize(shipAddressParts, 45);
+        doc.text(shipAddress, 75, 77 - headerOffset);
+
+        const labelX = 155;
+        const valueX = 157;
+        doc.setFont('helvetica', 'bold');
+        doc.text('INVOICE NO.', labelX, 67 - headerOffset, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.text(selectedOrder.invoice_id, valueX, 67 - headerOffset);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('DATE', labelX, 72 - headerOffset, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.text(formatDate(selectedOrder.delivery_date), valueX, 72 - headerOffset);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('DUE DATE', labelX, 77 - headerOffset, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.text(formatDate(selectedOrder.delivery_date), valueX, 77 - headerOffset);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('TERMS', labelX, 82 - headerOffset, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.text('Due on receipt', valueX, 82 - headerOffset);
+
+        doc.setDrawColor(77, 184, 186);
+        doc.line(20, 87 - headerOffset, 190, 87 - headerOffset);
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('SHIP DATE', 20, 93 - headerOffset);
+        doc.setFont('helvetica', 'normal');
+        doc.text(formatDate(selectedOrder.delivery_date), 20, 98 - headerOffset);
+        doc.setFont('helvetica', 'bold');
+        doc.text('TRACKING NO.', 100, 93 - headerOffset);
+        doc.setFont('helvetica', 'normal');
+        doc.text(selectedOrder.tracking_no, 100, 98 - headerOffset);
+
+        yPos = 104 - headerOffset;
+      } else {
+        yPos = 20;
+      }
+
+      // Render table if there are items
+      if (page.items.length > 0) {
+        renderTableHeader(yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        yPos += 13;
+
+        page.items.forEach((item) => {
+          const productText = `${item.product_type || item.product_name}`;
+
+          doc.setFont('helvetica', 'bold');
+          const productLines = doc.splitTextToSize(productText, 30);
+          const descriptionText = item.product_billingName || productText;
+          doc.text(productLines, 22, yPos);
+
+          doc.setFont('helvetica', 'normal');
+          const descLines = doc.splitTextToSize(descriptionText, 50);
+          doc.text(descLines, 60, yPos);
+
+          const maxLines = Math.max(productLines.length, descLines.length);
+          const centerY = yPos + ((maxLines - 1) * 4) / 2;
+
+          doc.text(item.quantity.toString(), 150, centerY, { align: 'center' });
+          doc.text(item.unit_price.toFixed(2), 168, centerY, { align: 'right' });
+          doc.text(item.subtotal.toFixed(2), 185, centerY, { align: 'right' });
+
+          yPos += (maxLines * 4) + 1;
+        });
+      }
+
+      // Render terms and totals on designated page
+      if (page.showTerms) {
+        renderTermsAndTotals(yPos + 2);
+      }
+
+      // Render footer on every page
+      renderFooterInPDF(doc, selectedFooter);
+    });
+
     doc.autoPrint();
-    
-    // Generate blob and open in new window
+
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
     window.open(blobUrl, '_blank');
@@ -1976,186 +2091,250 @@ const handleDownloadPDF = async () => {
     }
 
     const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-    renderHeaderInPDF(doc, selectedHeader, logoBase64);
+    const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
 
-    // Title
-    doc.setFontSize(16);
-    doc.setTextColor("#0D909A");
-    doc.text('Invoice', 20, 57);
-    doc.setTextColor(0, 0, 0);
+    // Calculate header lines for responsive spacing
+    const getHeaderLineCount = () => {
+      if (!selectedHeader) return 7;
+      const lines = [
+        selectedHeader.line1,
+        selectedHeader.line2,
+        selectedHeader.line3,
+        selectedHeader.line4,
+        selectedHeader.line5,
+        selectedHeader.line6,
+        selectedHeader.line7
+      ];
+      return lines.filter(line => line && line.trim() !== '').length;
+    };
+    const headerLineCount = getHeaderLineCount();
+    // Each line is approximately 4mm in PDF
+    const headerOffset = (7 - headerLineCount) * 4;
 
-    // Bill To, Ship To, Invoice Details
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('BILL TO', 20, 67);
-    doc.setFont('helvetica', 'normal');
-    doc.text(clientData.client_businessName || 'N/A', 20, 72);
-    const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
-    doc.text(billAddress, 20, 77);
+    // Pagination thresholds
+    const maxItemsSinglePage = 10;
+    const maxItemsFirstPage = 15;
+    const maxItemsPerContinuationPage = 20;
+    const totalItems = orderItems.length;
 
-    doc.setFont('helvetica', 'bold');
-    doc.text('SHIP TO', 75, 67);
-    doc.setFont('helvetica', 'normal');
-    doc.text(clientData.client_businessName || 'N/A', 75, 72);
-    const shipAddressParts = [
-      clientData.ad_streetName,
-      clientData.ad_country,
-      clientData.ad_postal
-    ].filter(Boolean).join(', ') || selectedOrder.delivery_address || 'N/A';
-    const shipAddress = doc.splitTextToSize(shipAddressParts, 45);
-    doc.text(shipAddress, 75, 77);
+    // Determine page structure
+    interface PageStructure {
+      items: typeof orderItems;
+      showHeader: boolean;
+      showTerms: boolean;
+    }
+    const pages: PageStructure[] = [];
 
-    // Invoice Details
-    const labelX = 155;
-    const valueX = 157;
-    doc.setFont('helvetica', 'bold');
-    doc.text('INVOICE NO.', labelX, 67, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(selectedOrder.invoice_id, valueX, 67);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('DATE', labelX, 72, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.delivery_date), valueX, 72);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('DUE DATE', labelX, 77, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.delivery_date), valueX, 77);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('TERMS', labelX, 82, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text('Due on receipt', valueX, 82);
-
-    // Horizontal line
-    doc.setDrawColor(77, 184, 186);
-    doc.line(20, 87, 190, 87);
-
-    // Shipping info
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('SHIP DATE', 20, 93);
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatDate(selectedOrder.delivery_date), 20, 98);
-    doc.setFont('helvetica', 'bold');
-    doc.text('TRACKING NO.', 100, 93);
-    doc.setFont('helvetica', 'normal');
-    doc.text(selectedOrder.tracking_no, 100, 98);
-
-    // Table Header
-    const tableStartY = 104;
-    doc.setFillColor(184, 230, 231);
-    doc.rect(20, tableStartY, 170, 8, 'F');
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor("#0D909A");
-    doc.setFontSize(9);
-    doc.text('PRODUCT /', 22, tableStartY + 3);
-    doc.text('SERVICES', 22, tableStartY + 6);
-    doc.text('DESCRIPTION', 60, tableStartY + 5);
-    doc.text('QTY', 150, tableStartY + 5, { align: 'center' });
-    doc.text('UNIT', 168, tableStartY + 3, { align: 'right' });
-    doc.text('PRICE', 168, tableStartY + 6, { align: 'right' });
-    doc.text('AMOUNT', 185, tableStartY + 5, { align: 'right' });
-
-    // Table Rows
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    let yPos = tableStartY + 13;
-
-    orderItems.forEach((item) => {
-      const productText = `${item.product_type || item.product_name}`;
-      
-      doc.setFont('helvetica', 'bold');
-      const productLines = doc.splitTextToSize(productText, 30);
-      const descriptionText = item.product_billingName || productText;
-      doc.text(productLines, 22, yPos);
-      
-      doc.setFont('helvetica', 'normal');
-      const descLines = doc.splitTextToSize(descriptionText, 50);
-      doc.text(descLines, 60, yPos);
-      
-      const maxLines = Math.max(productLines.length, descLines.length);
-      const centerY = yPos + ((maxLines - 1) * 4) / 2;
-      
-      doc.text(item.quantity.toString(), 150, centerY, { align: 'center' });
-      doc.text(item.unit_price.toFixed(2), 168, centerY, { align: 'right' });
-      doc.text(item.subtotal.toFixed(2), 185, centerY, { align: 'right' });
-      
-      yPos += (maxLines * 4) + 1;
-    });
-
-    doc.setDrawColor('#e0e0e0');
-    doc.setLineWidth(0.2);
-    for (let i = 20; i < 190; i += 1.5) {
-      doc.line(i, yPos + 2, i + 0.75, yPos + 2);
+    if (totalItems <= maxItemsSinglePage) {
+      pages.push({ items: orderItems, showHeader: true, showTerms: true });
+    } else if (totalItems <= maxItemsFirstPage) {
+      pages.push({ items: orderItems, showHeader: true, showTerms: false });
+      pages.push({ items: [], showHeader: false, showTerms: true });
+    } else {
+      pages.push({ items: orderItems.slice(0, maxItemsFirstPage), showHeader: true, showTerms: false });
+      let remaining = orderItems.slice(maxItemsFirstPage);
+      while (remaining.length > 0) {
+        const isLastBatch = remaining.length <= maxItemsPerContinuationPage;
+        pages.push({
+          items: remaining.slice(0, maxItemsPerContinuationPage),
+          showHeader: false,
+          showTerms: isLastBatch
+        });
+        remaining = remaining.slice(maxItemsPerContinuationPage);
+      }
     }
 
+    // Helper function to render table header
+    const renderTableHeader = (startY: number) => {
+      doc.setFillColor(184, 230, 231);
+      doc.rect(20, startY, 170, 8, 'F');
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor("#0D909A");
+      doc.setFontSize(9);
+      doc.text('PRODUCT /', 22, startY + 3);
+      doc.text('SERVICES', 22, startY + 6);
+      doc.text('DESCRIPTION', 60, startY + 5);
+      doc.text('QTY', 150, startY + 5, { align: 'center' });
+      doc.text('UNIT', 168, startY + 3, { align: 'right' });
+      doc.text('PRICE', 168, startY + 6, { align: 'right' });
+      doc.text('AMOUNT', 185, startY + 5, { align: 'right' });
+    };
 
-    // Terms & Conditions
-    yPos += 7;
-    doc.setFont('helvetica', 'normal');
-    doc.text('Terms & Conditions', 20, yPos);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    const terms1 = doc.splitTextToSize(
-      'We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.',
-      70
-    );
-    doc.text(terms1, 20, yPos + 5);
+    // Helper function to render terms and totals
+    const renderTermsAndTotals = (startY: number) => {
+      doc.setDrawColor('#e0e0e0');
+      doc.setLineWidth(0.2);
+      for (let i = 20; i < 190; i += 1.5) {
+        doc.line(i, startY, i + 0.75, startY);
+      }
 
-    const terms2 = doc.splitTextToSize(
-      'We are not liable for any damage to products once stored at your premises. Please keep frozen products (gelato and / or popsicles) frozen at -18 degree Celsius and below.',
-      70
-    );
-    doc.text(terms2, 20, yPos + 25);
+      const yPos = startY + 5;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(0, 0, 0);
+      doc.text('Terms & Conditions', 20, yPos);
 
-    // Signature line
-    doc.setDrawColor(0, 0, 0);
-    doc.line(20, yPos + 50, 85, yPos + 50);
-    doc.setFontSize(10);
-    doc.text("Client's Signature & Company Stamp", 20, yPos + 55);
+      const terms1 = doc.splitTextToSize(
+        'We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.',
+        70
+      );
+      doc.text(terms1, 20, yPos + 5);
 
-    const totalsLabelX = 100;
-    const totalsValueX = 185;
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('SUBTOTAL', totalsLabelX, yPos + 5);
-    doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: 'right' });
+      const terms2 = doc.splitTextToSize(
+        'We are not liable for any damage to products once stored at your premises. Please keep frozen products (gelato and / or popsicles) frozen at -18 degree Celsius and below.',
+        70
+      );
+      doc.text(terms2, 20, yPos + 25);
 
-    doc.setFont('helvetica', 'normal');
-    doc.text(`GST ${currentInvoiceGstPercent}%`, totalsLabelX, yPos + 10);
-    doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: 'right' });
+      doc.setDrawColor(0, 0, 0);
+      doc.line(20, yPos + 50, 85, yPos + 50);
+      doc.text("Client's Signature & Company Stamp", 20, yPos + 55);
 
-    doc.setFont('helvetica', 'normal');
-    doc.text('TOTAL', totalsLabelX, yPos + 15);
-    doc.text(selectedOrder.total_amount.toFixed(2), totalsValueX, yPos + 15, { align: 'right' });
+      const totalsLabelX = 100;
+      const totalsValueX = 185;
+      doc.text('SUBTOTAL', totalsLabelX, yPos + 5);
+      doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: 'right' });
 
-    doc.setFont('helvetica', 'normal');
-    doc.text('BALANCE DUE', totalsLabelX, yPos + 23);
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+      doc.text(`GST ${currentInvoiceGstPercent}%`, totalsLabelX, yPos + 10);
+      doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: 'right' });
 
-    // Footer
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
-    renderFooterInPDF(doc, selectedFooter);
+      doc.text('TOTAL', totalsLabelX, yPos + 15);
+      doc.text(selectedOrder.total_amount.toFixed(2), totalsValueX, yPos + 15, { align: 'right' });
+
+      doc.text('BALANCE DUE', totalsLabelX, yPos + 23);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+    };
+
+    // Render each page
+    pages.forEach((page, pageIndex) => {
+      if (pageIndex > 0) {
+        doc.addPage();
+      }
+
+      let yPos: number;
+
+      if (page.showHeader) {
+        renderHeaderInPDF(doc, selectedHeader, logoBase64);
+
+        doc.setFontSize(16);
+        doc.setTextColor("#0D909A");
+        doc.text('Invoice', 20, 57 - headerOffset);
+        doc.setTextColor(0, 0, 0);
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('BILL TO', 20, 67 - headerOffset);
+        doc.setFont('helvetica', 'normal');
+        doc.text(clientData.client_businessName || 'N/A', 20, 72 - headerOffset);
+        const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
+        doc.text(billAddress, 20, 77 - headerOffset);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('SHIP TO', 75, 67 - headerOffset);
+        doc.setFont('helvetica', 'normal');
+        doc.text(clientData.client_businessName || 'N/A', 75, 72 - headerOffset);
+        const shipAddressParts = [
+          clientData.ad_streetName,
+          clientData.ad_country,
+          clientData.ad_postal
+        ].filter(Boolean).join(', ') || selectedOrder.delivery_address || 'N/A';
+        const shipAddress = doc.splitTextToSize(shipAddressParts, 45);
+        doc.text(shipAddress, 75, 77 - headerOffset);
+
+        const labelX = 155;
+        const valueX = 157;
+        doc.setFont('helvetica', 'bold');
+        doc.text('INVOICE NO.', labelX, 67 - headerOffset, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.text(selectedOrder.invoice_id, valueX, 67 - headerOffset);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('DATE', labelX, 72 - headerOffset, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.text(formatDate(selectedOrder.delivery_date), valueX, 72 - headerOffset);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('DUE DATE', labelX, 77 - headerOffset, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.text(formatDate(selectedOrder.delivery_date), valueX, 77 - headerOffset);
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('TERMS', labelX, 82 - headerOffset, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.text('Due on receipt', valueX, 82 - headerOffset);
+
+        doc.setDrawColor(77, 184, 186);
+        doc.line(20, 87 - headerOffset, 190, 87 - headerOffset);
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('SHIP DATE', 20, 93 - headerOffset);
+        doc.setFont('helvetica', 'normal');
+        doc.text(formatDate(selectedOrder.delivery_date), 20, 98 - headerOffset);
+        doc.setFont('helvetica', 'bold');
+        doc.text('TRACKING NO.', 100, 93 - headerOffset);
+        doc.setFont('helvetica', 'normal');
+        doc.text(selectedOrder.tracking_no, 100, 98 - headerOffset);
+
+        yPos = 104 - headerOffset;
+      } else {
+        yPos = 20;
+      }
+
+      // Render table if there are items
+      if (page.items.length > 0) {
+        renderTableHeader(yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        yPos += 13;
+
+        page.items.forEach((item) => {
+          const productText = `${item.product_type || item.product_name}`;
+
+          doc.setFont('helvetica', 'bold');
+          const productLines = doc.splitTextToSize(productText, 30);
+          const descriptionText = item.product_billingName || productText;
+          doc.text(productLines, 22, yPos);
+
+          doc.setFont('helvetica', 'normal');
+          const descLines = doc.splitTextToSize(descriptionText, 50);
+          doc.text(descLines, 60, yPos);
+
+          const maxLines = Math.max(productLines.length, descLines.length);
+          const centerY = yPos + ((maxLines - 1) * 4) / 2;
+
+          doc.text(item.quantity.toString(), 150, centerY, { align: 'center' });
+          doc.text(item.unit_price.toFixed(2), 168, centerY, { align: 'right' });
+          doc.text(item.subtotal.toFixed(2), 185, centerY, { align: 'right' });
+
+          yPos += (maxLines * 4) + 1;
+        });
+      }
+
+      // Render terms and totals on designated page
+      if (page.showTerms) {
+        renderTermsAndTotals(yPos + 2);
+      }
+
+      // Render footer on every page
+      renderFooterInPDF(doc, selectedFooter);
+    });
 
     // Save PDF
     const fileName = `Invoice_${selectedOrder.invoice_id}_${formatDate(selectedOrder.delivery_date).replace(/\//g, '-')}.pdf`;
-    
+
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
-    
+
     const link = document.createElement('a');
     link.href = blobUrl;
     link.download = fileName;
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
-    
+
     setTimeout(() => {
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
@@ -2243,13 +2422,15 @@ const handleViewInvoice = async (order) => {
 
     console.log('Final items with details for invoice:', itemsWithDetails);
 
-    // Combine client data - keep all address fields from client_user
+    // Combine client data - use order's addresses if available, otherwise fall back to client's
     const combinedClientData = {
       ...client,
-      // Only override if order has a specific delivery address
-      ...(order.delivery_address && order.delivery_address !== client.ad_streetName && {
-        ad_streetName: order.delivery_address
-      })
+      // Use order's billing_address for Bill To if available
+      client_billing_address: order.billing_address || client?.client_billing_address || '',
+      // Use order's Ship To address fields if available
+      ad_streetName: order.ad_streetName || client?.ad_streetName || '',
+      ad_country: order.ad_country || client?.ad_country || '',
+      ad_postal: order.ad_postal || client?.ad_postal || ''
     };
 
     setClientData(combinedClientData);
@@ -2266,6 +2447,19 @@ const handleViewInvoice = async (order) => {
       const defaultGst = savedGst ? parseFloat(savedGst) : 9;
       setCurrentInvoiceGstPercent(!isNaN(defaultGst) ? defaultGst : 9);
     }
+
+    // Load saved header for this specific invoice, or use default
+    const savedHeaderId = invoiceHeaders[order.invoice_id];
+    if (savedHeaderId && headerOptions.some(h => h.id === savedHeaderId)) {
+      setSelectedHeaderId(savedHeaderId);
+    } else {
+      // Use default header
+      const defaultHeader = headerOptions.find(h => h.is_default) || headerOptions[0];
+      if (defaultHeader) {
+        setSelectedHeaderId(defaultHeader.id);
+      }
+    }
+
     setShowInvoiceModal(true);
   } catch (error) {
     console.error('Error loading invoice:', error);
@@ -2303,6 +2497,16 @@ const handleViewInvoice = async (order) => {
     const savedGst = localStorage.getItem('defaultGstPercent_client');
     const savedGstValue = savedGst ? parseFloat(savedGst) : 9;
     setApplyGstToFutureOrders(currentInvoiceGstPercent === savedGstValue);
+
+    // Initialize address fields from clientData
+    if (clientData) {
+      setEditBillToAddress(clientData.client_billing_address || '');
+      const shipToAddress = [clientData.ad_streetName, clientData.ad_country, clientData.ad_postal]
+        .filter(Boolean)
+        .join(', ') || selectedOrder.delivery_address || '';
+      setEditShipToAddress(shipToAddress);
+    }
+    setApplyAddressToFutureOrders(false);
 
     setShowEditInvoiceModal(true);
   };
@@ -2389,6 +2593,43 @@ const handleViewInvoice = async (order) => {
         localStorage.setItem('defaultGstPercent_client', editInvoiceGstPercent.toString());
       }
 
+      // Update local clientData with edited addresses for this invoice display
+      setClientData(prev => ({
+        ...prev,
+        client_billing_address: editBillToAddress,
+        ad_streetName: editShipToAddress,
+        ad_country: '',
+        ad_postal: ''
+      }));
+
+      // If "Apply to all upcoming orders" is checked, update client's default addresses in database
+      if (applyAddressToFutureOrders && selectedOrder.client_auth_id) {
+        const { error: clientUpdateError } = await supabase
+          .from('client_user')
+          .update({
+            client_billing_address: editBillToAddress,
+            ad_streetName: editShipToAddress
+          })
+          .eq('client_auth_id', selectedOrder.client_auth_id);
+
+        if (clientUpdateError) {
+          console.error('Error updating client addresses:', clientUpdateError);
+        }
+      }
+
+      // Update this order's addresses in database (both billing_address and delivery_address)
+      const { error: addressError } = await supabase
+        .from('client_order')
+        .update({
+          delivery_address: editShipToAddress,
+          billing_address: editBillToAddress
+        })
+        .eq('id', selectedOrder.id);
+
+      if (addressError) {
+        console.error('Error updating order address:', addressError);
+      }
+
       // Refresh orders list
       const { data: refreshedOrders } = await supabase
         .from('client_order')
@@ -2399,6 +2640,10 @@ const handleViewInvoice = async (order) => {
           order_date,
           delivery_date,
           delivery_address,
+          billing_address,
+          ad_streetName,
+          ad_country,
+          ad_postal,
           total_amount,
           status,
           notes,
@@ -2692,10 +2937,16 @@ const handleViewInvoice = async (order) => {
               </div>
 
                 {/* Create Order Button */}
-               <button 
+               <button
                 onClick={() => setShowCreateOrderModal(true)}
-                className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-opacity"
-                style={{ backgroundColor: '#FF5722' }}
+                disabled={!canEditOrders}
+                className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-opacity"
+                style={{
+                  backgroundColor: canEditOrders ? '#FF5722' : '#ccc',
+                  cursor: canEditOrders ? 'pointer' : 'not-allowed',
+                  opacity: canEditOrders ? 1 : 0.6
+                }}
+                title={!canEditOrders ? 'You do not have permission to create orders' : ''}
               >
                 <Plus size={20} />
                 <span>Create Order</span>
@@ -2748,9 +2999,10 @@ const handleViewInvoice = async (order) => {
                         <th className="text-left py-3 px-2 w-[40px]">
                           <input
                             type="checkbox"
-                            className="w-4 h-4 cursor-pointer"
+                            className={`w-4 h-4 ${canEditOrders ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                             checked={selectedRows.size === currentOrders.length && currentOrders.length > 0}
                             onChange={(e) => handleSelectAll(e.target.checked)}
+                            disabled={!canEditOrders}
                           />
                         </th>
                         <th className="text-left py-3 px-2 font-bold text-xs w-[180px]" style={{ color: '#5C2E1F' }}>
@@ -2851,9 +3103,10 @@ const handleViewInvoice = async (order) => {
                         <td className="py-3 px-2 w-[40px]">
                           <input
                             type="checkbox"
-                            className="w-4 h-4 cursor-pointer"
+                            className={`w-4 h-4 ${canEditOrders ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                             checked={selectedRows.has(order.id)}
                             onChange={(e) => handleSelectRow(order.id, e.target.checked)}
+                            disabled={!canEditOrders}
                           />
                         </td>
                         <td className="py-3 px-2 text-xs w-[180px]" title={order.company_name}>
@@ -2875,10 +3128,11 @@ const handleViewInvoice = async (order) => {
                           <select
                             value={order.status || 'pending'}
                             onChange={(e) => handleStatusUpdate(order.id, e.target.value)}
-                            disabled={updatingStatus[order.id]}
-                            className={`px-2 py-1 text-xs font-semibold rounded border-0 cursor-pointer ${getStatusBadge(order.status)} ${
+                            disabled={updatingStatus[order.id] || !canEditOrders}
+                            className={`px-2 py-1 text-xs font-semibold rounded border-0 ${getStatusBadge(order.status)} ${
                               updatingStatus[order.id] ? 'opacity-50 cursor-wait' : ''
-                            }`}
+                            } ${!canEditOrders ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                            title={!canEditOrders ? 'You do not have permission to change status' : ''}
                           >
                             <option value="Pending">Pending</option>
                             <option value="Completed">Completed</option>
@@ -3341,7 +3595,7 @@ const handleViewInvoice = async (order) => {
                             name="headerOption"
                             value={header.id}
                             checked={selectedHeaderId === header.id}
-                            onChange={() => setSelectedHeaderId(header.id)}
+                            onChange={() => selectedOrder && saveInvoiceHeader(selectedOrder.invoice_id, header.id)}
                             className="cursor-pointer accent-orange-500"
                           />
                           <span className="text-sm font-medium">{header.option_name}</span>
@@ -3583,6 +3837,45 @@ const handleViewInvoice = async (order) => {
                     </p>
                   </div>
 
+                  {/* Address Section */}
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <h4 className="text-lg font-semibold mb-4" style={{ color: '#5C2E1F' }}>Invoice Address</h4>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Bill To Address</label>
+                        <textarea
+                          value={editBillToAddress}
+                          onChange={(e) => setEditBillToAddress(e.target.value)}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                          placeholder="Enter billing address"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Ship To Address</label>
+                        <textarea
+                          value={editShipToAddress}
+                          onChange={(e) => setEditShipToAddress(e.target.value)}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                          placeholder="Enter shipping address"
+                        />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={applyAddressToFutureOrders}
+                        onChange={(e) => setApplyAddressToFutureOrders(e.target.checked)}
+                        className="w-4 h-4 accent-orange-500"
+                      />
+                      <span className="text-sm text-gray-700">Apply to all upcoming orders (update client default address)</span>
+                    </label>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Note: Addresses will be updated for this invoice. Check the box above to also update the client&apos;s default address for future orders.
+                    </p>
+                  </div>
+
                   {/* Order Items Table */}
                   <div className="mb-6">
                     <h4 className="text-lg font-semibold mb-4" style={{ color: '#5C2E1F' }}>Order Items</h4>
@@ -3730,6 +4023,10 @@ const handleViewInvoice = async (order) => {
                     order_date,
                     delivery_date,
                     delivery_address,
+                    billing_address,
+                    ad_streetName,
+                    ad_country,
+                    ad_postal,
                     total_amount,
                     status,
                     notes,
@@ -3811,9 +4108,10 @@ const handleViewInvoice = async (order) => {
                 <>
                   <button
                     onClick={handleEdit}
-                    disabled={loading}
+                    disabled={loading || !canEditOrders}
                     className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ padding: '2px 6px' }}
+                    title={!canEditOrders ? 'You do not have permission to edit orders' : ''}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -3821,16 +4119,17 @@ const handleViewInvoice = async (order) => {
                     </svg>
                     <span className="text-sm">Edit</span>
                   </button>
-                  
+
                   <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
                 </>
               )}
               
               <button
                 onClick={() => setIsDeleteConfirmOpen(true)}
-                disabled={loading}
+                disabled={loading || !canEditOrders}
                 className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ padding: '2px 6px' }}
+                title={!canEditOrders ? 'You do not have permission to delete orders' : ''}
               >
                 <X size={16} />
                 <span className="text-sm">Remove</span>
@@ -3869,6 +4168,10 @@ const handleViewInvoice = async (order) => {
                       order_date,
                       delivery_date,
                       delivery_address,
+                      billing_address,
+                      ad_streetName,
+                      ad_country,
+                      ad_postal,
                       total_amount,
                       status,
                       notes,

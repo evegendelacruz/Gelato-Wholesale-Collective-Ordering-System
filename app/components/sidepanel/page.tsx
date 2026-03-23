@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -15,6 +15,25 @@ import {
   ChevronRight,
   Link,
 } from 'lucide-react';
+import supabase from '@/lib/client';
+
+interface SubmenuPermission {
+  view: boolean;
+  edit: boolean;
+}
+
+interface ScreenPermission {
+  view: boolean;
+  edit: boolean;
+  submenus?: Record<string, SubmenuPermission>;
+}
+
+interface AccessPermissions {
+  client?: ScreenPermission;
+  product?: ScreenPermission;
+  orders?: ScreenPermission;
+  report?: ScreenPermission;
+}
 
 export default function Sidepanel() {
   const pathname = usePathname();
@@ -31,6 +50,53 @@ export default function Sidepanel() {
     };
   });
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [userRole, setUserRole] = useState<string>('Admin');
+  const [accessPermissions, setAccessPermissions] = useState<AccessPermissions | null>(null);
+  const [permissionsLoaded, setPermissionsLoaded] = useState(false);
+
+  // Load user role and permissions
+  useEffect(() => {
+    const loadUserPermissions = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user?.id) {
+          setPermissionsLoaded(true);
+          return;
+        }
+
+        // Get user role
+        const { data: userData } = await supabase
+          .from('admin_user')
+          .select('admin_role, admin_auth_id')
+          .eq('admin_auth_id', session.user.id)
+          .single();
+
+        if (userData) {
+          setUserRole(userData.admin_role);
+
+          // If Staff, load permissions
+          if (userData.admin_role === 'Staff') {
+            const { data: permData, error: permError } = await supabase
+              .from('admin_access_permissions')
+              .select('permissions')
+              .eq('admin_auth_id', userData.admin_auth_id)
+              .single();
+
+            // Ignore errors (table might not exist yet or no permissions set)
+            if (permData?.permissions && !permError) {
+              setAccessPermissions(permData.permissions as AccessPermissions);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error loading permissions:', err);
+      } finally {
+        setPermissionsLoaded(true);
+      }
+    };
+
+    loadUserPermissions();
+  }, []);
 
   const toggleSubmenu = (menu: string) => {
     if (isCollapsed) return;
@@ -40,7 +106,7 @@ export default function Sidepanel() {
     }));
   };
 
-  const menuItems = [
+  const allMenuItems = [
     {
       id: 'dashboard',
       label: 'Dashboard',
@@ -92,6 +158,41 @@ export default function Sidepanel() {
       path: '/admin/dashboard/xero'
     }
   ];
+
+  // Filter menu items based on permissions
+  const menuItems = allMenuItems.filter(item => {
+    // Dashboard is always visible
+    if (item.id === 'dashboard') return true;
+
+    // Admin users see everything
+    if (userRole === 'Admin') return true;
+
+    // Staff users - check permissions
+    if (userRole === 'Staff' && accessPermissions) {
+      const screenPerm = accessPermissions[item.id as keyof AccessPermissions];
+      return screenPerm?.view === true;
+    }
+
+    // Default: show if no permissions loaded yet (or User role)
+    return true;
+  }).map(item => {
+    // Filter submenus for Staff users
+    if (item.submenu && userRole === 'Staff' && accessPermissions) {
+      const screenPerm = accessPermissions[item.id as keyof AccessPermissions];
+      if (screenPerm?.submenus) {
+        const filteredSubmenu = item.submenu.filter(sub => {
+          const submenuPerm = screenPerm.submenus?.[sub.id];
+          return submenuPerm?.view === true;
+        });
+        return { ...item, submenu: filteredSubmenu };
+      }
+    }
+    return item;
+  }).filter(item => {
+    // Remove parent items with no visible submenus
+    if (item.submenu && item.submenu.length === 0) return false;
+    return true;
+  });
 
   return (
     <>

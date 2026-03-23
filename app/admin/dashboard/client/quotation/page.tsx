@@ -6,6 +6,7 @@ import Header from '@/app/components/header/page';
 import { TableSkeleton, SkeletonStyles } from '@/app/components/skeletonLoader/page';
 import supabase from '@/lib/client';
 import Image from 'next/image';
+import { useAccessControl } from '@/lib/accessControl';
 
 // Helper function to load image as base64 for PDF
 const loadImageAsBase64 = (src: string): Promise<string> => {
@@ -27,6 +28,32 @@ const loadImageAsBase64 = (src: string): Promise<string> => {
     img.onerror = () => reject(new Error('Failed to load image'));
     img.src = src;
   });
+};
+
+// Count filled header lines for dynamic positioning
+const countHeaderLines = (header: HeaderOption | undefined): number => {
+  if (!header) return 0;
+  let count = 0;
+  if (header.line1) count++;
+  if (header.line2) count++;
+  if (header.line3) count++;
+  if (header.line4) count++;
+  if (header.line5) count++;
+  if (header.line6) count++;
+  if (header.line7) count++;
+  return count;
+};
+
+// Count filled footer lines
+const countFooterLines = (footer: FooterOption | undefined): number => {
+  if (!footer) return 0;
+  let count = 0;
+  if (footer.line1) count++;
+  if (footer.line2) count++;
+  if (footer.line3) count++;
+  if (footer.line4) count++;
+  if (footer.line5) count++;
+  return count;
 };
 
 interface Quotation {
@@ -100,6 +127,8 @@ interface FooterOption {
 }
 
 export default function ClientQuotationPage() {
+  const { canEdit } = useAccessControl();
+  const canEditQuotations = canEdit('client', 'quotation');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -133,6 +162,7 @@ export default function ClientQuotationPage() {
   const [footerOptions, setFooterOptions] = useState<FooterOption[]>([]);
   const [selectedHeaderId, setSelectedHeaderId] = useState<number | null>(null);
   const [selectedFooterId, setSelectedFooterId] = useState<number | null>(null);
+  const [quotationHeaders, setQuotationHeaders] = useState<Record<string, number>>({});
 
   // Header/Footer editor states
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
@@ -180,6 +210,30 @@ export default function ClientQuotationPage() {
     fetchHeaderOptions();
     fetchFooterOptions();
   }, []);
+
+  // Load saved quotation headers from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('quotationHeaders');
+      if (saved) {
+        setQuotationHeaders(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error('Error loading quotation headers from localStorage:', error);
+    }
+  }, []);
+
+  // Function to save header for a specific quotation
+  const saveQuotationHeader = (quotationId: string, headerId: number) => {
+    const updated = { ...quotationHeaders, [quotationId]: headerId };
+    setQuotationHeaders(updated);
+    setSelectedHeaderId(headerId);
+    try {
+      localStorage.setItem('quotationHeaders', JSON.stringify(updated));
+    } catch (error) {
+      console.error('Error saving quotation headers to localStorage:', error);
+    }
+  };
 
   const fetchHeaderOptions = async () => {
     try {
@@ -651,45 +705,98 @@ export default function ClientQuotationPage() {
 
       const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
       const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
+      const headerLineCount = countHeaderLines(selectedHeader);
+      const footerLineCount = countFooterLines(selectedFooter);
 
-      // Load and add logo at top right
+      // Load logo
+      let logoBase64: string | undefined;
       try {
-        const logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
-        doc.addImage(logoBase64, 'PNG', 165, 10, 30, 20);
+        logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
       } catch (logoError) {
         console.error('Error loading logo:', logoError);
       }
 
-      // Header
-      doc.setFont('helvetica');
-      doc.setFontSize(10);
-      let yPos = 20;
+      const pageHeight = 297;
+      const footerSpace = footerLineCount > 0 ? (footerLineCount * 5) + 15 : 10;
+      const maxContentY = pageHeight - footerSpace - 10;
 
-      if (selectedHeader?.line1) {
+      // Helper function to render header
+      const renderHeader = (startY: number = 20): number => {
+        if (logoBase64) {
+          doc.addImage(logoBase64, 'PNG', 165, startY - 10, 30, 20);
+        }
+
+        doc.setFont('helvetica');
+        doc.setFontSize(10);
+        let yPos = startY;
+
+        if (selectedHeader?.line1) {
+          doc.setFont('helvetica', 'bold');
+          doc.text(selectedHeader.line1, 20, yPos);
+          yPos += 5;
+        }
+        doc.setFont('helvetica', 'normal');
+        if (selectedHeader?.line2) { doc.text(selectedHeader.line2, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line3) { doc.text(selectedHeader.line3, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line4) { doc.text(selectedHeader.line4, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line5) { doc.text(selectedHeader.line5, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line6) { doc.text(selectedHeader.line6, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line7) { doc.text(selectedHeader.line7, 20, yPos); yPos += 5; }
+
+        return yPos;
+      };
+
+      // Helper function to render footer on current page
+      // contentEndY: if provided, footer moves up with content; if not, footer stays at bottom
+      const renderFooter = (contentEndY?: number) => {
+        if (!selectedFooter) return;
+
+        // Position footer: after content if contentEndY provided, otherwise at bottom of page
+        const footerY = contentEndY !== undefined ? contentEndY + 15 : pageHeight - footerSpace;
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        doc.setFont('helvetica', 'normal');
+
+        let footerLineY = footerY;
+        if (selectedFooter.line1) { doc.text(selectedFooter.line1, 105, footerLineY, { align: 'center' }); footerLineY += 5; }
+        if (selectedFooter.line2) { doc.text(selectedFooter.line2, 105, footerLineY, { align: 'center' }); footerLineY += 5; }
+        if (selectedFooter.line3) { doc.text(selectedFooter.line3, 105, footerLineY, { align: 'center' }); footerLineY += 5; }
+        if (selectedFooter.line4) { doc.text(selectedFooter.line4, 105, footerLineY, { align: 'center' }); footerLineY += 5; }
+        if (selectedFooter.line5) { doc.text(selectedFooter.line5, 105, footerLineY, { align: 'center' }); }
+      };
+
+      // Helper function to render table header
+      const renderTableHeader = (y: number): number => {
+        doc.setFillColor(184, 230, 231);
+        doc.rect(20, y - 5, 170, 8, 'F');
+        doc.setTextColor("#4db8ba");
         doc.setFont('helvetica', 'bold');
-        doc.text(selectedHeader.line1, 20, yPos);
-        yPos += 5;
-      }
-      doc.setFont('helvetica', 'normal');
-      if (selectedHeader?.line2) { doc.text(selectedHeader.line2, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line3) { doc.text(selectedHeader.line3, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line4) { doc.text(selectedHeader.line4, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line5) { doc.text(selectedHeader.line5, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line6) { doc.text(selectedHeader.line6, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line7) { doc.text(selectedHeader.line7, 20, yPos); yPos += 5; }
+        doc.setFontSize(9);
+        doc.text('PRODUCT / SERVICES', 22, y);
+        doc.text('DESCRIPTION', 70, y);
+        doc.text('QTY', 120, y, { align: 'center' });
+        doc.text('UNIT PRICE', 150, y, { align: 'right' });
+        doc.text('AMOUNT', 185, y, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+        doc.setFont('helvetica', 'normal');
+        return y + 8;
+      };
 
-      // Title
-      yPos = 58;
+      // Render first page header
+      let headerEndY = renderHeader(20);
+
+      // Title - dynamic position based on header
+      let yPos = headerEndY + 8;
       doc.setFontSize(20);
       doc.setTextColor("#0D909A");
       doc.text('Quotation', 20, yPos);
 
-      // Three column section
-      yPos = 70;
+      // Three column section - dynamic position
+      yPos += 12;
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(10);
 
-      // BILL TO
+      // TO
       doc.setFont('helvetica', 'bold');
       doc.text('TO', 20, yPos);
       doc.setFont('helvetica', 'normal');
@@ -703,7 +810,6 @@ export default function ClientQuotationPage() {
       const dateLabel = 'DATE  ';
       const dateValue = new Date().toLocaleDateString('en-GB');
 
-      // Calculate positions to avoid overlap
       doc.setFont('helvetica', 'normal');
       const quotationValueWidth = doc.getTextWidth(quotationId);
       const dateValueWidth = doc.getTextWidth(dateValue);
@@ -711,42 +817,43 @@ export default function ClientQuotationPage() {
       const quotationLabelWidth = doc.getTextWidth(quotationLabel);
       const dateLabelWidth = doc.getTextWidth(dateLabel);
 
-      // Draw quotation number
       doc.setFont('helvetica', 'bold');
       doc.text(quotationLabel, rightX - quotationValueWidth - quotationLabelWidth, yPos);
       doc.setFont('helvetica', 'normal');
       doc.text(quotationId, rightX, yPos, { align: 'right' });
 
-      // Draw date
       doc.setFont('helvetica', 'bold');
       doc.text(dateLabel, rightX - dateValueWidth - dateLabelWidth, yPos + 6);
       doc.setFont('helvetica', 'normal');
       doc.text(dateValue, rightX, yPos + 6, { align: 'right' });
 
       // Horizontal divider
-      yPos = 90;
+      const addressHeight = address.length * 4;
+      yPos += Math.max(addressHeight + 5, 20);
       doc.setDrawColor(77, 184, 186);
       doc.line(20, yPos, 190, yPos);
 
       // Table header
-      yPos = 105;
-      doc.setFillColor(184, 230, 231);
-      doc.rect(20, yPos - 5, 170, 8, 'F');
-      doc.setTextColor("#4db8ba");
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.text('PRODUCT / SERVICES', 22, yPos);
-      doc.text('DESCRIPTION', 70, yPos);
-      doc.text('QTY', 120, yPos, { align: 'center' });
-      doc.text('UNIT PRICE', 150, yPos, { align: 'right' });
-      doc.text('AMOUNT', 185, yPos, { align: 'right' });
+      yPos += 15;
+      yPos = renderTableHeader(yPos);
 
-      // Table rows
-      doc.setTextColor(0, 0, 0);
-      doc.setFont('helvetica', 'normal');
-      yPos += 8;
+      // Table rows with pagination
+      let currentPage = 1;
+
+      const addNewPage = (): number => {
+        renderFooter();
+        doc.addPage();
+        currentPage++;
+        const newHeaderEndY = renderHeader(20);
+        return renderTableHeader(newHeaderEndY + 15);
+      };
 
       items.forEach((item) => {
+        if (yPos + 10 > maxContentY) {
+          yPos = addNewPage();
+        }
+
+        doc.setFontSize(9);
         doc.text(item.product_name.substring(0, 25), 22, yPos);
         doc.text((item.description || '').substring(0, 30), 70, yPos);
         doc.text(String(item.quantity), 120, yPos, { align: 'center' });
@@ -755,6 +862,24 @@ export default function ClientQuotationPage() {
         yPos += 6;
       });
 
+      // Calculate notes height for section fitting
+      let notesHeight = 0;
+      if (notes) {
+        const paragraphs = notes.split('\n').filter(p => p.trim());
+        paragraphs.forEach((paragraph) => {
+          const paragraphLines = doc.splitTextToSize(paragraph.trim(), 70);
+          notesHeight += (paragraphLines.length * 4) + 4;
+        });
+        notesHeight += 10; // Title + spacing
+      }
+
+      // Check if totals + notes section fits (side by side)
+      const totalsHeight = 35;
+      const sectionHeight = Math.max(totalsHeight, notesHeight);
+      if (yPos + sectionHeight > maxContentY) {
+        yPos = addNewPage();
+      }
+
       // Dotted line
       yPos += 5;
       (doc as any).setLineDashPattern([1, 1], 0);
@@ -762,69 +887,57 @@ export default function ClientQuotationPage() {
       doc.line(20, yPos, 190, yPos);
       (doc as any).setLineDashPattern([], 0);
 
-      // Totals
-      const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
-      const gst = subtotal * 0.09;
+      // Store the starting Y for notes and totals (side by side)
+      const sectionStartY = yPos + 10;
 
-      yPos += 10;
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text('SUBTOTAL', 140, yPos, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.text(subtotal.toFixed(2), 185, yPos, { align: 'right' });
-
-      yPos += 6;
-      doc.setFont('helvetica', 'bold');
-      doc.text('GST 9%', 140, yPos, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.text(gst.toFixed(2), 185, yPos, { align: 'right' });
-
-      yPos += 8;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('QUOTATION TOTAL', 140, yPos, { align: 'right' });
-      doc.setFontSize(14);
-      doc.text('$' + totalAmount.toFixed(2), 185, yPos, { align: 'right' });
-      doc.setFontSize(10);
-
-      // Notes
+      // Notes on the left (rendered at same Y as totals)
+      let notesEndY = sectionStartY;
       if (notes) {
-        yPos += 15;
         doc.setFont('helvetica', 'bold');
-        doc.text('Notes', 20, yPos);
+        doc.setFontSize(10);
+        doc.text('Notes', 20, sectionStartY);
         doc.setFont('helvetica', 'normal');
 
-        // Split notes into paragraphs and render each with proper spacing
         const paragraphs = notes.split('\n').filter(p => p.trim());
-        let noteY = yPos + 6;
+        let noteY = sectionStartY + 6;
         paragraphs.forEach((paragraph) => {
-          const paragraphLines = doc.splitTextToSize(paragraph.trim(), 80);
+          const paragraphLines = doc.splitTextToSize(paragraph.trim(), 70);
           doc.text(paragraphLines, 20, noteY);
           noteY += (paragraphLines.length * 4) + 4;
         });
+        notesEndY = noteY;
       }
 
-      // Footer
-      const footerY = 260;
+      // Totals on the right (at same Y as notes)
+      const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+      const gst = subtotal * 0.09;
+
+      let totalsY = sectionStartY;
       doc.setFontSize(10);
-      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'bold');
+      doc.text('SUBTOTAL', 140, totalsY, { align: 'right' });
       doc.setFont('helvetica', 'normal');
+      doc.text(subtotal.toFixed(2), 185, totalsY, { align: 'right' });
 
-      if (selectedFooter?.line1) {
-        doc.text(selectedFooter.line1, 105, footerY, { align: 'center' });
-      }
-      if (selectedFooter?.line2) {
-        doc.text(selectedFooter.line2, 105, footerY + 5, { align: 'center' });
-      }
-      if (selectedFooter?.line3) {
-        doc.text(selectedFooter.line3, 105, footerY + 10, { align: 'center' });
-      }
-      if (selectedFooter?.line4) {
-        doc.text(selectedFooter.line4, 105, footerY + 15, { align: 'center' });
-      }
-      if (selectedFooter?.line5) {
-        doc.text(selectedFooter.line5, 105, footerY + 20, { align: 'center' });
-      }
+      totalsY += 6;
+      doc.setFont('helvetica', 'bold');
+      doc.text('GST 9%', 140, totalsY, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.text(gst.toFixed(2), 185, totalsY, { align: 'right' });
+
+      totalsY += 8;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('QUOTATION TOTAL', 140, totalsY, { align: 'right' });
+      doc.setFontSize(14);
+      doc.text('$' + totalAmount.toFixed(2), 185, totalsY, { align: 'right' });
+      doc.setFontSize(10);
+
+      // Track final Y position (whichever is lower: notes or totals)
+      const contentEndY = Math.max(notesEndY, totalsY + 5);
+
+      // Render footer on last page - positioned after content
+      renderFooter(contentEndY);
 
       // Download
       const fileName = `Quotation_${quotationId}.pdf`;
@@ -1056,6 +1169,19 @@ export default function ClientQuotationPage() {
 
       setSelectedQuotation(quotation);
       setQuotationItemsView(items || []);
+
+      // Load saved header for this specific quotation, or use default
+      const savedHeaderId = quotationHeaders[quotation.quotation_id];
+      if (savedHeaderId && headerOptions.some(h => h.id === savedHeaderId)) {
+        setSelectedHeaderId(savedHeaderId);
+      } else {
+        // Use default header
+        const defaultHeader = headerOptions.find(h => h.is_default) || headerOptions[0];
+        if (defaultHeader) {
+          setSelectedHeaderId(defaultHeader.id);
+        }
+      }
+
       setShowQuotationModal(true);
     } catch (error) {
       console.error('Error loading quotation:', error);
@@ -1079,41 +1205,93 @@ export default function ClientQuotationPage() {
 
       const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
       const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
+      const footerLineCount = countFooterLines(selectedFooter);
 
-      // Load and add logo at top right
+      // Load logo
+      let logoBase64: string | undefined;
       try {
-        const logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
-        doc.addImage(logoBase64, 'PNG', 165, 10, 30, 20);
+        logoBase64 = await loadImageAsBase64('/assets/file_logo.png');
       } catch (logoError) {
         console.error('Error loading logo:', logoError);
       }
 
-      // Header
-      doc.setFont('helvetica');
-      doc.setFontSize(10);
-      let yPos = 20;
+      const pageHeight = 297;
+      const footerSpace = footerLineCount > 0 ? (footerLineCount * 5) + 15 : 10;
+      const maxContentY = pageHeight - footerSpace - 10;
 
-      if (selectedHeader?.line1) {
+      // Helper function to render header
+      const renderHeader = (startY: number = 20): number => {
+        if (logoBase64) {
+          doc.addImage(logoBase64, 'PNG', 165, startY - 10, 30, 20);
+        }
+
+        doc.setFont('helvetica');
+        doc.setFontSize(10);
+        let yPos = startY;
+
+        if (selectedHeader?.line1) {
+          doc.setFont('helvetica', 'bold');
+          doc.text(selectedHeader.line1, 20, yPos);
+          yPos += 5;
+        }
+        doc.setFont('helvetica', 'normal');
+        if (selectedHeader?.line2) { doc.text(selectedHeader.line2, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line3) { doc.text(selectedHeader.line3, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line4) { doc.text(selectedHeader.line4, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line5) { doc.text(selectedHeader.line5, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line6) { doc.text(selectedHeader.line6, 20, yPos); yPos += 5; }
+        if (selectedHeader?.line7) { doc.text(selectedHeader.line7, 20, yPos); yPos += 5; }
+
+        return yPos;
+      };
+
+      // Helper function to render footer on current page
+      // contentEndY: if provided, footer moves up with content; if not, footer stays at bottom
+      const renderFooter = (contentEndY?: number) => {
+        if (!selectedFooter) return;
+
+        // Position footer: after content if contentEndY provided, otherwise at bottom of page
+        const footerY = contentEndY !== undefined ? contentEndY + 15 : pageHeight - footerSpace;
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        doc.setFont('helvetica', 'normal');
+
+        let footerLineY = footerY;
+        if (selectedFooter.line1) { doc.text(selectedFooter.line1, 105, footerLineY, { align: 'center' }); footerLineY += 5; }
+        if (selectedFooter.line2) { doc.text(selectedFooter.line2, 105, footerLineY, { align: 'center' }); footerLineY += 5; }
+        if (selectedFooter.line3) { doc.text(selectedFooter.line3, 105, footerLineY, { align: 'center' }); footerLineY += 5; }
+        if (selectedFooter.line4) { doc.text(selectedFooter.line4, 105, footerLineY, { align: 'center' }); footerLineY += 5; }
+        if (selectedFooter.line5) { doc.text(selectedFooter.line5, 105, footerLineY, { align: 'center' }); }
+      };
+
+      // Helper function to render table header
+      const renderTableHeader = (y: number): number => {
+        doc.setFillColor(184, 230, 231);
+        doc.rect(20, y - 5, 170, 8, 'F');
+        doc.setTextColor("#4db8ba");
         doc.setFont('helvetica', 'bold');
-        doc.text(selectedHeader.line1, 20, yPos);
-        yPos += 5;
-      }
-      doc.setFont('helvetica', 'normal');
-      if (selectedHeader?.line2) { doc.text(selectedHeader.line2, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line3) { doc.text(selectedHeader.line3, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line4) { doc.text(selectedHeader.line4, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line5) { doc.text(selectedHeader.line5, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line6) { doc.text(selectedHeader.line6, 20, yPos); yPos += 5; }
-      if (selectedHeader?.line7) { doc.text(selectedHeader.line7, 20, yPos); yPos += 5; }
+        doc.setFontSize(9);
+        doc.text('PRODUCT / SERVICES', 22, y);
+        doc.text('DESCRIPTION', 70, y);
+        doc.text('QTY', 120, y, { align: 'center' });
+        doc.text('UNIT PRICE', 150, y, { align: 'right' });
+        doc.text('AMOUNT', 185, y, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+        doc.setFont('helvetica', 'normal');
+        return y + 8;
+      };
 
-      // Title
-      yPos = 58;
+      // Render first page header
+      let headerEndY = renderHeader(20);
+
+      // Title - dynamic position
+      let yPos = headerEndY + 8;
       doc.setFontSize(20);
       doc.setTextColor("#0D909A");
       doc.text('Quotation', 20, yPos);
 
       // Three column section
-      yPos = 70;
+      yPos += 12;
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(10);
 
@@ -1131,7 +1309,6 @@ export default function ClientQuotationPage() {
       const dateLabel = 'DATE  ';
       const dateValue = new Date(selectedQuotation.date_created).toLocaleDateString('en-GB');
 
-      // Calculate positions to avoid overlap
       doc.setFont('helvetica', 'normal');
       const quotationValueWidth = doc.getTextWidth(selectedQuotation.quotation_id);
       const dateValueWidth = doc.getTextWidth(dateValue);
@@ -1139,42 +1316,43 @@ export default function ClientQuotationPage() {
       const quotationLabelWidth = doc.getTextWidth(quotationLabel);
       const dateLabelWidth = doc.getTextWidth(dateLabel);
 
-      // Draw quotation number
       doc.setFont('helvetica', 'bold');
       doc.text(quotationLabel, rightX - quotationValueWidth - quotationLabelWidth, yPos);
       doc.setFont('helvetica', 'normal');
       doc.text(selectedQuotation.quotation_id, rightX, yPos, { align: 'right' });
 
-      // Draw date
       doc.setFont('helvetica', 'bold');
       doc.text(dateLabel, rightX - dateValueWidth - dateLabelWidth, yPos + 6);
       doc.setFont('helvetica', 'normal');
       doc.text(dateValue, rightX, yPos + 6, { align: 'right' });
 
       // Horizontal divider
-      yPos = 90;
+      const addressHeight = address.length * 4;
+      yPos += Math.max(addressHeight + 5, 20);
       doc.setDrawColor(77, 184, 186);
       doc.line(20, yPos, 190, yPos);
 
       // Table header
-      yPos = 105;
-      doc.setFillColor(184, 230, 231);
-      doc.rect(20, yPos - 5, 170, 8, 'F');
-      doc.setTextColor("#4db8ba");
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.text('PRODUCT / SERVICES', 22, yPos);
-      doc.text('DESCRIPTION', 70, yPos);
-      doc.text('QTY', 120, yPos, { align: 'center' });
-      doc.text('UNIT PRICE', 150, yPos, { align: 'right' });
-      doc.text('AMOUNT', 185, yPos, { align: 'right' });
+      yPos += 15;
+      yPos = renderTableHeader(yPos);
 
-      // Table rows
-      doc.setTextColor(0, 0, 0);
-      doc.setFont('helvetica', 'normal');
-      yPos += 8;
+      // Table rows with pagination
+      let currentPage = 1;
+
+      const addNewPage = (): number => {
+        renderFooter();
+        doc.addPage();
+        currentPage++;
+        const newHeaderEndY = renderHeader(20);
+        return renderTableHeader(newHeaderEndY + 15);
+      };
 
       quotationItemsView.forEach((item) => {
+        if (yPos + 10 > maxContentY) {
+          yPos = addNewPage();
+        }
+
+        doc.setFontSize(9);
         doc.text(item.product_name.substring(0, 25), 22, yPos);
         doc.text((item.description || '').substring(0, 30), 70, yPos);
         doc.text(String(item.quantity), 120, yPos, { align: 'center' });
@@ -1183,6 +1361,24 @@ export default function ClientQuotationPage() {
         yPos += 6;
       });
 
+      // Calculate notes height for section fitting
+      let notesHeight = 0;
+      if (selectedQuotation.notes) {
+        const paragraphs = selectedQuotation.notes.split('\n').filter(p => p.trim());
+        paragraphs.forEach((paragraph) => {
+          const paragraphLines = doc.splitTextToSize(paragraph.trim(), 70);
+          notesHeight += (paragraphLines.length * 4) + 4;
+        });
+        notesHeight += 10; // Title + spacing
+      }
+
+      // Check if totals + notes section fits (side by side)
+      const totalsHeight = 35;
+      const sectionHeight = Math.max(totalsHeight, notesHeight);
+      if (yPos + sectionHeight > maxContentY) {
+        yPos = addNewPage();
+      }
+
       // Dotted line
       yPos += 5;
       (doc as any).setLineDashPattern([1, 1], 0);
@@ -1190,69 +1386,57 @@ export default function ClientQuotationPage() {
       doc.line(20, yPos, 190, yPos);
       (doc as any).setLineDashPattern([], 0);
 
-      // Totals
-      const subtotal = quotationItemsView.reduce((sum, item) => sum + item.subtotal, 0);
-      const gst = subtotal * 0.09;
+      // Store the starting Y for notes and totals (side by side)
+      const sectionStartY = yPos + 10;
 
-      yPos += 10;
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text('SUBTOTAL', 140, yPos, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.text(subtotal.toFixed(2), 185, yPos, { align: 'right' });
-
-      yPos += 6;
-      doc.setFont('helvetica', 'bold');
-      doc.text('GST 9%', 140, yPos, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.text(gst.toFixed(2), 185, yPos, { align: 'right' });
-
-      yPos += 8;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('QUOTATION TOTAL', 140, yPos, { align: 'right' });
-      doc.setFontSize(14);
-      doc.text('$' + selectedQuotation.total_amount.toFixed(2), 185, yPos, { align: 'right' });
-      doc.setFontSize(10);
-
-      // Notes
+      // Notes on the left (rendered at same Y as totals)
+      let notesEndY = sectionStartY;
       if (selectedQuotation.notes) {
-        yPos += 15;
         doc.setFont('helvetica', 'bold');
-        doc.text('Notes', 20, yPos);
+        doc.setFontSize(10);
+        doc.text('Notes', 20, sectionStartY);
         doc.setFont('helvetica', 'normal');
 
-        // Split notes into paragraphs and render each with proper spacing
         const paragraphs = selectedQuotation.notes.split('\n').filter(p => p.trim());
-        let noteY = yPos + 6;
+        let noteY = sectionStartY + 6;
         paragraphs.forEach((paragraph) => {
-          const paragraphLines = doc.splitTextToSize(paragraph.trim(), 80);
+          const paragraphLines = doc.splitTextToSize(paragraph.trim(), 70);
           doc.text(paragraphLines, 20, noteY);
           noteY += (paragraphLines.length * 4) + 4;
         });
+        notesEndY = noteY;
       }
 
-      // Footer
-      const footerY = 260;
+      // Totals on the right (at same Y as notes)
+      const subtotal = quotationItemsView.reduce((sum, item) => sum + item.subtotal, 0);
+      const gst = subtotal * 0.09;
+
+      let totalsY = sectionStartY;
       doc.setFontSize(10);
-      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'bold');
+      doc.text('SUBTOTAL', 140, totalsY, { align: 'right' });
       doc.setFont('helvetica', 'normal');
+      doc.text(subtotal.toFixed(2), 185, totalsY, { align: 'right' });
 
-      if (selectedFooter?.line1) {
-        doc.text(selectedFooter.line1, 105, footerY, { align: 'center' });
-      }
-      if (selectedFooter?.line2) {
-        doc.text(selectedFooter.line2, 105, footerY + 5, { align: 'center' });
-      }
-      if (selectedFooter?.line3) {
-        doc.text(selectedFooter.line3, 105, footerY + 10, { align: 'center' });
-      }
-      if (selectedFooter?.line4) {
-        doc.text(selectedFooter.line4, 105, footerY + 15, { align: 'center' });
-      }
-      if (selectedFooter?.line5) {
-        doc.text(selectedFooter.line5, 105, footerY + 20, { align: 'center' });
-      }
+      totalsY += 6;
+      doc.setFont('helvetica', 'bold');
+      doc.text('GST 9%', 140, totalsY, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.text(gst.toFixed(2), 185, totalsY, { align: 'right' });
+
+      totalsY += 8;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('QUOTATION TOTAL', 140, totalsY, { align: 'right' });
+      doc.setFontSize(14);
+      doc.text('$' + selectedQuotation.total_amount.toFixed(2), 185, totalsY, { align: 'right' });
+      doc.setFontSize(10);
+
+      // Track final Y position (whichever is lower: notes or totals)
+      const contentEndY = Math.max(notesEndY, totalsY + 5);
+
+      // Render footer on last page - positioned after content
+      renderFooter(contentEndY);
 
       doc.autoPrint();
       const pdfBlob = doc.output('blob');
@@ -1397,8 +1581,10 @@ export default function ClientQuotationPage() {
 
                 <button
                   onClick={() => setShowCreateModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: '#FF5722' }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-white font-medium transition-opacity ${canEditQuotations ? 'hover:opacity-90' : 'opacity-50 cursor-not-allowed'}`}
+                  style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }}
+                  disabled={!canEditQuotations}
+                  title={!canEditQuotations ? 'You do not have permission to create quotations' : ''}
                 >
                   <Plus size={20} />
                   <span>Create Quotation</span>
@@ -1416,7 +1602,8 @@ export default function ClientQuotationPage() {
                         type="checkbox"
                         checked={currentQuotations.length > 0 && selectedQuotationIds.length === currentQuotations.length}
                         onChange={handleSelectAll}
-                        className="w-4 h-4 accent-orange-500 cursor-pointer"
+                        className={`w-4 h-4 accent-orange-500 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                        disabled={!canEditQuotations}
                       />
                     </th>
                     <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
@@ -1458,7 +1645,8 @@ export default function ClientQuotationPage() {
                             type="checkbox"
                             checked={selectedQuotationIds.includes(quotation.id)}
                             onChange={() => handleSelectQuotation(quotation.id)}
-                            className="w-4 h-4 accent-orange-500 cursor-pointer"
+                            className={`w-4 h-4 accent-orange-500 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                            disabled={!canEditQuotations}
                           />
                         </td>
                         <td className="py-2 px-3 text-xs">{quotation.company_name}</td>
@@ -1531,7 +1719,7 @@ export default function ClientQuotationPage() {
                 <div className="flex-1 overflow-auto p-6 space-y-6">
                   {/* Client Type Toggle */}
                   <div className="flex items-center gap-4 mb-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className={`flex items-center gap-2 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                       <input
                         type="radio"
                         name="clientType"
@@ -1541,11 +1729,12 @@ export default function ClientQuotationPage() {
                           setUnregisteredClientName('');
                           setUnregisteredClientAddress('');
                         }}
-                        className="accent-orange-500"
+                        className={`accent-orange-500 ${!canEditQuotations ? 'cursor-not-allowed' : ''}`}
+                        disabled={!canEditQuotations}
                       />
                       <span className="text-sm font-medium" style={{ color: '#5C2E1F' }}>Registered Client</span>
                     </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className={`flex items-center gap-2 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                       <input
                         type="radio"
                         name="clientType"
@@ -1555,7 +1744,8 @@ export default function ClientQuotationPage() {
                           setSelectedClient('');
                           setClientSearchQuery('');
                         }}
-                        className="accent-orange-500"
+                        className={`accent-orange-500 ${!canEditQuotations ? 'cursor-not-allowed' : ''}`}
+                        disabled={!canEditQuotations}
                       />
                       <span className="text-sm font-medium" style={{ color: '#5C2E1F' }}>Unregistered Client</span>
                     </label>
@@ -1649,7 +1839,9 @@ export default function ClientQuotationPage() {
                       </label>
                       <button
                         onClick={handleAddItem}
-                        className="flex items-center gap-1 text-sm px-3 py-1 rounded border border-orange-500 text-orange-500 hover:bg-orange-50 transition-colors"
+                        className={`flex items-center gap-1 text-sm px-3 py-1 rounded border transition-colors ${canEditQuotations ? 'border-orange-500 text-orange-500 hover:bg-orange-50' : 'border-gray-300 text-gray-400 cursor-not-allowed opacity-50'}`}
+                        disabled={!canEditQuotations}
+                        title={!canEditQuotations ? 'You do not have permission to add items' : ''}
                       >
                         <Plus size={16} />
                         Add Item
@@ -1735,7 +1927,9 @@ export default function ClientQuotationPage() {
                                 <td className="py-2 px-2 text-center">
                                   <button
                                     onClick={() => handleRemoveItem(index)}
-                                    className="text-red-500 hover:text-red-700 transition-colors"
+                                    className={`transition-colors ${canEditQuotations ? 'text-red-500 hover:text-red-700' : 'text-gray-400 cursor-not-allowed opacity-50'}`}
+                                    disabled={!canEditQuotations}
+                                    title={!canEditQuotations ? 'You do not have permission to remove items' : ''}
                                   >
                                     <Trash2 size={16} />
                                   </button>
@@ -1785,9 +1979,10 @@ export default function ClientQuotationPage() {
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg">
                   <button
                     onClick={handleCreateQuotation}
-                    disabled={creatingQuotation}
-                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-                    style={{ backgroundColor: '#FF5722' }}
+                    disabled={creatingQuotation || !canEditQuotations}
+                    className={`flex-1 px-4 py-3 rounded-lg text-white font-medium transition-opacity disabled:opacity-50 ${canEditQuotations ? 'hover:opacity-90' : 'cursor-not-allowed'}`}
+                    style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }}
+                    title={!canEditQuotations ? 'You do not have permission to create quotations' : ''}
                   >
                     {creatingQuotation ? 'Creating...' : 'Create Quotation'}
                   </button>
@@ -1830,19 +2025,21 @@ export default function ClientQuotationPage() {
                     </label>
                     <div className="flex items-center gap-2 flex-wrap">
                       {headerOptions.map((header) => (
-                        <label key={header.id} className="flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:border-orange-300 transition-colors">
+                        <label key={header.id} className={`flex items-center gap-1 bg-white px-2 py-1 rounded border border-gray-200 transition-colors ${canEditQuotations ? 'cursor-pointer hover:border-orange-300' : 'cursor-not-allowed opacity-50'}`}>
                           <input
                             type="radio"
                             name="headerOption"
                             value={header.id}
                             checked={selectedHeaderId === header.id}
-                            onChange={() => setSelectedHeaderId(header.id)}
-                            className="cursor-pointer accent-orange-500 w-3 h-3"
+                            onChange={() => selectedQuotation && saveQuotationHeader(selectedQuotation.quotation_id, header.id)}
+                            className={`accent-orange-500 w-3 h-3 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                            disabled={!canEditQuotations}
                           />
                           <span className="text-xs font-medium">{header.option_name}</span>
                           <button
                             onClick={(e) => { e.preventDefault(); handleEditHeaderOption(header); }}
-                            className="text-blue-500 hover:text-blue-700 text-xs ml-1 underline"
+                            className={`text-xs ml-1 underline ${canEditQuotations ? 'text-blue-500 hover:text-blue-700' : 'text-gray-400 cursor-not-allowed'}`}
+                            disabled={!canEditQuotations}
                           >Edit</button>
                         </label>
                       ))}
@@ -1852,173 +2049,234 @@ export default function ClientQuotationPage() {
                           setHeaderFormData({ option_name: '', line1: '', line2: '', line3: '', line4: '', line5: '', line6: '', line7: '' });
                           setShowHeaderEditor(true);
                         }}
-                        className="text-xs px-2 py-1 border border-dashed border-gray-300 rounded hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                        className={`text-xs px-2 py-1 border border-dashed rounded transition-colors ${canEditQuotations ? 'border-gray-300 hover:border-orange-400 hover:bg-orange-50' : 'border-gray-200 opacity-50 cursor-not-allowed'}`}
                         style={{ color: '#5C2E1F' }}
+                        disabled={!canEditQuotations}
+                        title={!canEditQuotations ? 'You do not have permission to add headers' : ''}
                       >+ New Header</button>
                     </div>
                   </div>
                 </div>
 
-                {/* A4 Paper Preview - Invoice Style */}
+                {/* A4 Paper Preview - Invoice Style with Pagination */}
                 <div className="flex-1 overflow-auto px-6 py-6" style={{ backgroundColor: '#e5e7eb' }}>
-                  <div
-                    className="mx-auto bg-white shadow-lg"
-                    style={{
-                      width: '210mm',
-                      minHeight: '297mm',
-                      padding: '15mm',
-                      position: 'relative',
-                      fontFamily: 'Arial, Helvetica, sans-serif',
-                    }}
-                  >
-                    {/* Header Section */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '5px' }}>
-                      <div style={{ fontSize: '10pt', lineHeight: '1.5' }}>
-                        {(() => {
-                          const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
-                          if (!selectedHeader) return null;
-                          return (
-                            <>
-                              {selectedHeader.line1 && <div style={{ fontWeight: 'bold' }}>{selectedHeader.line1}</div>}
-                              {selectedHeader.line2 && <div>{selectedHeader.line2}</div>}
-                              {selectedHeader.line3 && <div>{selectedHeader.line3}</div>}
-                              {selectedHeader.line4 && <div>{selectedHeader.line4}</div>}
-                              {selectedHeader.line5 && <div>{selectedHeader.line5}</div>}
-                              {selectedHeader.line6 && <div>{selectedHeader.line6}</div>}
-                              {selectedHeader.line7 && <div>{selectedHeader.line7}</div>}
-                            </>
-                          );
-                        })()}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end' }}>
-                        <Image
-                          src="/assets/file_logo.png"
-                          alt="Company Logo"
-                          width={80}
-                          height={60}
-                          style={{ objectFit: 'contain' }}
-                        />
-                      </div>
-                    </div>
+                  {(() => {
+                    const selectedHeader = headerOptions.find(h => h.id === selectedHeaderId);
+                    const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
+                    const headerLineCount = countHeaderLines(selectedHeader);
+                    const footerLineCount = countFooterLines(selectedFooter);
 
-                    {/* Title */}
-                    <div style={{ fontSize: '20pt', color: '#0D909A', fontWeight: '300', margin: '5px 0' }}>
-                      Quotation
-                    </div>
+                    // Calculate items per page based on header/footer size
+                    const baseItemsPerPage = 15;
+                    const extraItemsFromHeader = Math.max(0, 7 - headerLineCount);
+                    const extraItemsFromFooter = Math.max(0, 5 - footerLineCount);
+                    const itemsPerPageCalc = baseItemsPerPage + extraItemsFromHeader + extraItemsFromFooter;
 
-                    {/* Three Column Section */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '18px', marginBottom: '12px' }}>
-                      <div>
-                        <div style={{ fontSize: '10pt', fontWeight: 'bold', marginBottom: '5px' }}>TO</div>
-                        <div style={{ fontSize: '10pt' }}>
-                          <strong>{selectedQuotation.company_name}</strong>
-                        </div>
-                        <div style={{ fontSize: '10pt', maxWidth: '150px', wordWrap: 'break-word' }}>
-                          {selectedQuotation.business_address}
-                        </div>
-                      </div>
+                    // Calculate notes height (approximate lines)
+                    const notesLineCount = selectedQuotation.notes
+                      ? selectedQuotation.notes.split('\n').filter(p => p.trim()).length
+                      : 0;
+                    // Reserve space for notes + totals on last page (reduce items on last page if needed)
+                    const lastPageReservedItems = Math.ceil(notesLineCount / 2) + 3; // 3 rows for totals
 
-                      <div></div>
+                    // Split items into pages, accounting for notes/totals on last page
+                    const pages: QuotationItem[][] = [];
+                    const totalItems = quotationItemsView.length;
 
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '10pt', marginBottom: '3px' }}>
-                          <strong>QUOTATION NO.</strong> {selectedQuotation.quotation_id}
-                        </div>
-                        <div style={{ fontSize: '10pt' }}>
-                          <strong>DATE</strong> {new Date(selectedQuotation.date_created).toLocaleDateString('en-GB')}
-                        </div>
-                      </div>
-                    </div>
+                    if (totalItems === 0) {
+                      pages.push([]);
+                    } else if (totalItems <= itemsPerPageCalc - lastPageReservedItems) {
+                      // Everything fits on one page
+                      pages.push(quotationItemsView);
+                    } else {
+                      // Need multiple pages
+                      let remaining = [...quotationItemsView];
+                      while (remaining.length > 0) {
+                        const isLastPage = remaining.length <= itemsPerPageCalc - lastPageReservedItems;
+                        const itemsThisPage = isLastPage
+                          ? remaining.length
+                          : Math.min(itemsPerPageCalc, remaining.length);
+                        pages.push(remaining.slice(0, itemsThisPage));
+                        remaining = remaining.slice(itemsThisPage);
+                      }
+                    }
 
-                    {/* Divider */}
-                    <hr style={{ border: 'none', borderTop: '1px solid #4db8ba', margin: '12px 0' }} />
+                    const subtotal = quotationItemsView.reduce((sum, item) => sum + item.subtotal, 0);
+                    const gst = subtotal * 0.09;
 
-                    {/* Items Table */}
-                    <div style={{ margin: '12px 0' }}>
-                      <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1.2fr 1.8fr 0.6fr 0.8fr 0.8fr',
-                        background: 'rgba(184, 230, 231, 0.5)',
-                        padding: '8px 10px',
-                        fontSize: '10pt',
-                        fontWeight: 'bold',
-                        color: '#4db8ba'
-                      }}>
-                        <div>PRODUCT / SERVICES</div>
-                        <div>DESCRIPTION</div>
-                        <div style={{ textAlign: 'center' }}>QTY</div>
-                        <div style={{ textAlign: 'right' }}>UNIT PRICE</div>
-                        <div style={{ textAlign: 'right' }}>AMOUNT</div>
-                      </div>
+                    return (
+                      <div className="space-y-8">
+                        {pages.map((pageItems, pageIndex) => (
+                          <div
+                            key={pageIndex}
+                            className="mx-auto bg-white shadow-lg"
+                            style={{
+                              width: '210mm',
+                              minHeight: '297mm',
+                              padding: '15mm',
+                              position: 'relative',
+                              fontFamily: 'Arial, Helvetica, sans-serif',
+                            }}
+                          >
+                            {/* Header Section */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '5px' }}>
+                              <div style={{ fontSize: '10pt', lineHeight: '1.5' }}>
+                                {selectedHeader && (
+                                  <>
+                                    {selectedHeader.line1 && <div style={{ fontWeight: 'bold' }}>{selectedHeader.line1}</div>}
+                                    {selectedHeader.line2 && <div>{selectedHeader.line2}</div>}
+                                    {selectedHeader.line3 && <div>{selectedHeader.line3}</div>}
+                                    {selectedHeader.line4 && <div>{selectedHeader.line4}</div>}
+                                    {selectedHeader.line5 && <div>{selectedHeader.line5}</div>}
+                                    {selectedHeader.line6 && <div>{selectedHeader.line6}</div>}
+                                    {selectedHeader.line7 && <div>{selectedHeader.line7}</div>}
+                                  </>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end' }}>
+                                <Image
+                                  src="/assets/file_logo.png"
+                                  alt="Company Logo"
+                                  width={80}
+                                  height={60}
+                                  style={{ objectFit: 'contain' }}
+                                />
+                              </div>
+                            </div>
 
-                      {quotationItemsView.map((item, idx) => (
-                        <div key={idx} style={{
-                          display: 'grid',
-                          gridTemplateColumns: '1.2fr 1.8fr 0.6fr 0.8fr 0.8fr',
-                          padding: '6px 10px',
-                          fontSize: '10pt'
-                        }}>
-                          <div>{item.product_name}</div>
-                          <div>{item.description || ''}</div>
-                          <div style={{ textAlign: 'center' }}>{item.quantity}</div>
-                          <div style={{ textAlign: 'right' }}>{item.unit_price.toFixed(2)}</div>
-                          <div style={{ textAlign: 'right' }}>{item.subtotal.toFixed(2)}</div>
-                        </div>
-                      ))}
-                    </div>
+                            {/* Title - dynamic margin based on header */}
+                            <div style={{
+                              fontSize: '20pt',
+                              color: '#0D909A',
+                              fontWeight: '300',
+                              marginTop: headerLineCount <= 3 ? '5px' : '10px',
+                              marginBottom: '5px'
+                            }}>
+                              Quotation {pages.length > 1 && `(Page ${pageIndex + 1} of ${pages.length})`}
+                            </div>
 
-                    {/* Totals */}
-                    {(() => {
-                      const subtotal = quotationItemsView.reduce((sum, item) => sum + item.subtotal, 0);
-                      const gst = subtotal * 0.09;
-                      return (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '35px', marginTop: '10px', paddingTop: '10px', borderTop: '2px dotted #e0e0e0' }}>
-                          <div style={{ paddingRight: '18px' }}>
-                            {selectedQuotation.notes && (
+                            {/* Three Column Section - only on first page */}
+                            {pageIndex === 0 && (
                               <>
-                                <div style={{ fontSize: '10pt', fontWeight: 'bold', marginBottom: '8px' }}>Notes</div>
-                                <div style={{ fontSize: '10pt', lineHeight: '1.8', textAlign: 'justify' }}>
-                                  {selectedQuotation.notes.split('\n').map((paragraph, idx) => (
-                                    paragraph.trim() && (
-                                      <p key={idx} style={{ margin: '0 0 8px 0' }}>{paragraph}</p>
-                                    )
-                                  ))}
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '18px', marginBottom: '12px' }}>
+                                  <div>
+                                    <div style={{ fontSize: '10pt', fontWeight: 'bold', marginBottom: '5px' }}>TO</div>
+                                    <div style={{ fontSize: '10pt' }}>
+                                      <strong>{selectedQuotation.company_name}</strong>
+                                    </div>
+                                    <div style={{ fontSize: '10pt', maxWidth: '150px', wordWrap: 'break-word' }}>
+                                      {selectedQuotation.business_address}
+                                    </div>
+                                  </div>
+
+                                  <div></div>
+
+                                  <div style={{ textAlign: 'right' }}>
+                                    <div style={{ fontSize: '10pt', marginBottom: '3px' }}>
+                                      <strong>QUOTATION NO.</strong> {selectedQuotation.quotation_id}
+                                    </div>
+                                    <div style={{ fontSize: '10pt' }}>
+                                      <strong>DATE</strong> {new Date(selectedQuotation.date_created).toLocaleDateString('en-GB')}
+                                    </div>
+                                  </div>
                                 </div>
+
+                                {/* Divider */}
+                                <hr style={{ border: 'none', borderTop: '1px solid #4db8ba', margin: '12px 0' }} />
                               </>
                             )}
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10pt' }}>
-                              <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>SUBTOTAL</div>
-                              <div style={{ width: '90px', textAlign: 'right' }}>{subtotal.toFixed(2)}</div>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10pt' }}>
-                              <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>GST 9%</div>
-                              <div style={{ width: '90px', textAlign: 'right' }}>{gst.toFixed(2)}</div>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px', fontSize: '10pt' }}>
-                              <div style={{ width: '150px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>QUOTATION TOTAL</div>
-                              <div style={{ width: '90px', textAlign: 'right', fontSize: '16pt', fontWeight: 'bold' }}>${selectedQuotation.total_amount.toFixed(2)}</div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
 
-                    {/* Footer */}
-                    {(() => {
-                      const selectedFooter = footerOptions.find(f => f.id === selectedFooterId);
-                      return (
-                        <div style={{ position: 'absolute', bottom: '15mm', left: '15mm', right: '15mm', textAlign: 'center', fontSize: '10pt', lineHeight: '1.6', fontWeight: 'normal' }}>
-                          {selectedFooter?.line1 && <p style={{ margin: '4px 0' }}>{selectedFooter.line1}</p>}
-                          {selectedFooter?.line2 && <p style={{ margin: '4px 0' }}>{selectedFooter.line2}</p>}
-                          {selectedFooter?.line3 && <p style={{ margin: '4px 0' }}>{selectedFooter.line3}</p>}
-                          {selectedFooter?.line4 && <p style={{ margin: '4px 0' }}>{selectedFooter.line4}</p>}
-                          {selectedFooter?.line5 && <p style={{ margin: '4px 0' }}>{selectedFooter.line5}</p>}
-                        </div>
-                      );
-                    })()}
-                  </div>
+                            {/* Items Table */}
+                            <div style={{ margin: '12px 0' }}>
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: '1.2fr 1.8fr 0.6fr 0.8fr 0.8fr',
+                                background: 'rgba(184, 230, 231, 0.5)',
+                                padding: '8px 10px',
+                                fontSize: '10pt',
+                                fontWeight: 'bold',
+                                color: '#4db8ba'
+                              }}>
+                                <div>PRODUCT / SERVICES</div>
+                                <div>DESCRIPTION</div>
+                                <div style={{ textAlign: 'center' }}>QTY</div>
+                                <div style={{ textAlign: 'right' }}>UNIT PRICE</div>
+                                <div style={{ textAlign: 'right' }}>AMOUNT</div>
+                              </div>
+
+                              {pageItems.map((item, idx) => (
+                                <div key={idx} style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: '1.2fr 1.8fr 0.6fr 0.8fr 0.8fr',
+                                  padding: '6px 10px',
+                                  fontSize: '10pt'
+                                }}>
+                                  <div>{item.product_name}</div>
+                                  <div>{item.description || ''}</div>
+                                  <div style={{ textAlign: 'center' }}>{item.quantity}</div>
+                                  <div style={{ textAlign: 'right' }}>{item.unit_price.toFixed(2)}</div>
+                                  <div style={{ textAlign: 'right' }}>{item.subtotal.toFixed(2)}</div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Totals - only on last page */}
+                            {pageIndex === pages.length - 1 && (
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: '1fr 1fr',
+                                gap: '35px',
+                                marginTop: '10px',
+                                paddingTop: '10px',
+                                borderTop: '2px dotted #e0e0e0',
+                                paddingBottom: `${15 + (footerLineCount * 5)}mm`
+                              }}>
+                                <div style={{ paddingRight: '18px' }}>
+                                  {selectedQuotation.notes && (
+                                    <>
+                                      <div style={{ fontSize: '10pt', fontWeight: 'bold', marginBottom: '8px' }}>Notes</div>
+                                      <div style={{ fontSize: '10pt', lineHeight: '1.8', textAlign: 'justify' }}>
+                                        {selectedQuotation.notes.split('\n').map((paragraph, idx) => (
+                                          paragraph.trim() && (
+                                            <p key={idx} style={{ margin: '0 0 8px 0' }}>{paragraph}</p>
+                                          )
+                                        ))}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10pt' }}>
+                                    <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>SUBTOTAL</div>
+                                    <div style={{ width: '90px', textAlign: 'right' }}>{subtotal.toFixed(2)}</div>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10pt' }}>
+                                    <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>GST 9%</div>
+                                    <div style={{ width: '90px', textAlign: 'right' }}>{gst.toFixed(2)}</div>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px', fontSize: '10pt' }}>
+                                    <div style={{ width: '150px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>QUOTATION TOTAL</div>
+                                    <div style={{ width: '90px', textAlign: 'right', fontSize: '16pt', fontWeight: 'bold' }}>${selectedQuotation.total_amount.toFixed(2)}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Footer - positioned at bottom */}
+                            {selectedFooter && (
+                              <div style={{ position: 'absolute', bottom: '15mm', left: '15mm', right: '15mm', textAlign: 'center', fontSize: '10pt', lineHeight: '1.6', fontWeight: 'normal' }}>
+                                {selectedFooter.line1 && <p style={{ margin: '4px 0' }}>{selectedFooter.line1}</p>}
+                                {selectedFooter.line2 && <p style={{ margin: '4px 0' }}>{selectedFooter.line2}</p>}
+                                {selectedFooter.line3 && <p style={{ margin: '4px 0' }}>{selectedFooter.line3}</p>}
+                                {selectedFooter.line4 && <p style={{ margin: '4px 0' }}>{selectedFooter.line4}</p>}
+                                {selectedFooter.line5 && <p style={{ margin: '4px 0' }}>{selectedFooter.line5}</p>}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Footer Options Selection - Compact */}
@@ -2029,31 +2287,34 @@ export default function ClientQuotationPage() {
                     </label>
                     <div className="flex items-center gap-2 flex-wrap">
                       {/* Empty Option */}
-                      <label className="flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:border-orange-300 transition-colors">
+                      <label className={`flex items-center gap-1 bg-white px-2 py-1 rounded border border-gray-200 transition-colors ${canEditQuotations ? 'cursor-pointer hover:border-orange-300' : 'cursor-not-allowed opacity-50'}`}>
                         <input
                           type="radio"
                           name="footerOption"
                           value=""
                           checked={selectedFooterId === null}
                           onChange={() => setSelectedFooterId(null)}
-                          className="cursor-pointer accent-orange-500 w-3 h-3"
+                          className={`accent-orange-500 w-3 h-3 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                          disabled={!canEditQuotations}
                         />
                         <span className="text-xs font-medium">Empty</span>
                       </label>
                       {footerOptions.map((footer) => (
-                        <label key={footer.id} className="flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:border-orange-300 transition-colors">
+                        <label key={footer.id} className={`flex items-center gap-1 bg-white px-2 py-1 rounded border border-gray-200 transition-colors ${canEditQuotations ? 'cursor-pointer hover:border-orange-300' : 'cursor-not-allowed opacity-50'}`}>
                           <input
                             type="radio"
                             name="footerOption"
                             value={footer.id}
                             checked={selectedFooterId === footer.id}
                             onChange={() => setSelectedFooterId(footer.id)}
-                            className="cursor-pointer accent-orange-500 w-3 h-3"
+                            className={`accent-orange-500 w-3 h-3 ${canEditQuotations ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                            disabled={!canEditQuotations}
                           />
                           <span className="text-xs font-medium">{footer.option_name}</span>
                           <button
                             onClick={(e) => { e.preventDefault(); handleEditFooterOption(footer); }}
-                            className="text-blue-500 hover:text-blue-700 text-xs ml-1 underline"
+                            className={`text-xs ml-1 underline ${canEditQuotations ? 'text-blue-500 hover:text-blue-700' : 'text-gray-400 cursor-not-allowed'}`}
+                            disabled={!canEditQuotations}
                           >Edit</button>
                         </label>
                       ))}
@@ -2063,8 +2324,10 @@ export default function ClientQuotationPage() {
                           setFooterFormData({ option_name: '', line1: '', line2: '', line3: '', line4: '', line5: '' });
                           setShowFooterEditor(true);
                         }}
-                        className="text-xs px-2 py-1 border border-dashed border-gray-300 rounded hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                        className={`text-xs px-2 py-1 border border-dashed rounded transition-colors ${canEditQuotations ? 'border-gray-300 hover:border-orange-400 hover:bg-orange-50' : 'border-gray-200 opacity-50 cursor-not-allowed'}`}
                         style={{ color: '#5C2E1F' }}
+                        disabled={!canEditQuotations}
+                        title={!canEditQuotations ? 'You do not have permission to add footers' : ''}
                       >+ New Footer</button>
                     </div>
                   </div>
@@ -2240,7 +2503,9 @@ export default function ClientQuotationPage() {
                       </label>
                       <button
                         onClick={handleAddEditItem}
-                        className="flex items-center gap-1 text-sm px-3 py-1 rounded border border-orange-500 text-orange-500 hover:bg-orange-50 transition-colors"
+                        className={`flex items-center gap-1 text-sm px-3 py-1 rounded border transition-colors ${canEditQuotations ? 'border-orange-500 text-orange-500 hover:bg-orange-50' : 'border-gray-300 text-gray-400 cursor-not-allowed opacity-50'}`}
+                        disabled={!canEditQuotations}
+                        title={!canEditQuotations ? 'You do not have permission to add items' : ''}
                       >
                         <Plus size={16} />
                         Add Item
@@ -2339,7 +2604,9 @@ export default function ClientQuotationPage() {
                                 <td className="py-2 px-2 text-center">
                                   <button
                                     onClick={() => handleRemoveEditItem(index)}
-                                    className="text-red-500 hover:text-red-700 transition-colors"
+                                    className={`transition-colors ${canEditQuotations ? 'text-red-500 hover:text-red-700' : 'text-gray-400 cursor-not-allowed opacity-50'}`}
+                                    disabled={!canEditQuotations}
+                                    title={!canEditQuotations ? 'You do not have permission to remove items' : ''}
                                   >
                                     <Trash2 size={16} />
                                   </button>
@@ -2389,9 +2656,10 @@ export default function ClientQuotationPage() {
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex gap-3 shrink-0 rounded-b-lg">
                   <button
                     onClick={handleSaveEdit}
-                    disabled={loading}
-                    className="flex-1 px-4 py-3 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-                    style={{ backgroundColor: '#FF5722' }}
+                    disabled={loading || !canEditQuotations}
+                    className={`flex-1 px-4 py-3 rounded-lg text-white font-medium transition-opacity disabled:opacity-50 ${canEditQuotations ? 'hover:opacity-90' : 'cursor-not-allowed'}`}
+                    style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }}
+                    title={!canEditQuotations ? 'You do not have permission to save changes' : ''}
                   >
                     {loading ? 'Saving...' : 'Save Changes'}
                   </button>
@@ -2463,9 +2731,10 @@ export default function ClientQuotationPage() {
                 <>
                   <button
                     onClick={handleEditSelected}
-                    disabled={loading}
-                    className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={loading || !canEditQuotations}
+                    className={`flex items-center gap-1.5 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${canEditQuotations ? 'hover:text-gray-300' : ''}`}
                     style={{ padding: "2px 6px" }}
+                    title={!canEditQuotations ? 'You do not have permission to edit quotations' : ''}
                   >
                     <Edit2 size={16} />
                     <span className="text-sm">Edit</span>
@@ -2483,9 +2752,10 @@ export default function ClientQuotationPage() {
 
               <button
                 onClick={handleDeleteSelected}
-                disabled={loading}
-                className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={loading || !canEditQuotations}
+                className={`flex items-center gap-1.5 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${canEditQuotations ? 'hover:text-gray-300' : ''}`}
                 style={{ padding: "2px 6px" }}
+                title={!canEditQuotations ? 'You do not have permission to delete quotations' : ''}
               >
                 <Trash2 size={16} />
                 <span className="text-sm">Delete</span>
@@ -2501,7 +2771,7 @@ export default function ClientQuotationPage() {
                   <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>{editingHeaderId ? 'Edit Header' : 'New Header'}</h3>
                   <div className="flex items-center gap-2">
                     {editingHeaderId && (
-                      <button onClick={() => handleDeleteHeaderOption(editingHeaderId)} className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-300 rounded">Delete</button>
+                      <button onClick={() => handleDeleteHeaderOption(editingHeaderId)} disabled={!canEditQuotations} className={`text-xs px-2 py-1 border rounded ${canEditQuotations ? 'text-red-600 hover:text-red-800 border-red-300' : 'text-gray-400 border-gray-200 cursor-not-allowed opacity-50'}`} title={!canEditQuotations ? 'You do not have permission to delete headers' : ''}>Delete</button>
                     )}
                     <button onClick={() => setShowHeaderEditor(false)} className="text-gray-500 hover:text-gray-700 text-xl">×</button>
                   </div>
@@ -2541,7 +2811,7 @@ export default function ClientQuotationPage() {
                   </div>
                 </div>
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-2">
-                  <button onClick={handleSaveHeaderOption} className="flex-1 px-3 py-2 text-white rounded text-sm font-medium hover:opacity-90" style={{ backgroundColor: '#FF5722' }}>{editingHeaderId ? 'Update' : 'Create'}</button>
+                  <button onClick={handleSaveHeaderOption} disabled={!canEditQuotations} className={`flex-1 px-3 py-2 text-white rounded text-sm font-medium ${canEditQuotations ? 'hover:opacity-90' : 'opacity-50 cursor-not-allowed'}`} style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }} title={!canEditQuotations ? 'You do not have permission to edit headers' : ''}>{editingHeaderId ? 'Update' : 'Create'}</button>
                   <button onClick={() => setShowHeaderEditor(false)} className="flex-1 px-3 py-2 border rounded text-sm font-medium hover:bg-gray-50" style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}>Cancel</button>
                 </div>
               </div>
@@ -2556,7 +2826,7 @@ export default function ClientQuotationPage() {
                   <h3 className="text-lg font-bold" style={{ color: '#5C2E1F' }}>{editingFooterId ? 'Edit Footer' : 'New Footer'}</h3>
                   <div className="flex items-center gap-2">
                     {editingFooterId && (
-                      <button onClick={() => handleDeleteFooterOption(editingFooterId)} className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-300 rounded">Delete</button>
+                      <button onClick={() => handleDeleteFooterOption(editingFooterId)} disabled={!canEditQuotations} className={`text-xs px-2 py-1 border rounded ${canEditQuotations ? 'text-red-600 hover:text-red-800 border-red-300' : 'text-gray-400 border-gray-200 cursor-not-allowed opacity-50'}`} title={!canEditQuotations ? 'You do not have permission to delete footers' : ''}>Delete</button>
                     )}
                     <button onClick={() => setShowFooterEditor(false)} className="text-gray-500 hover:text-gray-700 text-xl">×</button>
                   </div>
@@ -2588,7 +2858,7 @@ export default function ClientQuotationPage() {
                   </div>
                 </div>
                 <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-2">
-                  <button onClick={handleSaveFooterOption} className="flex-1 px-3 py-2 text-white rounded text-sm font-medium hover:opacity-90" style={{ backgroundColor: '#FF5722' }}>{editingFooterId ? 'Update' : 'Create'}</button>
+                  <button onClick={handleSaveFooterOption} disabled={!canEditQuotations} className={`flex-1 px-3 py-2 text-white rounded text-sm font-medium ${canEditQuotations ? 'hover:opacity-90' : 'opacity-50 cursor-not-allowed'}`} style={{ backgroundColor: canEditQuotations ? '#FF5722' : '#ccc' }} title={!canEditQuotations ? 'You do not have permission to edit footers' : ''}>{editingFooterId ? 'Update' : 'Create'}</button>
                   <button onClick={() => setShowFooterEditor(false)} className="flex-1 px-3 py-2 border rounded text-sm font-medium hover:bg-gray-50" style={{ borderColor: '#5C2E1F', color: '#5C2E1F' }}>Cancel</button>
                 </div>
               </div>

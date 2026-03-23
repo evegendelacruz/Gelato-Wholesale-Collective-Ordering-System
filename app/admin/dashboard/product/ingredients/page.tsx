@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react';
 import { Search, Filter, X, Image as ImageIcon, ChevronDown } from 'lucide-react';
 import supabase from '@/lib/client';
 import Image from 'next/image';
+import { useAccessControl } from '@/lib/accessControl';
 
 interface Ingredient {
   id: number;
@@ -24,6 +25,8 @@ interface Message {
 }
 
 export default function IngredientsPage() {
+  const { canEdit } = useAccessControl();
+  const canEditIngredients = canEdit('product', 'ingredients');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -69,13 +72,14 @@ export default function IngredientsPage() {
       const { data, error } = await supabase
         .from('product_list')
         .select('id, product_id, product_name, product_ingredient, product_allergen, product_image, product_created_at')
+        .or('is_deleted.is.null,is_deleted.eq.false')
         .order('id', { ascending: false });
 
       if (error) {
         console.error('Supabase error:', error);
         throw error;
       }
-      
+
       setIngredients(data || []);
     } catch (error) {
       console.error('Error fetching ingredients:', error);
@@ -249,7 +253,7 @@ export default function IngredientsPage() {
                 </div>
 
                 <div className="relative sort-dropdown">
-                  <button 
+                  <button
                     onClick={() => {
                       setIsSortDropdownOpen(!isSortDropdownOpen);
                       setIsFilterDropdownOpen(false);
@@ -259,7 +263,7 @@ export default function IngredientsPage() {
                     <ChevronDown size={20} />
                     <span>Sort</span>
                   </button>
-                  
+
                   {isSortDropdownOpen && (
                     <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-300 rounded-lg shadow-lg z-10">
                       <div className="py-1">
@@ -309,7 +313,7 @@ export default function IngredientsPage() {
                 </div>
 
                 <div className="relative filter-dropdown">
-                  <button 
+                  <button
                     onClick={() => {
                       setIsFilterDropdownOpen(!isFilterDropdownOpen);
                       setIsSortDropdownOpen(false);
@@ -416,18 +420,20 @@ export default function IngredientsPage() {
                     currentIngredients.map((ingredient) => (
                       <tr
                         key={ingredient.id}
-                        className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
-                        onClick={() => handleRowClick(ingredient)}
+                        className={`border-b border-gray-200 ${canEditIngredients ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-not-allowed'}`}
+                        onClick={() => canEditIngredients && handleRowClick(ingredient)}
                       >
                         <td className="py-2 px-3">
                           <div
                             className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                              selectedRow === ingredient.id
-                                ? 'border-orange-500 bg-orange-500'
-                                : 'border-gray-300'
+                              !canEditIngredients
+                                ? 'border-gray-200 bg-gray-100 opacity-50'
+                                : selectedRow === ingredient.id
+                                  ? 'border-orange-500 bg-orange-500'
+                                  : 'border-gray-300'
                             }`}
                           >
-                            {selectedRow === ingredient.id && (
+                            {selectedRow === ingredient.id && canEditIngredients && (
                               <div className="w-2 h-2 bg-white rounded-full"></div>
                             )}
                           </div>
@@ -563,8 +569,10 @@ export default function IngredientsPage() {
                 <div className="flex justify-center mt-6">
                   <button
                     onClick={handleEdit}
-                    className="px-16 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity"
-                    style={{ backgroundColor: '#FF5722' }}
+                    className={`px-16 py-2 text-white rounded font-medium transition-opacity ${canEditIngredients ? 'hover:opacity-90' : 'opacity-50 cursor-not-allowed'}`}
+                    style={{ backgroundColor: canEditIngredients ? '#FF5722' : '#ccc' }}
+                    disabled={!canEditIngredients}
+                    title={!canEditIngredients ? 'You do not have permission to edit ingredients' : ''}
                   >
                     Edit
                   </button>
@@ -634,8 +642,9 @@ export default function IngredientsPage() {
                     value={editFormData.product_ingredient}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, product_ingredient: e.target.value }))}
                     rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm ${!canEditIngredients ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                     placeholder="Enter ingredients..."
+                    disabled={!canEditIngredients}
                   />
                 </div>
 
@@ -647,8 +656,9 @@ export default function IngredientsPage() {
                     value={editFormData.product_allergen}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, product_allergen: e.target.value }))}
                     rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm ${!canEditIngredients ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                     placeholder="Enter allergens..."
+                    disabled={!canEditIngredients}
                   />
                 </div>
 
@@ -661,9 +671,10 @@ export default function IngredientsPage() {
                   </button>
                   <button
                     onClick={handleUpdate}
-                    disabled={loading}
-                    className="px-12 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: '#FF5722' }}
+                    disabled={loading || !canEditIngredients}
+                    className={`px-12 py-2 text-white rounded font-medium transition-opacity ${canEditIngredients ? 'hover:opacity-90' : 'opacity-50 cursor-not-allowed'}`}
+                    style={{ backgroundColor: canEditIngredients ? '#FF5722' : '#ccc' }}
+                    title={!canEditIngredients ? 'You do not have permission to update ingredients' : ''}
                   >
                     {loading ? 'Updating...' : 'Update'}
                   </button>

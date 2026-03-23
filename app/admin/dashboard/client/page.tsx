@@ -6,6 +6,7 @@ import { downloadCredentialImage } from '@/app/components/credentialGenerator/cr
 import { useState, useEffect } from 'react';
 import { Search, Filter, Plus, X, Upload, Check, UserMinus, Download, ChevronDown } from 'lucide-react';
 import supabase from '@/lib/client';
+import { useAccessControl } from '@/lib/accessControl';
 import Image from 'next/image';
 
 interface Client {
@@ -77,6 +78,10 @@ interface Message {
 }
 
 export default function ClientAccountPage() {
+  // Access Control
+  const { canEdit } = useAccessControl();
+  const canEditClients = canEdit('client', 'client');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1503,9 +1508,10 @@ const handleUpdate = async () => {
               <>
                 <button
                   onClick={handleEdit}
-                  disabled={loading}
+                  disabled={loading || !canEditClients}
                   className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ padding: '2px 6px' }}
+                  title={!canEditClients ? "You do not have permission to edit clients" : ""}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -1513,14 +1519,15 @@ const handleUpdate = async () => {
                   </svg>
                   <span className="text-sm">Edit</span>
                 </button>
-                
+
                 <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
 
                 <button
                   onClick={openClientProductListModal}
-                  disabled={loading}
+                  disabled={loading || !canEditClients}
                   className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ padding: '2px 6px' }}
+                  title={!canEditClients ? "You do not have permission to manage client products" : ""}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
@@ -1528,16 +1535,17 @@ const handleUpdate = async () => {
                   </svg>
                   <span className="text-sm">Products</span>
                 </button>
-                
+
                 <div style={{ width: '1px', height: '20px', backgroundColor: 'rgba(255, 255, 255, 0.3)' }}></div>
               </>
             )}
-            
+
             <button
               onClick={() => setIsDeleteConfirmOpen(true)}
-              disabled={loading}
+              disabled={loading || !canEditClients}
               className="flex items-center gap-1.5 text-white hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ padding: '2px 6px' }}
+              title={!canEditClients ? "You do not have permission to delete clients" : ""}
             >
               <UserMinus size={16} />
               <span className="text-sm">Remove</span>
@@ -1716,21 +1724,26 @@ const handleUpdate = async () => {
               </div>
 
                 {/* Add Client Product Button*/}
-                <button 
+                <button
                   onClick={openClientProductModal}
-                  disabled={loading || selectedRows.size !== 1}
+                  disabled={loading || selectedRows.size !== 1 || !canEditClients}
                   className="flex items-center gap-2 px-4 py-2 border border-orange-500 text-orange-600 rounded-lg hover:bg-orange-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={!canEditClients ? "You do not have permission to add client products" : ""}
                 >
                   <Plus size={20} />
                   <span>Add Client Product</span>
                 </button>
 
                 {/* Add New Client Button */}
-                <button 
+                <button
                   onClick={openModal}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#FF5722' }}
+                  disabled={loading || !canEditClients}
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    backgroundColor: canEditClients ? '#FF5722' : '#ccc',
+                    cursor: canEditClients ? 'pointer' : 'not-allowed'
+                  }}
+                  title={!canEditClients ? "You do not have permission to add clients" : ""}
                 >
                   <Plus size={20} />
                   <span>Add New Client</span>
@@ -1746,9 +1759,10 @@ const handleUpdate = async () => {
                     <th className="text-left py-2 px-3" style={{ minWidth: '50px' }}>
                       <input
                         type="checkbox"
-                        className="w-4 h-4 cursor-pointer"
+                        className={`w-4 h-4 ${canEditClients ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                         checked={selectedRows.size === currentClients.length && currentClients.length > 0}
                         onChange={(e) => handleSelectAll(e.target.checked)}
+                        disabled={!canEditClients}
                       />
                     </th>
                     <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
@@ -1795,9 +1809,10 @@ const handleUpdate = async () => {
                         <td className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
-                            className="w-4 h-4 cursor-pointer"
+                            className={`w-4 h-4 ${canEditClients ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                             checked={selectedRows.has(client.client_id)}
                             onChange={(e) => handleSelectRow(client.client_id, e.target.checked)}
+                            disabled={!canEditClients}
                           />
                         </td>
                         <td className="py-2 px-3 text-xs">{client.client_person_incharge}</td>
@@ -1813,9 +1828,17 @@ const handleUpdate = async () => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDownloadCredential(client);
+                            if (canEditClients) {
+                              handleDownloadCredential(client);
+                            }
                           }}
-                          className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-xs"
+                          disabled={!canEditClients}
+                          className={`flex items-center gap-1 px-3 py-1.5 text-white rounded transition-colors text-xs ${
+                            canEditClients
+                              ? 'bg-blue-500 hover:bg-blue-600 cursor-pointer'
+                              : 'bg-gray-400 cursor-not-allowed opacity-60'
+                          }`}
+                          title={!canEditClients ? 'You do not have permission to download credentials' : ''}
                         >
                           <Download size={14} />
                           Download
@@ -2043,7 +2066,7 @@ const handleUpdate = async () => {
                         .map((product) => {
                           const isChecked = selectedProducts.has(product.id.toString());
                           return (
-                            <tr key={product.product_id} className={`border-b border-orange-100 hover:bg-orange-50 ${isChecked ? 'bg-orange-100' : 'bg-white'}`}>
+                            <tr key={product.id} className={`border-b border-orange-100 hover:bg-orange-50 ${isChecked ? 'bg-orange-100' : 'bg-white'}`}>
                               <td className="py-3 px-4">
                                 <input
                                   type="checkbox"
@@ -2964,8 +2987,14 @@ const handleUpdate = async () => {
                           <p className="font-medium text-sm">{selectedClient.client_ACRA.split('/').pop()}</p>
                         </div>
                         <button
-                          onClick={() => downloadAcraFile(selectedClient.client_ACRA!)}
-                          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                          onClick={() => canEditClients && downloadAcraFile(selectedClient.client_ACRA!)}
+                          disabled={!canEditClients}
+                          className={`px-4 py-2 text-white rounded transition-colors ${
+                            canEditClients
+                              ? 'bg-blue-500 hover:bg-blue-600 cursor-pointer'
+                              : 'bg-gray-400 cursor-not-allowed opacity-60'
+                          }`}
+                          title={!canEditClients ? 'You do not have permission to download documents' : ''}
                         >
                           Download
                         </button>

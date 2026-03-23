@@ -39,9 +39,9 @@ interface ClientData {
   client_delivery_address: string;
   client_billing_address: string;
   client_person_incharge: string;
-  ad_streetName: string;  
-  ad_country: string;   
-  ad_postal: string;     
+  ad_streetName: string;
+  ad_country: string;
+  ad_postal: string;
 }
 
 interface ClientInvoiceProps {
@@ -89,385 +89,323 @@ export default function ClientInvoice({
   const gst = getGST(order);
   const displayGstPercentage = gstPercentage;
 
+  const allItems = order.items;
+  const totalItems = allItems.length;
+
+  // Thresholds
+  const maxItemsSinglePage = 10; // Up to 10 items = single page
+  const maxItemsFirstPage = 15; // First page can hold up to 15 items
+  const maxItemsPerContinuationPage = 20; // Continuation pages can hold more items
+
+  // Determine page structure
+  const pages: { items: OrderItem[]; showHeader: boolean; showTerms: boolean }[] = [];
+
+  if (totalItems <= maxItemsSinglePage) {
+    // Single page with everything
+    pages.push({ items: allItems, showHeader: true, showTerms: true });
+  } else if (totalItems <= maxItemsFirstPage) {
+    // 11-15 items: Page 1 has all items, Page 2 has terms/totals only
+    pages.push({ items: allItems, showHeader: true, showTerms: false });
+    pages.push({ items: [], showHeader: false, showTerms: true });
+  } else {
+    // 16+ items: Split items across pages
+    // Page 1: First 15 items
+    pages.push({ items: allItems.slice(0, maxItemsFirstPage), showHeader: true, showTerms: false });
+
+    // Remaining items
+    let remaining = allItems.slice(maxItemsFirstPage);
+    while (remaining.length > 0) {
+      const isLastBatch = remaining.length <= maxItemsPerContinuationPage;
+      pages.push({
+        items: remaining.slice(0, maxItemsPerContinuationPage),
+        showHeader: false,
+        showTerms: isLastBatch
+      });
+      remaining = remaining.slice(maxItemsPerContinuationPage);
+    }
+  }
+
+  const totalPages = pages.length;
+
+  // Render footer component
+  const renderFooter = () => (
+    <div style={{
+      position: 'absolute',
+      bottom: '15mm',
+      left: '0.5in',
+      right: '0.5in',
+      textAlign: 'center',
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '10px',
+      lineHeight: '1.6'
+    }}>
+      {selectedFooter?.line1 && <p style={{ margin: '4px 0' }}>{selectedFooter.line1}</p>}
+      {selectedFooter?.line2 && <p style={{ margin: '4px 0' }}>{selectedFooter.line2}</p>}
+      {selectedFooter?.line3 && <p style={{ margin: '4px 0' }}>{selectedFooter.line3}</p>}
+      {selectedFooter?.line4 && <p style={{ margin: '4px 0' }}>{selectedFooter.line4}</p>}
+      {selectedFooter?.line5 && <p style={{ margin: '4px 0' }}>{selectedFooter.line5}</p>}
+
+      {!selectedFooter && (
+        <>
+          <p style={{ margin: '4px 0 12px 0' }}>The team at Momolato deeply appreciates your kind support.</p>
+          <p style={{ margin: '4px 0' }}>Payment instructions:</p>
+          <p style={{ margin: '4px 0' }}>
+            PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)
+          </p>
+          <p style={{ margin: '4px 0' }}>
+            OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd
+          </p>
+        </>
+      )}
+    </div>
+  );
+
+  // Render table header
+  const renderTableHeader = () => (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '1.2fr 1.8fr 0.6fr 0.8fr 0.8fr',
+      background: 'rgba(184, 230, 231, 0.5)',
+      padding: '8px 10px',
+      fontSize: '10px',
+      fontWeight: 'bold',
+      color: '#4db8ba'
+    }}>
+      <div>PRODUCT / SERVICES</div>
+      <div>DESCRIPTION</div>
+      <div style={{ textAlign: 'center' }}>QTY</div>
+      <div style={{ textAlign: 'right' }}>UNIT PRICE</div>
+      <div style={{ textAlign: 'right' }}>AMOUNT</div>
+    </div>
+  );
+
+  // Render terms and totals
+  const renderTermsAndTotals = () => (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '35px',
+      marginTop: '10px',
+      borderTop: '2px dotted #e0e0e0'
+    }}>
+      {/* Terms & Conditions */}
+      <div style={{ paddingRight: '18px' }}>
+        <h3 style={{ fontSize: '10px', marginBottom: '8px', marginTop: '3.5px' }}>Terms & Conditions</h3>
+        <p style={{ fontSize: '10px', lineHeight: '1.6', marginBottom: '10px' }}>
+          We acknowledge that the above goods are received in good condition. Please inform us of any issues
+          within 24 hours. Otherwise, kindly note no return or refunds accepted.
+        </p>
+        <p style={{ fontSize: '10px', lineHeight: '1.6', marginBottom: '10px' }}>
+          We are not liable for any damage to products once stored at your premises. Please keep frozen products
+          (gelato and / or popsicles) frozen at -18 degree Celsius and below.
+        </p>
+        <div style={{
+          marginTop: '35px',
+          paddingTop: '5px',
+          borderTop: '1px solid #000',
+          width: '250px',
+          fontSize: '10px'
+        }}>
+          Client&apos;s Signature & Company Stamp
+        </div>
+      </div>
+
+      {/* Totals */}
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10px' }}>
+          <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>SUBTOTAL</div>
+          <div style={{ width: '90px', textAlign: 'right' }}>{subtotal.toFixed(2)}</div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10px' }}>
+          <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>GST {displayGstPercentage}%</div>
+          <div style={{ width: '90px', textAlign: 'right' }}>{gst.toFixed(2)}</div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10px' }}>
+          <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>TOTAL</div>
+          <div style={{ width: '90px', textAlign: 'right' }}>{order.total_amount.toFixed(2)}</div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px', fontSize: '10px' }}>
+          <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>BALANCE DUE</div>
+          <div style={{ width: '90px', textAlign: 'right', fontSize: '16px', fontWeight: 'bold' }}>${order.total_amount.toFixed(2)}</div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div style={{
       width: '100%',
-      minHeight: '100%',
-      backgroundColor: 'white',
-      padding: '0',
-      boxSizing: 'border-box',
-      position: 'relative'
+      backgroundColor: '#e5e7eb',
+      padding: '20px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center'
     }}>
-      <div 
-        id="invoice-content"
-        style={{ 
-          width: '100%', 
-          minHeight: '11in',
-          margin: '0',
-          padding: '0.5in 0.5in 0.19in 0.5in',
-          backgroundColor: 'white',
-          position: 'relative',
-          fontFamily: 'Arial MT, sans-serif',
-          boxSizing: 'border-box'
-        }}>
-        <style jsx>{`
-          @media print {
-            @page {
-                size: 8.5in 11in;
-                margin: 1.27cm 1.27cm 0 1.27cm;
-            }
-            
-            html, body {
-                width: 8.5in;
-                height: 11in;
-                margin: 0;
-                padding: 0;
-            }
-          }
-          
-          .invoice-content {
-            width: 100%;
-            height: 100%;
-            position: relative;
-          }
-          
-          .header-section {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 5px;
-          }
-          .company-info {
-            font-size: 10px;
-            line-height: 1.5;
-            color: #000;
-          }
-          .company-info .company-name {
-            font-weight: bold;
-            margin-bottom: 0px;
-          }
-          .logo-container {
-            display: flex;
-            align-items: flex-start;
-            justify-content: flex-end;
-          }
-
-          .tax-invoice-title {
-            font-size: 20px;
-            color: #0D909A;
-            font-weight: 300;
-            margin: 5px 0 5px 0;
-          }
-          .three-column-section {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 18px;
-            margin-bottom: 12px;
-          }
-          .info-box h3 {
-            font-size: 10px;
-            font-weight: bold;
-            color: #000;
-            margin-bottom: 5px;
-          }
-          .info-box p {
-            font-size: 10px;
-            color: #000;
-            line-height: 1.5;
-            margin: 0;
-          }
-          .invoice-meta-box {
-            text-align: right;
-          }
-          .invoice-meta-box p {
-            margin: 1px 0;
-            font-size: 10px;
-            line-height: 1.6;
-          }
-          .invoice-meta-box strong {
-            font-weight: bold;
-          }
-          .horizontal-divider {
-            border: none;
-            border-top: 1px solid #4db8ba;
-            margin: 12px 0;
-          }
-          .shipping-section {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 12px;
-            margin: 12px 0;
-          }
-          .shipping-item {
-            font-size: 10px;
-          }
-          .shipping-item strong {
-            display: block;
-            font-weight: bold;
-            margin-bottom: 3px;
-          }
-          .table-section {
-            margin: 12px 0;
-          }
-          .table-header {
-            display: grid;
-            grid-template-columns: 1.2fr 1.8fr 0.6fr 0.8fr 0.8fr;
-            background: rgba(184, 230, 231, 0.5);
-            padding: 8px 10px;
-            font-size: 10px;
-            font-weight: bold;
-            color: #4db8ba;
-          }
-          .table-header-col {
-            text-align: left;
-          }
-          .table-header-col.qty {
-            text-align: center;
-          }
-          .table-header-col.price {
-            text-align: right;
-          }
-          .table-header-col.amount {
-            text-align: right;
-          }
-          .table-row {
-            display: grid;
-            grid-template-columns: 1.2fr 1.8fr 0.6fr 0.8fr 0.8fr;
-            padding: 6px 10px;
-            font-size: 10px;
-          }
-          .table-col {
-            text-align: left;
-          }
-          .table-col.qty {
-            text-align: center;
-          }
-          .table-col.price {
-            text-align: right;
-          }
-          .table-col.amount {
-            text-align: right;
-          }
-          .bottom-section {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 35px;
-            margin-top: 10px;
-            padding-bottom: 170px;
-            border-top: 2px dotted #e0e0e0;
-          }
-          .terms-section {
-            padding-right: 18px;
-          }
-          .terms-section h3 {
-            font-size: 10px;
-            margin-bottom: 8px;
-            margin-top: 3.5px;
-          }
-          .terms-section p {
-            font-size: 10px;
-            line-height: 1.6;
-            margin-bottom: 10px;
-            color: #000;
-          }
-          .totals-section {
-            text-align: right;
-          }
-          .totals-row {
-            display: flex;
-            justify-content: flex-end;
-            margin: 7px 0;
-            font-size: 10px;
-          }
-          .totals-label {
-            width: 130px;
-            text-align: right;
-            padding-right: 18px;
-            font-weight: bold;
-          }
-          .totals-value {
-            width: 90px;
-            text-align: right;
-          }
-          .balance-due-row {
-            margin-top: 10px;
-            padding-top: 0px;
-          }
-          .balance-due-row .totals-label {
-            font-size: 10px;
-            font-weight: bold;
-          }
-          .balance-due-row .totals-value {
-            font-size: 16px;
-            font-weight: bold;
-          }
-          .signature-line {
-            margin-top: 35px;
-            padding-top: 5px;
-            border-top: 1px solid #000;
-            width: 250px;
-            font-size: 10px;
-          }
-          .footer-section {
-            position: absolute;
-            bottom: 0.5in;
-            left: 0;
-            right: 0;
-            text-align: center;
-            font-size: 10px;
-            line-height: 1.6;
-            
-            bottom: -190px;
-          }
-          .footer-section p {
-            margin: 4px 0;
-          }
-          .footer-thank-you {
-            margin-bottom: 12px;
-          }
-          
+      <style jsx>{`
         @media print {
-          .footer-section {
-            position: fixed;
-            bottom: 0.5in;
-            left: 0.5in;
-            right: 0.5in;
+          @page {
+            size: 8.5in 11in;
+            margin: 1.27cm;
+          }
+          .page-break {
+            page-break-after: always;
           }
         }
-        
-        `}</style>
+      `}</style>
 
-        <div className="invoice-content">
-          {/* Header */}
-          <div className="header-section">
-            <div className="company-info">
-              <div className="company-name">{selectedHeader?.line1 || 'Momolato Pte Ltd'}</div>
-              <div>{selectedHeader?.line2 || '21 Tampines Street 92, #04-06'}</div>
-              <div>{selectedHeader?.line3 || 'Singapore'}</div>
-              <div>{selectedHeader?.line4 || 'finance@momolato.com'}</div>
-              <div>{selectedHeader?.line5 || 'GST Registration No. : 201319550R'}</div>
-              <div>{selectedHeader?.line6 || 'Company Registration No. UEN:'}</div>
-              <div>{selectedHeader?.line7 || '201319550R'}</div>
-            </div>
-            <div className="logo-container">
-              <Image
-                src="/assets/file_logo.png"
-                alt="Company Logo"
-                width={80}
-                height={60}
-                style={{ objectFit: 'contain' }}
-              />
-            </div>
-          </div>
-
-          {/* Tax Invoice Title */}
-          <h1 className="tax-invoice-title">Invoice</h1>
-
-          {/* Three Column Section: Bill To, Ship To, Invoice Details */}
-        <div className="three-column-section">
-          <div className="info-box">
-            <h3>BILL TO</h3>
-            <p><strong>{clientData?.client_businessName || 'N/A'}</strong></p>
-            <p style={{ maxWidth: '150px', wordWrap: 'break-word' }}>
-              {clientData?.client_billing_address || 'N/A'}
-            </p>
-          </div>
-          
-          <div className="info-box">
-            <h3>SHIP TO</h3>
-            <p><strong>{clientData?.client_businessName || 'N/A'}</strong></p>
-            <p style={{ maxWidth: '150px', wordWrap: 'break-word' }}>
-              {[clientData?.ad_streetName, clientData?.ad_country, clientData?.ad_postal]
-                .filter(Boolean)
-                .join(', ') || order.delivery_address || 'N/A'}
-            </p>
-          </div>
-
-          <div className="info-box invoice-meta-box">
-            <p><strong>INVOICE NO.</strong> {order.invoice_id}</p>
-            <p><strong>DATE</strong> {formatDate(order.delivery_date)}</p>
-            <p><strong>DUE DATE</strong> {formatDate(order.delivery_date)}</p>
-            <p><strong>TERMS</strong> Due on receipt</p>
-          </div>
-        </div>
-
-          {/* Horizontal Divider */}
-          <hr className="horizontal-divider" />
-
-          {/* Shipping Section */}
-          <div className="shipping-section">
-            <div className="shipping-item">
-              <strong>SHIP DATE</strong>
-              <span>{formatDate(order.delivery_date)}</span>
-            </div>
-            <div className="shipping-item">
-              <strong>TRACKING NO.</strong>
-              <span>{order.tracking_no}</span>
-            </div>
-          </div>
-
-          {/* Table */}
-          <div className="table-section">
-            <div className="table-header">
-              <div className="table-header-col">PRODUCT / SERVICES</div>
-              <div className="table-header-col">DESCRIPTION</div>
-              <div className="table-header-col qty">QTY</div>
-              <div className="table-header-col price">UNIT PRICE</div>
-              <div className="table-header-col amount">AMOUNT</div>
-            </div>
-
-            {order.items.map((item) => (
-              <div key={item.id} className="table-row">
-                <div className="table-col">{item.product_type || item.product_name} </div>
-                <div className="table-col">{item.product_billingName || item.product_name}</div>
-                <div className="table-col qty">{item.quantity}</div>
-                <div className="table-col price">{item.unit_price.toFixed(2)}</div>
-                <div className="table-col amount">{item.subtotal.toFixed(2)}</div>
+      {pages.map((page, pageIndex) => (
+        <div
+          key={pageIndex}
+          className={pageIndex < totalPages - 1 ? 'page-break' : ''}
+          style={{
+            width: '8.5in',
+            height: '11in',
+            padding: '0.5in',
+            backgroundColor: 'white',
+            position: 'relative',
+            fontFamily: 'Arial, sans-serif',
+            boxSizing: 'border-box',
+            marginBottom: pageIndex < totalPages - 1 ? '30px' : '0',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+          }}
+        >
+          {/* Header and billing info - only on first page */}
+          {page.showHeader && (
+            <>
+              {/* Header */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                marginBottom: '5px'
+              }}>
+                <div style={{ fontSize: '10px', lineHeight: '1.5', color: '#000' }}>
+                  {selectedHeader ? (
+                    <>
+                      {selectedHeader.line1 && <div style={{ fontWeight: 'bold' }}>{selectedHeader.line1}</div>}
+                      {selectedHeader.line2 && <div>{selectedHeader.line2}</div>}
+                      {selectedHeader.line3 && <div>{selectedHeader.line3}</div>}
+                      {selectedHeader.line4 && <div>{selectedHeader.line4}</div>}
+                      {selectedHeader.line5 && <div>{selectedHeader.line5}</div>}
+                      {selectedHeader.line6 && <div>{selectedHeader.line6}</div>}
+                      {selectedHeader.line7 && <div>{selectedHeader.line7}</div>}
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontWeight: 'bold' }}>Momolato Pte Ltd</div>
+                      <div>21 Tampines Street 92, #04-06</div>
+                      <div>Singapore</div>
+                      <div>finance@momolato.com</div>
+                      <div>GST Registration No. : 201319550R</div>
+                      <div>Company Registration No. UEN:</div>
+                      <div>201319550R</div>
+                    </>
+                  )}
+                </div>
+                <div>
+                  <Image
+                    src="/assets/file_logo.png"
+                    alt="Company Logo"
+                    width={80}
+                    height={60}
+                    style={{ objectFit: 'contain' }}
+                  />
+                </div>
               </div>
-            ))}
-          </div>
 
-          {/* Bottom Section: Terms & Totals side by side */}
-          <div className="bottom-section">
-            {/* Terms & Conditions */}
-            <div className="terms-section">
-              <h3>Terms & Conditions</h3>
-              <p>
-                We acknowledge that the above goods are received in good condition. Please inform us of any issues 
-                within 24 hours. Otherwise, kindly note no return or refunds accepted.
-              </p>
-              <p>
-                We are not liable for any damage to products once stored at your premises. Please keep frozen products 
-                (gelato and / or popsicles) frozen at -18 degree Celsius and below.
-              </p>
-              
-              {/* Signature Line */}
-              <div className="signature-line">Client&apos;s Signature & Company Stamp</div>
+              {/* Invoice Title */}
+              <h1 style={{
+                fontSize: '20px',
+                color: '#0D909A',
+                fontWeight: '300',
+                margin: '5px 0'
+              }}>
+                Invoice
+              </h1>
+
+              {/* Bill To, Ship To, Invoice Details */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr 1fr',
+                gap: '18px',
+                marginBottom: '12px'
+              }}>
+                <div>
+                  <h3 style={{ fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>BILL TO</h3>
+                  <p style={{ fontSize: '10px', margin: 0 }}><strong>{clientData?.client_businessName || 'N/A'}</strong></p>
+                  <p style={{ fontSize: '10px', margin: 0, maxWidth: '150px', wordWrap: 'break-word' }}>
+                    {clientData?.client_billing_address || 'N/A'}
+                  </p>
+                </div>
+
+                <div>
+                  <h3 style={{ fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>SHIP TO</h3>
+                  <p style={{ fontSize: '10px', margin: 0 }}><strong>{clientData?.client_businessName || 'N/A'}</strong></p>
+                  <p style={{ fontSize: '10px', margin: 0, maxWidth: '150px', wordWrap: 'break-word' }}>
+                    {[clientData?.ad_streetName, clientData?.ad_country, clientData?.ad_postal]
+                      .filter(Boolean)
+                      .join(', ') || order.delivery_address || 'N/A'}
+                  </p>
+                </div>
+
+                <div style={{ textAlign: 'right' }}>
+                  <p style={{ fontSize: '10px', margin: '1px 0' }}><strong>INVOICE NO.</strong> {order.invoice_id}</p>
+                  <p style={{ fontSize: '10px', margin: '1px 0' }}><strong>DATE</strong> {formatDate(order.delivery_date)}</p>
+                  <p style={{ fontSize: '10px', margin: '1px 0' }}><strong>DUE DATE</strong> {formatDate(order.delivery_date)}</p>
+                  <p style={{ fontSize: '10px', margin: '1px 0' }}><strong>TERMS</strong> Due on receipt</p>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <hr style={{ border: 'none', borderTop: '1px solid #4db8ba', margin: '12px 0' }} />
+
+              {/* Shipping Section */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                paddingRight: '25%',
+                margin: '12px 0'
+              }}>
+                <div style={{ fontSize: '10px' }}>
+                  <strong style={{ display: 'block', marginBottom: '3px' }}>SHIP DATE</strong>
+                  <span>{formatDate(order.delivery_date)}</span>
+                </div>
+                <div style={{ fontSize: '10px' }}>
+                  <strong style={{ display: 'block', marginBottom: '3px' }}>TRACKING NO.</strong>
+                  <span>{order.tracking_no}</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Table - only if there are items on this page */}
+          {page.items.length > 0 && (
+            <div style={{ margin: '12px 0' }}>
+              {renderTableHeader()}
+
+              {page.items.map((item) => (
+                <div key={item.id} style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1.2fr 1.8fr 0.6fr 0.8fr 0.8fr',
+                  padding: '6px 10px',
+                  fontSize: '10px'
+                }}>
+                  <div>{item.product_type || item.product_name}</div>
+                  <div>{item.product_billingName || item.product_name}</div>
+                  <div style={{ textAlign: 'center' }}>{item.quantity}</div>
+                  <div style={{ textAlign: 'right' }}>{item.unit_price.toFixed(2)}</div>
+                  <div style={{ textAlign: 'right' }}>{item.subtotal.toFixed(2)}</div>
+                </div>
+              ))}
             </div>
+          )}
 
-            {/* Totals */}
-            <div className="totals-section">
-              <div className="totals-row">
-                <div className="totals-label">SUBTOTAL</div>
-                <div className="totals-value">{subtotal.toFixed(2)}</div>
-              </div>
-              <div className="totals-row">
-                <div className="totals-label">GST {displayGstPercentage}%</div>
-                <div className="totals-value">{gst.toFixed(2)}</div>
-              </div>
-              <div className="totals-row">
-                <div className="totals-label">TOTAL</div>
-                <div className="totals-value">{order.total_amount.toFixed(2)}</div>
-              </div>
-              <div className="totals-row balance-due-row">
-                <div className="totals-label">BALANCE DUE</div>
-                <div className="totals-value">${order.total_amount.toFixed(2)}</div>
-              </div>
-            </div>
-          </div>
+          {/* Terms & Totals - only on designated page */}
+          {page.showTerms && renderTermsAndTotals()}
 
-          {/* Audit Trail — visible at bottom of invoice (synced to Xero as note) */}
-          {(order.last_modified_by_name || order.xero_invoice_id) && (
+          {/* Audit Trail — shown at bottom of last page, synced to Xero as a history note */}
+          {page.showTerms && (order.last_modified_by_name || order.xero_invoice_id) && (
             <div style={{
               marginTop: '8px',
               paddingTop: '6px',
@@ -477,7 +415,7 @@ export default function ClientInvoice({
               gap: '12px',
               fontSize: '8px',
               color: '#9ca3af',
-              fontFamily: 'inherit',
+              fontFamily: 'Arial, sans-serif',
             }}>
               {order.last_modified_by_name && order.updated_at && (
                 <span>
@@ -496,30 +434,10 @@ export default function ClientInvoice({
             </div>
           )}
 
-          {/* Footer - Fixed at bottom of page */}
-          <div className="footer-section">
-            {selectedFooter?.line1 && <p className="footer-thank-you">{selectedFooter.line1}</p>}
-            {selectedFooter?.line2 && <p>{selectedFooter.line2}</p>}
-            {selectedFooter?.line3 && <p>{selectedFooter.line3}</p>}
-            {selectedFooter?.line4 && <p>{selectedFooter.line4}</p>}
-            {selectedFooter?.line5 && <p>{selectedFooter.line5}</p>}
-            
-            {/* Fallback to default if no footer selected */}
-            {!selectedFooter && (
-              <>
-                <p className="footer-thank-you">The team at Momolato deeply appreciates your kind support.</p>
-                <p>Payment instructions:</p>
-                <p>
-                  PayNow : UEN201319550R, cheque (attention to: Momolato Pte Ltd) or bank transfer (details below)
-                </p>
-                <p>
-                  OCBC BANK | SWIFT: OCBCSGSG | Account no.: 647 886 415 001 | Momolato Pte Ltd
-                </p>
-              </>
-            )}
-          </div>
+          {/* Footer - on every page */}
+          {renderFooter()}
         </div>
-      </div>
+      ))}
     </div>
   );
 }
