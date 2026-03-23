@@ -192,7 +192,7 @@ export async function syncInvoiceToXero(
   const subtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
   const gstAmount = subtotal * (gstRate / 100);
 
-  // Build line items — no tax type (org not GST-configured in Xero)
+  // Build line items — pre-tax amounts, Xero calculates totals
   const lineItems = items.map((item) => ({
     Description: item.product_description
       ? `${item.product_name} – ${item.product_description}`
@@ -200,7 +200,7 @@ export async function syncInvoiceToXero(
     Quantity: item.quantity,
     UnitAmount: item.unit_price,
     LineAmount: item.subtotal,
-    TaxType: 'NONE',
+    TaxType: gstRate > 0 ? 'OUTPUT' : 'NONE',
   }));
 
   // Due date: invoice_due_date or 30 days from order_date
@@ -225,11 +225,8 @@ export async function syncInvoiceToXero(
     Date: order.order_date,
     DueDate: dueDate,
     Status: mapStatusToXero(order.status),
-    LineAmountTypes: 'NOTAX',
+    LineAmountTypes: 'EXCLUSIVE',
     LineItems: lineItems,
-    SubTotal: subtotal,
-    TotalTax: gstAmount,
-    Total: order.total_amount,
     CurrencyCode: 'SGD',
     Url: `${process.env.NEXT_PUBLIC_APP_URL}/admin/dashboard/order`,
     ...(order.notes ? { Reference: `${order.order_id} | ${order.notes}` } : {}),
