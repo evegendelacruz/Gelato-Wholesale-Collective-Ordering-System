@@ -192,16 +192,15 @@ export async function syncInvoiceToXero(
   const subtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
   const gstAmount = subtotal * (gstRate / 100);
 
-  // Build line items — GST-inclusive amounts to match GWC invoice
-  const gstMultiplier = 1 + gstRate / 100;
+  // Build line items — no tax type (org not GST-configured in Xero)
   const lineItems = items.map((item) => ({
     Description: item.product_description
       ? `${item.product_name} – ${item.product_description}`
       : item.product_name,
     Quantity: item.quantity,
-    UnitAmount: parseFloat((item.unit_price * gstMultiplier).toFixed(2)),
-    LineAmount: parseFloat((item.subtotal * gstMultiplier).toFixed(2)),
-    TaxType: gstRate > 0 ? 'OUTPUT' : 'NONE',
+    UnitAmount: item.unit_price,
+    LineAmount: item.subtotal,
+    TaxType: 'NONE',
   }));
 
   // Due date: invoice_due_date or 30 days from order_date
@@ -213,9 +212,10 @@ export async function syncInvoiceToXero(
   }
 
   // Audit trail: who last modified this invoice in GWC
+  const gstLine = gstRate > 0 ? ` | GST ${gstRate}%: SGD ${gstAmount.toFixed(2)} | Total incl. GST: SGD ${order.total_amount.toFixed(2)}` : '';
   const auditNote = order.last_modified_by_name
-    ? `Last modified by: ${order.last_modified_by_name} on ${new Date(order.updated_at).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })}`
-    : `Synced from GWC on ${new Date().toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })}`;
+    ? `Last modified by: ${order.last_modified_by_name} on ${new Date(order.updated_at).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })}${gstLine}`
+    : `Synced from GWC on ${new Date().toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })}${gstLine}`;
 
   const payload = {
     Type: 'ACCREC',
@@ -225,7 +225,7 @@ export async function syncInvoiceToXero(
     Date: order.order_date,
     DueDate: dueDate,
     Status: mapStatusToXero(order.status),
-    LineAmountTypes: 'INCLUSIVE',              // Amounts include GST
+    LineAmountTypes: 'NOTAX',
     LineItems: lineItems,
     SubTotal: subtotal,
     TotalTax: gstAmount,
