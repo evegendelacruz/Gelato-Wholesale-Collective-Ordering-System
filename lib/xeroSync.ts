@@ -225,7 +225,6 @@ export async function syncInvoiceToXero(
     Date: order.order_date,
     DueDate: dueDate,
     Status: mapStatusToXero(order.status),
-    LineAmountTypes: 'EXCLUSIVE',
     LineItems: lineItems,
     CurrencyCode: 'SGD',
     Url: `${process.env.NEXT_PUBLIC_APP_URL}/admin/dashboard/order`,
