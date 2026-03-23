@@ -61,26 +61,42 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * GET /api/xero/invoices?xeroInvoiceId=XXX
- * Fetch a Xero invoice by its Xero ID.
+ * GET /api/xero/invoices          — fetch all Xero invoices
+ * GET /api/xero/invoices?xeroInvoiceId=XXX — fetch single invoice
  */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const xeroInvoiceId = searchParams.get('xeroInvoiceId');
 
-    if (!xeroInvoiceId) {
-      return NextResponse.json({ error: 'xeroInvoiceId is required' }, { status: 400 });
+    // Single invoice
+    if (xeroInvoiceId) {
+      const invoice = await getXeroInvoice(xeroInvoiceId);
+      if (!invoice) {
+        return NextResponse.json({ error: 'Invoice not found in Xero' }, { status: 404 });
+      }
+      return NextResponse.json({ invoice });
     }
 
-    const invoice = await getXeroInvoice(xeroInvoiceId);
-    if (!invoice) {
-      return NextResponse.json({ error: 'Invoice not found in Xero' }, { status: 404 });
+    // All invoices — paginate through all pages (100 per page max)
+    const { xeroFetch } = await import('@/lib/xeroClient');
+    const allInvoices = [];
+    let page = 1;
+    while (true) {
+      const res = await xeroFetch(`/Invoices?order=Date DESC&pageSize=100&page=${page}`);
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Xero fetch failed: ${err}`);
+      }
+      const data = await res.json();
+      const batch = data.Invoices ?? [];
+      allInvoices.push(...batch);
+      if (batch.length < 100) break; // last page
+      page++;
     }
-
-    return NextResponse.json({ invoice });
+    return NextResponse.json({ invoices: allInvoices });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch invoice';
+    const msg = e instanceof Error ? e.message : 'Failed to fetch invoices';
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
