@@ -91,12 +91,17 @@ function XeroPageContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ syncAll: true }),
       });
-      const data: SyncResult = await res.json();
-      setSyncResult(data);
-      if (data.failed === 0) {
-        showToast('success', `${data.synced} invoice(s) synced to Xero.`);
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        showToast('error', `Sync failed: ${data.error ?? 'Unknown error'}`);
+        return;
+      }
+      const result = data as SyncResult;
+      setSyncResult(result);
+      if (result.failed === 0) {
+        showToast('success', `${result.synced} invoice(s) synced to Xero.`);
       } else {
-        showToast('error', `${data.synced} synced, ${data.failed} failed.`);
+        showToast('error', `${result.synced} synced, ${result.failed} failed.`);
       }
     } catch {
       showToast('error', 'Sync failed. Please try again.');

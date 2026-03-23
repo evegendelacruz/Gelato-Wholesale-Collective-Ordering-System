@@ -319,7 +319,7 @@ export async function syncAllPendingInvoices(): Promise<{ synced: number; failed
       client:client_user(*)
     `)
     .neq('status', 'Cancelled')
-    .or('xero_invoice_id.is.null,xero_synced_at.lt.updated_at');
+    .is('xero_invoice_id', null);
 
   if (error) throw error;
 
