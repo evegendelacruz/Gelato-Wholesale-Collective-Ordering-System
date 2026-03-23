@@ -47,6 +47,8 @@ interface Order {
   ad_streetName?: string;
   ad_country?: string;
   ad_postal?: string;
+  xero_invoice_id?: string;
+  xero_synced_at?: string;
 }
 
 interface SupabaseOrderResponse {
@@ -220,6 +222,7 @@ export default function OrderPage() {
   const [syncingToXero, setSyncingToXero] = useState(false);
   const [xeroSyncMessage, setXeroSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncingRowXero, setSyncingRowXero] = useState<Record<number, boolean>>({});
+  const [xeroInvoiceMap, setXeroInvoiceMap] = useState<Record<string, { Status: string; AmountDue: number; AmountPaid: number }>>({});
 
   // Edit Invoice state
   const [showEditInvoiceModal, setShowEditInvoiceModal] = useState(false);
@@ -281,6 +284,29 @@ export default function OrderPage() {
     [orderId]: !prev[orderId]
   }));
 };
+
+// Load Xero invoices and build a map keyed by InvoiceID (silently skip if not connected)
+useEffect(() => {
+  const loadXeroStatuses = async () => {
+    try {
+      const res = await fetch('/api/xero/invoices');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.invoices) {
+        const map: Record<string, { Status: string; AmountDue: number; AmountPaid: number }> = {};
+        for (const inv of data.invoices) {
+          if (inv.InvoiceID) {
+            map[inv.InvoiceID] = { Status: inv.Status, AmountDue: inv.AmountDue ?? 0, AmountPaid: inv.AmountPaid ?? 0 };
+          }
+        }
+        setXeroInvoiceMap(map);
+      }
+    } catch {
+      // Xero not connected — ignore
+    }
+  };
+  loadXeroStatuses();
+}, []);
 
 // Load default GST from localStorage on mount
 useEffect(() => {
@@ -1749,6 +1775,13 @@ const handleDelete = async () => {
             : o
         )
       );
+      // Update xero status map with the newly synced invoice status (DRAFT by default until Xero processes)
+      if (data.xeroInvoiceId) {
+        setXeroInvoiceMap(prev => ({
+          ...prev,
+          [data.xeroInvoiceId]: { Status: 'DRAFT', AmountDue: order.total_amount, AmountPaid: 0 }
+        }));
+      }
     } catch (e) {
       alert(`Xero sync failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
     } finally {
@@ -3201,6 +3234,20 @@ const handleViewInvoice = async (order) => {
                           </div>
                         </td>
                         <td className="py-3 px-2 w-[70px]">
+                          {/* Xero payment status badge — auto shown when synced */}
+                          {order.xero_invoice_id && xeroInvoiceMap[order.xero_invoice_id] && (() => {
+                            const xs = xeroInvoiceMap[order.xero_invoice_id];
+                            const color =
+                              xs.Status === 'PAID' ? 'bg-green-100 text-green-700' :
+                              xs.Status === 'AUTHORISED' ? 'bg-blue-100 text-blue-700' :
+                              xs.Status === 'VOIDED' ? 'bg-red-100 text-red-600' :
+                              'bg-gray-100 text-gray-500';
+                            return (
+                              <div className={`text-xs font-semibold px-1 py-0.5 rounded mb-1 text-center ${color}`}>
+                                {xs.Status === 'AUTHORISED' ? 'APPROVED' : xs.Status}
+                              </div>
+                            );
+                          })()}
                           <button
                             onClick={() => handleSyncRowToXero(order)}
                             disabled={syncingRowXero[order.id]}
