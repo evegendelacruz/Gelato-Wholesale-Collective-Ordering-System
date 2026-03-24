@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { X, Plus, Trash2, Check, Search } from 'lucide-react';
+import { X, Plus, Trash2, Check, Search, ChevronDown, ChevronUp } from 'lucide-react';
 import supabase from '@/lib/client';
 import {
   generateNextBbdCode,
@@ -93,6 +93,9 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
   const [products, setProducts] = useState<Product[]>([]);
   const [showProductPicker, setShowProductPicker] = useState<number | null>(null);
   const [productPickerSearch, setProductPickerSearch] = useState('');
+
+  // Collapsible items state
+  const [collapsedItems, setCollapsedItems] = useState<Set<number>>(new Set());
 
   // Fetch products from product_list
   const fetchProducts = async () => {
@@ -190,6 +193,7 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
   ]);
 
   const handleAddItem = () => {
+    const newIndex = orderItems.length;
     setOrderItems([
       ...orderItems,
       {
@@ -220,6 +224,32 @@ export default function CreateOnlineOrderModal({ isOpen, onClose, onSuccess }: C
         sticker_gpbn_code: null
       }
     ]);
+    // Ensure new item is expanded
+    setCollapsedItems(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(newIndex);
+      return newSet;
+    });
+  };
+
+  const toggleItemCollapse = (index: number) => {
+    setCollapsedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(index)) {
+        newSet.delete(index);
+      } else {
+        newSet.add(index);
+      }
+      return newSet;
+    });
+  };
+
+  const collapseAllItems = () => {
+    setCollapsedItems(new Set(orderItems.map((_, i) => i)));
+  };
+
+  const expandAllItems = () => {
+    setCollapsedItems(new Set());
   };
 
   // Handle selecting a product from the product list
@@ -875,6 +905,7 @@ const handleRemoveGelatoType = async (option: string) => {
     ]);
     setShowProductPicker(null);
     setProductPickerSearch('');
+    setCollapsedItems(new Set());
   };
 
   const handleClose = () => {
@@ -916,45 +947,39 @@ const handleRemoveGelatoType = async (option: string) => {
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-      <div className="bg-white rounded-lg w-full max-w-5xl mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
+      <div className="bg-white rounded-lg w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="px-6 py-4 flex-shrink-0 border-b border-gray-200">
           {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-2xl font-bold" style={{ color: '#5C2E1F' }}>
-                Create Online Order
-              </h2>
-              <p className="text-gray-500 mt-1">
-                {step === 1 && 'Enter customer details'}
-                {step === 2 && 'Add products to the order'}
-              </p>
-            </div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xl font-bold" style={{ color: '#5C2E1F' }}>
+              Create Online Order
+            </h2>
             <button onClick={handleClose} disabled={loading} className="text-gray-400 hover:text-gray-600 disabled:cursor-not-allowed">
-              <X size={24} />
+              <X size={22} />
             </button>
           </div>
-
-          {/* Progress Steps */}
-          <div className="flex items-center justify-center mb-6">
-            <div className="flex items-center gap-4">
+          {/* Centered Progress Steps */}
+          <div className="flex items-center justify-center">
+            <div className="flex items-center gap-3">
               <div className={`flex items-center gap-2 ${step >= 1 ? 'text-orange-600' : 'text-gray-400'}`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step >= 1 ? 'bg-orange-600 text-white' : 'bg-gray-300'}`}>
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-medium ${step >= 1 ? 'bg-orange-600 text-white' : 'bg-gray-300'}`}>
                   1
                 </div>
                 <span className="text-sm font-medium">Customer</span>
               </div>
-              <div className={`w-16 h-0.5 ${step >= 2 ? 'bg-orange-600' : 'bg-gray-300'}`}></div>
+              <div className={`w-12 h-0.5 ${step >= 2 ? 'bg-orange-600' : 'bg-gray-300'}`}></div>
               <div className={`flex items-center gap-2 ${step >= 2 ? 'text-orange-600' : 'text-gray-400'}`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step >= 2 ? 'bg-orange-600 text-white' : 'bg-gray-300'}`}>
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-medium ${step >= 2 ? 'bg-orange-600 text-white' : 'bg-gray-300'}`}>
                   2
                 </div>
-                <span className="text-sm font-medium">Product Details</span>
+                <span className="text-sm font-medium">Products</span>
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Content */}
-          <div>
+        {/* Scrollable Content Area */}
+        <div className="flex-1 overflow-y-auto px-6">
           {step === 1 ? (
             <div className="space-y-4">
               <div>
@@ -1085,56 +1110,92 @@ const handleRemoveGelatoType = async (option: string) => {
                 />
               </div>
 
-              {/* Buttons for Step 1 */}
-              <div className="flex justify-end gap-3 mt-6">
-                <button
-                  onClick={handleClose}
-                  className="px-8 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
-                  disabled={loading}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleProceed}
-                  disabled={loading}
-                  className="px-8 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#FF5722' }}
-                >
-                  Next
-                </button>
-              </div>
             </div>
           ) : (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-700">Order Items</h3>
-                <button
-                  onClick={handleAddItem}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-                  disabled={loading}
-                >
-                  <Plus size={20} />
-                  <span>Add More Item</span>
-                </button>
-              </div>
-
-              
-              {orderItems.map((item, index) => (
-                <div key={index} className="border border-gray-300 rounded-lg p-4 bg-gray-50">
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-medium text-gray-700">Item {index + 1}</h4>
+            <div className="space-y-4 pb-4">
+              {/* Sticky Header with Add Button */}
+              <div className="sticky top-0 z-10 bg-white py-3 border-b border-gray-200 shadow-sm -mx-6 px-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <h3 className="text-lg font-semibold text-gray-700">Order Items ({orderItems.length})</h3>
                     {orderItems.length > 1 && (
-                      <button
-                        onClick={() => handleRemoveItem(index)}
-                        className="text-red-500 hover:text-red-700"
-                        disabled={loading}
-                      >
-                        <Trash2 size={20} />
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={collapseAllItems}
+                          className="text-xs px-2 py-1 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+                          type="button"
+                        >
+                          Collapse All
+                        </button>
+                        <button
+                          onClick={expandAllItems}
+                          className="text-xs px-2 py-1 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+                          type="button"
+                        >
+                          Expand All
+                        </button>
+                      </div>
                     )}
                   </div>
+                  <button
+                    onClick={handleAddItem}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                    disabled={loading}
+                  >
+                    <Plus size={20} />
+                    <span>Add More Item</span>
+                  </button>
+                </div>
+              </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-3">
+              {orderItems.map((item, index) => (
+                <div key={index} className="border border-gray-300 rounded-lg bg-gray-50 overflow-hidden">
+                  {/* Collapsible Header */}
+                  <div
+                    className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-100 transition-colors"
+                    onClick={() => toggleItemCollapse(index)}
+                  >
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <button
+                        type="button"
+                        className="text-gray-500 hover:text-gray-700 flex-shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleItemCollapse(index);
+                        }}
+                      >
+                        {collapsedItems.has(index) ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                      </button>
+                      <h4 className="font-medium text-gray-700 text-sm flex-shrink-0">Item {index + 1}</h4>
+                      {/* Summary when collapsed */}
+                      {collapsedItems.has(index) && item.product_name && (
+                        <div className="flex items-center gap-1 text-xs text-gray-600 truncate">
+                          <span className="font-medium truncate">{item.product_name}</span>
+                          <span className="text-gray-400">|</span>
+                          <span>Qty: {item.quantity}</span>
+                          <span className="text-gray-400">|</span>
+                          <span className="text-orange-600 font-medium">${(item.product_price * item.quantity).toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {orderItems.length > 1 && (
+                        <button
+                          onClick={() => handleRemoveItem(index)}
+                          className="text-red-500 hover:text-red-700 p-1"
+                          disabled={loading}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Collapsible Content */}
+                  {!collapsedItems.has(index) && (
+                  <div className="p-3 pt-0 border-t border-gray-200">
+                  <div className="grid grid-cols-2 gap-2">
                     <div className="col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                         Product Name <span className="text-red-500">*</span>
@@ -1396,29 +1457,54 @@ const handleRemoveGelatoType = async (option: string) => {
                         </span>
                       </div>
                     )}
+                  </div>
+                  )}
                 </div>
               ))}
-              {/* Buttons for Step 2 */}
-              <div className="flex justify-between gap-3 mt-6">
-                <button
-                  onClick={() => setStep(1)}
-                  className="px-8 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
-                  disabled={loading}
-                >
-                  Back
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={loading}
-                  className="px-8 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#FF5722' }}
-                >
-                  {loading ? 'Creating Order...' : 'Create Order'}
-                </button>
               </div>
             </div>
           )}
-          </div>
+        </div>
+
+        {/* Footer Buttons */}
+        <div className="flex-shrink-0 border-t border-gray-200 bg-white p-4 px-6">
+          {step === 1 ? (
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={handleClose}
+                className="px-8 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
+                disabled={loading}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleProceed}
+                disabled={loading}
+                className="px-8 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: '#FF5722' }}
+              >
+                Next
+              </button>
+            </div>
+          ) : (
+            <div className="flex justify-between gap-3">
+              <button
+                onClick={() => setStep(1)}
+                className="px-8 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors"
+                disabled={loading}
+              >
+                Back
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="px-8 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: '#FF5722' }}
+              >
+                {loading ? 'Creating Order...' : 'Create Order'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
