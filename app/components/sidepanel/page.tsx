@@ -13,6 +13,7 @@ import {
   ChevronUp,
   ChevronLeft,
   ChevronRight,
+  Link as LinkIcon,
 } from 'lucide-react';
 import supabase from '@/lib/client';
 
@@ -149,6 +150,12 @@ export default function Sidepanel() {
         { id: 'product-analysis-customer', label: 'Product Analysis (Client)', path: '/admin/dashboard/report/productAnalysisClient' },
         { id: 'delivery-list', label: 'Delivery Report', path: '/admin/dashboard/report/deliveryList' }
       ]
+    },
+    {
+      id: 'xero',
+      label: 'Xero Integration',
+      icon: LinkIcon,
+      path: '/admin/dashboard/xero'
     }
   ];
 

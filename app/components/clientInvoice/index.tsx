@@ -19,11 +19,19 @@ interface Order {
   tracking_no: string;
   order_date: string;
   delivery_date: string;
+  invoice_due_date?: string;
   delivery_address: string;
   total_amount: number;
   status: string;
   notes: string | null;
   items: OrderItem[];
+  // Audit trail
+  last_modified_by?: string;
+  last_modified_by_name?: string;
+  updated_at?: string;
+  // Xero sync
+  xero_invoice_id?: string;
+  xero_synced_at?: string;
 }
 
 interface ClientData {
@@ -395,6 +403,36 @@ export default function ClientInvoice({
 
           {/* Terms & Totals - only on designated page */}
           {page.showTerms && renderTermsAndTotals()}
+
+          {/* Audit Trail — shown at bottom of last page, synced to Xero as a history note */}
+          {page.showTerms && (order.last_modified_by_name || order.xero_invoice_id) && (
+            <div style={{
+              marginTop: '8px',
+              paddingTop: '6px',
+              borderTop: '1px solid #e5e7eb',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '12px',
+              fontSize: '8px',
+              color: '#9ca3af',
+              fontFamily: 'Arial, sans-serif',
+            }}>
+              {order.last_modified_by_name && order.updated_at && (
+                <span>
+                  Last modified by: <strong>{order.last_modified_by_name}</strong>{' '}
+                  on {new Date(order.updated_at).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })}
+                </span>
+              )}
+              {order.xero_invoice_id && (
+                <span>
+                  Xero ID: {order.xero_invoice_id}
+                  {order.xero_synced_at && (
+                    <> · Synced: {new Date(order.xero_synced_at).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })}</>
+                  )}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Footer - on every page */}
           {renderFooter()}
