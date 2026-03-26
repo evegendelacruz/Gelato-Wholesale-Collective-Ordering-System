@@ -132,6 +132,7 @@ export default function ProductPage() {
     client_id: string;
     client_auth_id: string;
     client_businessName: string;
+    client_operationName: string;
     client_person_incharge: string;
   }>>([]);
   const [selectedClients, setSelectedClients] = useState<Set<string>>(new Set());
@@ -257,7 +258,7 @@ export default function ProductPage() {
     try {
       const { data, error } = await supabase
         .from('client_user')
-        .select('client_id, client_auth_id, client_businessName, client_person_incharge')
+        .select('client_id, client_auth_id, client_businessName, client_operationName, client_person_incharge')
         .order('client_businessName', { ascending: true });
 
       if (error) throw error;
@@ -2735,10 +2736,10 @@ export default function ProductPage() {
                         ) : (
                           <div className="divide-y divide-gray-200">
                             {availableClients
-                              .filter(client => 
-                                client.client_businessName.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
-                                client.client_person_incharge.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
-                                client.client_id.toLowerCase().includes(clientSearchQuery.toLowerCase())
+                              .filter(client =>
+                                client.client_businessName?.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
+                                client.client_operationName?.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
+                                client.client_person_incharge?.toLowerCase().includes(clientSearchQuery.toLowerCase())
                               )
                               .map((client) => (
                                 <div key={client.client_auth_id} className="flex items-center gap-3 p-3 hover:bg-gray-50">
@@ -2751,7 +2752,7 @@ export default function ProductPage() {
                                   />
                                   <div className="flex-1">
                                     <p className="text-sm font-medium text-gray-900">{client.client_businessName}</p>
-                                    <p className="text-xs text-gray-500">{client.client_id} • {client.client_person_incharge}</p>
+                                    <p className="text-xs text-gray-500">{client.client_operationName || 'No operation name'} • {client.client_person_incharge}</p>
                                   </div>
                                 </div>
                               ))}
