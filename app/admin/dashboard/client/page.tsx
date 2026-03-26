@@ -864,6 +864,31 @@ const handleAddClientProducts = async () => {
       // Check for existing email and generate suggestion (debounced)
       checkEmailAndSuggest(value);
     }
+    // Handle business address fields - auto-copy to billing address if billing is empty or matches previous business value
+    else if (name === 'ad_streetName') {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value,
+        // Auto-copy to billing if billing is empty or matches previous business value
+        ad_billing_streetName: (!prev.ad_billing_streetName || prev.ad_billing_streetName === prev.ad_streetName) ? value : prev.ad_billing_streetName
+      }));
+    }
+    else if (name === 'ad_country') {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value,
+        // Auto-copy to billing if billing is empty or matches previous business value
+        ad_billing_country: (!prev.ad_billing_country || prev.ad_billing_country === prev.ad_country) ? value : prev.ad_billing_country
+      }));
+    }
+    else if (name === 'ad_postal') {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value,
+        // Auto-copy to billing if billing is empty or matches previous business value
+        ad_billing_postal: (!prev.ad_billing_postal || prev.ad_billing_postal === prev.ad_postal) ? value : prev.ad_billing_postal
+      }));
+    }
     else {
       setFormData(prev => ({
         ...prev,
@@ -2807,11 +2832,19 @@ const handleUpdate = async () => {
                     </div>
                   </div>
 
-                  <div className="flex justify-center mt-6">
+                  <div className="flex justify-center gap-4 mt-6">
+                    <button
+                      onClick={() => setModalStep(1)}
+                      disabled={loading}
+                      className="px-12 py-2 border border-gray-300 rounded font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ color: '#5C2E1F' }}
+                    >
+                      Back
+                    </button>
                     <button
                       onClick={isEditMode ? handleUpdate : handleSubmit}
                       disabled={loading}
-                      className="px-24 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-12 py-2 text-white rounded font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{ backgroundColor: '#FF5722' }}
                     >
                       {loading ? (isEditMode ? 'Updating...' : 'Adding Client...') : (isEditMode ? 'Update Client' : 'Add New Client')}
