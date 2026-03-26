@@ -120,6 +120,9 @@ export default function ClientAccountPage() {
     business: '',
     person: ''
   });
+  const [emailSuggestion, setEmailSuggestion] = useState<string | null>(null);
+  const [showEmailSuggestion, setShowEmailSuggestion] = useState(false);
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
 
   // Form data state
   const [formData, setFormData] = useState(() => ({
@@ -721,6 +724,93 @@ const handleAddClientProducts = async () => {
     }
   };
 
+  // Check if email exists and generate suggestion
+  const checkEmailAndSuggest = async (email: string) => {
+    if (!email || !email.includes('@')) {
+      setEmailSuggestion(null);
+      setShowEmailSuggestion(false);
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setEmailSuggestion(null);
+      setShowEmailSuggestion(false);
+      return;
+    }
+
+    setIsCheckingEmail(true);
+    try {
+      // Check if this exact email exists
+      const { data: existingEmails, error } = await supabase
+        .from('client_user')
+        .select('client_email')
+        .ilike('client_email', `${email.split('@')[0]}%@${email.split('@')[1]}`);
+
+      if (error) {
+        console.error('Error checking email:', error);
+        setEmailSuggestion(null);
+        setShowEmailSuggestion(false);
+        return;
+      }
+
+      // Check if the exact email exists
+      const exactMatch = existingEmails?.find(
+        (e) => e.client_email.toLowerCase() === email.toLowerCase()
+      );
+
+      if (exactMatch) {
+        // Email exists, generate suggestion with next available number
+        const [localPart, domain] = email.split('@');
+
+        // Find all emails that match the pattern (with or without numbers)
+        const baseLocalPart = localPart.replace(/\d+$/, ''); // Remove trailing numbers
+        const matchingEmails = existingEmails?.filter((e) => {
+          const existingLocal = e.client_email.split('@')[0];
+          const existingBase = existingLocal.replace(/\d+$/, '');
+          return existingBase.toLowerCase() === baseLocalPart.toLowerCase() &&
+                 e.client_email.split('@')[1].toLowerCase() === domain.toLowerCase();
+        }) || [];
+
+        // Find the highest number used
+        let maxNumber = 0;
+        matchingEmails.forEach((e) => {
+          const existingLocal = e.client_email.split('@')[0];
+          const match = existingLocal.match(/(\d+)$/);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (num > maxNumber) maxNumber = num;
+          }
+        });
+
+        // Suggest the next number
+        const suggestedEmail = `${baseLocalPart}${maxNumber + 1}@${domain}`;
+        setEmailSuggestion(suggestedEmail);
+        setShowEmailSuggestion(true);
+      } else {
+        setEmailSuggestion(null);
+        setShowEmailSuggestion(false);
+      }
+    } catch (error) {
+      console.error('Error checking email:', error);
+      setEmailSuggestion(null);
+      setShowEmailSuggestion(false);
+    } finally {
+      setIsCheckingEmail(false);
+    }
+  };
+
+  const handleEmailSuggestionClick = () => {
+    if (emailSuggestion) {
+      setFormData(prev => ({
+        ...prev,
+        client_email: emailSuggestion
+      }));
+      setEmailSuggestion(null);
+      setShowEmailSuggestion(false);
+    }
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     
@@ -764,7 +854,16 @@ const handleAddClientProducts = async () => {
         ...prev,
         [name]: limitedDigits
       }));
-    } 
+    }
+    // Handle email field with suggestion check
+    else if (name === 'client_email') {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+      // Check for existing email and generate suggestion (debounced)
+      checkEmailAndSuggest(value);
+    }
     else {
       setFormData(prev => ({
         ...prev,
@@ -1067,6 +1166,9 @@ const handleAddClientProducts = async () => {
     setSelectedClient(null);
     setAcraFile(null);
     setMessage({ type: '', text: '' });
+    // Reset email suggestion states
+    setEmailSuggestion(null);
+    setShowEmailSuggestion(false);
     // Reset form
     setFormData({
       client_id: '',
@@ -2566,18 +2668,50 @@ const handleUpdate = async () => {
                         <p className="text-red-500 text-xs mt-1">{contactErrors.person}</p>
                       )}
                     </div>
-                    <div>
+                    <div className="relative">
                       <label className="block text-sm font-medium mb-1" style={{ color: '#5C2E1F' }}>
                         Email <span className="text-red-500">*</span>
                       </label>
-                      <input
-                        type="email"
-                        name="client_email"
-                        value={formData.client_email}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        required
-                      />
+                      <div className="relative">
+                        <input
+                          type="email"
+                          name="client_email"
+                          value={formData.client_email}
+                          onChange={handleInputChange}
+                          onBlur={() => {
+                            // Delay hiding to allow click on suggestion
+                            setTimeout(() => setShowEmailSuggestion(false), 200);
+                          }}
+                          onFocus={() => {
+                            if (emailSuggestion) setShowEmailSuggestion(true);
+                          }}
+                          className={`w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 ${
+                            showEmailSuggestion ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-orange-500'
+                          }`}
+                          required
+                        />
+                        {isCheckingEmail && (
+                          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                            <div className="animate-spin h-4 w-4 border-2 border-orange-500 border-t-transparent rounded-full"></div>
+                          </div>
+                        )}
+                      </div>
+                      {/* Email Suggestion Dropdown */}
+                      {showEmailSuggestion && emailSuggestion && (
+                        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg overflow-hidden">
+                          <div className="px-3 py-2 text-xs text-yellow-700 bg-yellow-50 border-b border-yellow-200 rounded-t-md">
+                            This email already exists. Try this suggestion:
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleEmailSuggestionClick}
+                            className="w-full px-3 py-2 text-left hover:bg-green-50 focus:bg-green-50 focus:outline-none transition-colors"
+                          >
+                            <span className="block text-green-600 font-medium text-sm break-all overflow-hidden">{emailSuggestion}</span>
+                            <span className="block text-xs text-gray-500 mt-1">(Click to use)</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
 
