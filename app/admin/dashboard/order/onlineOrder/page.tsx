@@ -1961,7 +1961,7 @@ export default function OnlineOrderPage() {
 
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
-      let footerY = 275;
+      let footerY = 268; // Footer positioned within bottom margin
       const lineHeight = 4;
 
       const lines = [
@@ -2062,35 +2062,78 @@ export default function OnlineOrderPage() {
       doc.text("PRICE", 168, tableStartY + 6, { align: "right" });
       doc.text("AMOUNT", 185, tableStartY + 5, { align: "right" });
 
+      // Page dimensions for pagination
+      const footerY = 268; // Footer positioned within bottom margin
+      const maxContentY = footerY - 2; // Content stops at Y=266 (2mm buffer)
+      const termsBaseHeight = 58; // Height for terms, totals, signature
+      const lineHeight = 4;
+      const continuationPageStartY = 20;
+
       doc.setFont("helvetica", "normal");
       doc.setTextColor(0, 0, 0);
       let yPos = tableStartY + 13;
 
-      orderItems.forEach((item) => {
+      // Render items with page break handling
+      orderItems.forEach((item, idx) => {
         const productText = item.product_type || item.product_name;
         doc.setFont("helvetica", "bold");
         const productLines = doc.splitTextToSize(productText, 30);
         const descriptionText = item.product_name;
-        doc.text(productLines, 22, yPos);
-
-        doc.setFont("helvetica", "normal");
         const descLines = doc.splitTextToSize(descriptionText, 50);
+        const maxLines = Math.max(productLines.length, descLines.length);
+        const itemHeight = maxLines * 4 + 1;
+
+        // Check if item fits on current page
+        // For last item, also check if terms will fit
+        const isLastItem = idx === orderItems.length - 1;
+        const extraSpaceNeeded = isLastItem ? termsBaseHeight : 0;
+
+        if (yPos + itemHeight + extraSpaceNeeded > maxContentY && idx > 0) {
+          // Need new page
+          const selectedFooter = footerOptions.find((f) => f.id === selectedFooterId);
+          renderFooterInPDF(doc, selectedFooter);
+          doc.addPage();
+
+          // Render table header on new page
+          doc.setFillColor(184, 230, 231);
+          doc.rect(20, continuationPageStartY, 170, 8, "F");
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(13, 144, 154);
+          doc.setFontSize(9);
+          doc.text("PRODUCT /", 22, continuationPageStartY + 3);
+          doc.text("SERVICES", 22, continuationPageStartY + 6);
+          doc.text("DESCRIPTION", 60, continuationPageStartY + 5);
+          doc.text("QTY", 150, continuationPageStartY + 5, { align: "center" });
+          doc.text("UNIT", 168, continuationPageStartY + 3, { align: "right" });
+          doc.text("PRICE", 168, continuationPageStartY + 6, { align: "right" });
+          doc.text("AMOUNT", 185, continuationPageStartY + 5, { align: "right" });
+
+          yPos = continuationPageStartY + 13;
+          doc.setTextColor(0, 0, 0);
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.text(productLines, 22, yPos);
+        doc.setFont("helvetica", "normal");
         doc.text(descLines, 60, yPos);
 
-        const maxLines = Math.max(productLines.length, descLines.length);
         const centerY = yPos + ((maxLines - 1) * 4) / 2;
-
         doc.text(item.quantity.toString(), 150, centerY, { align: "center" });
-        doc.text(item.product_price.toFixed(2), 168, centerY, {
-          align: "right",
-        });
-        doc.text((item.product_cost * item.quantity).toFixed(2), 185, centerY, {
-          align: "right",
-        });
+        doc.text(item.product_price.toFixed(2), 168, centerY, { align: "right" });
+        doc.text((item.product_cost * item.quantity).toFixed(2), 185, centerY, { align: "right" });
 
-        yPos += maxLines * 4 + 1;
+        yPos += itemHeight;
       });
 
+      // Check if terms fit on current page
+      if (yPos + termsBaseHeight > maxContentY) {
+        const selectedFooter = footerOptions.find((f) => f.id === selectedFooterId);
+        renderFooterInPDF(doc, selectedFooter);
+        doc.addPage();
+        yPos = continuationPageStartY;
+      }
+
+      // Dotted line separator
       doc.setDrawColor(224, 224, 224);
       doc.setLineWidth(0.2);
       for (let i = 20; i < 190; i += 1.5) {
@@ -2099,8 +2142,8 @@ export default function OnlineOrderPage() {
 
       yPos += 7;
       doc.setFont("helvetica", "normal");
-      doc.text("Terms & Conditions", 20, yPos);
       doc.setFontSize(10);
+      doc.text("Terms & Conditions", 20, yPos);
       const terms1 = doc.splitTextToSize(
         "We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.",
         70,
@@ -2117,31 +2160,65 @@ export default function OnlineOrderPage() {
       doc.line(20, yPos + 50, 85, yPos + 50);
       doc.text("Client's Signature & Company Stamp", 20, yPos + 55);
 
+      // Totals on right side
       const totalsLabelX = 100;
       const totalsValueX = 185;
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
       doc.text("SUBTOTAL", totalsLabelX, yPos + 5);
       doc.text(subtotal.toFixed(2), totalsValueX, yPos + 5, { align: "right" });
-
       doc.text(`GST ${currentInvoiceGstPercent}%`, totalsLabelX, yPos + 10);
       doc.text(gst.toFixed(2), totalsValueX, yPos + 10, { align: "right" });
-
       doc.text("TOTAL", totalsLabelX, yPos + 15);
       doc.text(total.toFixed(2), totalsValueX, yPos + 15, { align: "right" });
-
       doc.text("BALANCE DUE", totalsLabelX, yPos + 23);
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
-      doc.text(`$${total.toFixed(2)}`, totalsValueX, yPos + 23, {
-        align: "right",
-      });
+      doc.text(`$${total.toFixed(2)}`, totalsValueX, yPos + 23, { align: "right" });
 
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      const selectedFooter = footerOptions.find(
-        (f) => f.id === selectedFooterId,
-      );
+      // Notes Section
+      if (order.notes) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        const notesWidth = 170;
+        const notesLines = doc.splitTextToSize(order.notes, notesWidth);
+        const notesStartY = yPos + 62;
+        const spaceForNotes = maxContentY - notesStartY - 2;
+        const maxLinesOnPage = Math.max(0, Math.floor(spaceForNotes / lineHeight));
+
+        if (notesLines.length <= maxLinesOnPage) {
+          doc.setFont("helvetica", "bold");
+          doc.text("Notes:", 20, notesStartY);
+          doc.setFont("helvetica", "normal");
+          doc.text(notesLines, 20, notesStartY + 5);
+        } else {
+          // Render what fits on current page
+          const firstPageLines = notesLines.slice(0, Math.max(1, maxLinesOnPage));
+          doc.setFont("helvetica", "bold");
+          doc.text("Notes:", 20, notesStartY);
+          doc.setFont("helvetica", "normal");
+          doc.text(firstPageLines, 20, notesStartY + 5);
+
+          const selectedFooter = footerOptions.find((f) => f.id === selectedFooterId);
+          renderFooterInPDF(doc, selectedFooter);
+
+          // Render remaining on new pages
+          let remainingLines = notesLines.slice(Math.max(1, maxLinesOnPage));
+          const linesPerPage = Math.floor((maxContentY - continuationPageStartY) / lineHeight);
+
+          while (remainingLines.length > 0) {
+            doc.addPage();
+            const pageLines = remainingLines.slice(0, linesPerPage);
+            remainingLines = remainingLines.slice(linesPerPage);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+            doc.setTextColor(0, 0, 0);
+            doc.text(pageLines, 20, continuationPageStartY);
+            renderFooterInPDF(doc, selectedFooter);
+          }
+          return;
+        }
+      }
+
+      const selectedFooter = footerOptions.find((f) => f.id === selectedFooterId);
       renderFooterInPDF(doc, selectedFooter);
     };
 
@@ -2304,20 +2381,181 @@ export default function OnlineOrderPage() {
               const itemsFirstPage = baseItemsFirstPage + extraFromHeader + Math.floor(extraFromFooter / 2);
               const itemsOtherPages = baseItemsOtherPages + Math.floor(extraFromFooter / 2);
 
-              // Split items into pages
-              const pages: OrderItem[][] = [];
+              // Page structure interface with notes lines for proper pagination
+              interface PageStructure {
+                items: OrderItem[];
+                showHeader: boolean;
+                showTerms: boolean;
+                notesLines?: string[]; // Notes split into lines for pagination
+                isNotesOverflow?: boolean;
+                isFirstNotesPage?: boolean;
+              }
+
+              const notesText = order.notes || '';
+
+              // Dynamic pagination with notes overflow handling for HTML preview
+              const pageContentHeight = 730; // Usable content height (leaving space for footer ~70px)
+              const headerHeight = 260; // Height of header section
+              const termsBaseHeight = 160; // Height for terms, totals, signature
+              const tableHeaderHeight = 30; // Height of table header
+              const itemRowHeight = 22; // Height per item row
+              const notesLineHeight = 16; // Approximate height per line of notes
+              const charsPerLine = 120; // Approximate characters per line
+
+              // Split notes into lines for pagination
+              const splitNotesIntoLines = (text: string): string[] => {
+                if (!text) return [];
+                const words = text.split(/\s+/);
+                const lines: string[] = [];
+                let currentLine = '';
+                for (const word of words) {
+                  if ((currentLine + ' ' + word).trim().length <= charsPerLine) {
+                    currentLine = (currentLine + ' ' + word).trim();
+                  } else {
+                    if (currentLine) lines.push(currentLine);
+                    currentLine = word;
+                  }
+                }
+                if (currentLine) lines.push(currentLine);
+                return lines;
+              };
+
+              const allNotesLines = splitNotesIntoLines(notesText);
+              const linesPerOverflowPage = Math.floor((pageContentHeight - 20) / notesLineHeight);
+
+              // Track if we've shown the "Notes:" label yet
+              let notesLabelShown = false;
+              const hasNotes = allNotesLines.length > 0;
+
+              const pages: PageStructure[] = [];
               const allItems = orderItems;
 
-              if (allItems.length === 0) {
-                pages.push([]);
-              } else if (allItems.length <= itemsFirstPage) {
-                pages.push(allItems);
+              let currentPageItems: OrderItem[] = [];
+              let currentHeight = headerHeight + tableHeaderHeight;
+              let isFirstPage = true;
+              let itemIdx = 0;
+
+              // Process all items - fit as many as possible
+              while (itemIdx < allItems.length) {
+                if (currentHeight + itemRowHeight <= pageContentHeight) {
+                  currentPageItems.push(allItems[itemIdx]);
+                  currentHeight += itemRowHeight;
+                  itemIdx++;
+                } else if (currentPageItems.length === 0) {
+                  currentPageItems.push(allItems[itemIdx]);
+                  currentHeight += itemRowHeight;
+                  itemIdx++;
+                } else {
+                  pages.push({
+                    items: currentPageItems,
+                    showHeader: isFirstPage,
+                    showTerms: false
+                  });
+                  currentPageItems = [];
+                  currentHeight = tableHeaderHeight;
+                  isFirstPage = false;
+                }
+              }
+
+              // Check if terms fit on the same page
+              const termsEndHeight = currentHeight + termsBaseHeight;
+              const termsWillFit = termsEndHeight <= pageContentHeight;
+
+              // Calculate space for notes
+              const spaceForNotesOnTermsPage = termsWillFit ? pageContentHeight - termsEndHeight - 10 : 0;
+              const maxNotesLinesOnTermsPage = Math.max(0, Math.floor(spaceForNotesOnTermsPage / notesLineHeight));
+              const firstPageNotesLines = allNotesLines.slice(0, maxNotesLinesOnTermsPage);
+              const overflowNotesLines = allNotesLines.slice(maxNotesLinesOnTermsPage);
+
+              if (termsWillFit) {
+                const showNotesLabel = hasNotes && firstPageNotesLines.length > 0;
+                if (showNotesLabel) notesLabelShown = true;
+                pages.push({
+                  items: currentPageItems,
+                  showHeader: isFirstPage,
+                  showTerms: true,
+                  notesLines: firstPageNotesLines.length > 0 ? firstPageNotesLines : undefined,
+                  isFirstNotesPage: showNotesLabel
+                });
+                // Add overflow pages for notes
+                if (overflowNotesLines.length > 0) {
+                  for (let i = 0; i < overflowNotesLines.length; i += linesPerOverflowPage) {
+                    const isFirst = !notesLabelShown && i === 0;
+                    if (isFirst) notesLabelShown = true;
+                    pages.push({
+                      items: [],
+                      showHeader: false,
+                      showTerms: false,
+                      notesLines: overflowNotesLines.slice(i, i + linesPerOverflowPage),
+                      isNotesOverflow: true,
+                      isFirstNotesPage: isFirst
+                    });
+                  }
+                }
               } else {
-                pages.push(allItems.slice(0, itemsFirstPage));
-                let remaining = allItems.slice(itemsFirstPage);
-                while (remaining.length > 0) {
-                  pages.push(remaining.slice(0, itemsOtherPages));
-                  remaining = remaining.slice(itemsOtherPages);
+                if (currentPageItems.length > 0) {
+                  pages.push({
+                    items: currentPageItems,
+                    showHeader: isFirstPage,
+                    showTerms: false
+                  });
+                }
+                // Calculate notes for separate terms page
+                const termsPageNotesSpace = pageContentHeight - termsBaseHeight - 20;
+                const maxNotesOnTermsPage = Math.max(0, Math.floor(termsPageNotesSpace / notesLineHeight));
+                const termsPageNotes = allNotesLines.slice(0, maxNotesOnTermsPage);
+                const remainingAfterTermsPage = allNotesLines.slice(maxNotesOnTermsPage);
+
+                const showNotesLabel = hasNotes && termsPageNotes.length > 0;
+                if (showNotesLabel) notesLabelShown = true;
+                pages.push({
+                  items: [],
+                  showHeader: false,
+                  showTerms: true,
+                  notesLines: termsPageNotes.length > 0 ? termsPageNotes : undefined,
+                  isFirstNotesPage: showNotesLabel
+                });
+
+                // Add overflow pages for remaining notes
+                if (remainingAfterTermsPage.length > 0) {
+                  for (let i = 0; i < remainingAfterTermsPage.length; i += linesPerOverflowPage) {
+                    const isFirst = !notesLabelShown && i === 0;
+                    if (isFirst) notesLabelShown = true;
+                    pages.push({
+                      items: [],
+                      showHeader: false,
+                      showTerms: false,
+                      notesLines: remainingAfterTermsPage.slice(i, i + linesPerOverflowPage),
+                      isNotesOverflow: true,
+                      isFirstNotesPage: isFirst
+                    });
+                  }
+                }
+              }
+
+              // Handle no items case
+              if (allItems.length === 0 && pages.length === 0) {
+                const emptyPageNotesSpace = pageContentHeight - headerHeight - termsBaseHeight - 20;
+                const maxNotesOnEmpty = Math.max(0, Math.floor(emptyPageNotesSpace / notesLineHeight));
+                pages.push({
+                  items: [],
+                  showHeader: true,
+                  showTerms: true,
+                  notesLines: allNotesLines.slice(0, maxNotesOnEmpty),
+                  isFirstNotesPage: allNotesLines.length > 0
+                });
+                const remainingNotes = allNotesLines.slice(maxNotesOnEmpty);
+                if (remainingNotes.length > 0) {
+                  for (let i = 0; i < remainingNotes.length; i += linesPerOverflowPage) {
+                    pages.push({
+                      items: [],
+                      showHeader: false,
+                      showTerms: false,
+                      notesLines: remainingNotes.slice(i, i + linesPerOverflowPage),
+                      isNotesOverflow: true,
+                      isFirstNotesPage: false
+                    });
+                  }
                 }
               }
 
@@ -2349,7 +2587,7 @@ export default function OnlineOrderPage() {
 
               return (
                 <div className="space-y-8">
-                  {pages.map((pageItems, pageIndex) => (
+                  {pages.map((page, pageIndex) => (
                     <div
                       key={pageIndex}
                       className="bg-white shadow-lg mx-auto"
@@ -2364,7 +2602,7 @@ export default function OnlineOrderPage() {
                       }}
                     >
                       {/* First page - full header */}
-                      {pageIndex === 0 && (
+                      {page.showHeader && (
                         <>
                           {/* Header Section */}
                           {selectedHeader && (
@@ -2437,7 +2675,7 @@ export default function OnlineOrderPage() {
                       )}
 
                       {/* Continuation pages - minimal header */}
-                      {pageIndex > 0 && (
+                      {!page.showHeader && (
                         <div className="mb-4 pb-2 border-b border-gray-200">
                           <div className="flex justify-between items-center text-[10px]">
                             <div><strong>Invoice #{order.invoice_id}</strong> - {order.customer_name || "N/A"}</div>
@@ -2446,69 +2684,97 @@ export default function OnlineOrderPage() {
                         </div>
                       )}
 
-                      {/* Table */}
-                      <div className="mb-3">
-                        <div
-                          className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px] font-bold"
-                          style={{ background: "rgba(184, 230, 231, 0.5)", color: "#4db8ba" }}
-                        >
-                          <div>PRODUCT / SERVICES</div>
-                          <div>DESCRIPTION</div>
-                          <div className="text-center">QTY</div>
-                          <div className="text-right">UNIT PRICE</div>
-                          <div className="text-right">AMOUNT</div>
-                        </div>
-                        {pageItems.map((item, index) => (
+                      {/* Table - only if page has items */}
+                      {page.items.length > 0 && (
+                        <div className="mb-3">
                           <div
-                            key={index}
-                            className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px]"
+                            className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px] font-bold"
+                            style={{ background: "rgba(184, 230, 231, 0.5)", color: "#4db8ba" }}
                           >
-                            <div>{item.product_type || item.product_name}</div>
-                            <div className="text-gray-700">{item.product_name}</div>
-                            <div className="text-center">{item.quantity}</div>
-                            <div className="text-right">{formatCurrency(item.product_price)}</div>
-                            <div className="text-right font-medium">{formatCurrency(item.product_price * item.quantity)}</div>
+                            <div>PRODUCT / SERVICES</div>
+                            <div>DESCRIPTION</div>
+                            <div className="text-center">QTY</div>
+                            <div className="text-right">UNIT PRICE</div>
+                            <div className="text-right">AMOUNT</div>
                           </div>
-                        ))}
-                      </div>
-
-                      {/* Bottom Section - only on last page */}
-                      {pageIndex === totalPages - 1 && (
-                        <div className="grid grid-cols-2 gap-8 mt-2 pt-2 border-t-2 border-dashed border-gray-300">
-                          {/* Terms & Conditions */}
-                          <div className="pr-4">
-                            <h3 className="font-bold text-[10px] mb-2 mt-1">Terms & Conditions</h3>
-                            <p className="text-[10px] leading-relaxed mb-2 text-gray-700">
-                              We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.
-                            </p>
-                            <p className="text-[10px] leading-relaxed mb-4 text-gray-700">
-                              We are not liable for any damage to products once stored at your premises. Please keep frozen products (gelato and / or popsicles) frozen at -18 degree Celsius and below.
-                            </p>
-                            <div className="border-t border-black pt-1 w-250px mt-8">
-                              <p className="text-[10px]">Client&apos;s Signature & Company Stamp</p>
+                          {page.items.map((item, index) => (
+                            <div
+                              key={index}
+                              className="grid grid-cols-[1.2fr_1.8fr_0.6fr_0.8fr_0.8fr] gap-2 p-2 text-[10px]"
+                            >
+                              <div>{item.product_type || item.product_name}</div>
+                              <div className="text-gray-700">{item.product_name}</div>
+                              <div className="text-center">{item.quantity}</div>
+                              <div className="text-right">{formatCurrency(item.product_price)}</div>
+                              <div className="text-right font-medium">{formatCurrency(item.product_price * item.quantity)}</div>
                             </div>
-                          </div>
-
-                          {/* Totals */}
-                          <div className="text-right">
-                            <div className="flex justify-end mb-1.5 text-[10px]">
-                              <div className="w-32 text-right pr-4 font-bold">SUBTOTAL</div>
-                              <div className="w-24 text-right">{formatCurrency(subtotal)}</div>
-                            </div>
-                            <div className="flex justify-end mb-1.5 text-[10px]">
-                              <div className="w-32 text-right pr-4 font-bold">GST {currentInvoiceGstPercent}%</div>
-                              <div className="w-24 text-right">{formatCurrency(gst)}</div>
-                            </div>
-                            <div className="flex justify-end mb-1.5 text-[10px]">
-                              <div className="w-32 text-right pr-4 font-bold">TOTAL</div>
-                              <div className="w-24 text-right font-medium">{formatCurrency(total)}</div>
-                            </div>
-                            <div className="flex justify-end mt-2 pt-0">
-                              <div className="w-32 text-right pr-4 font-bold text-[10px]">BALANCE DUE</div>
-                              <div className="w-24 text-right text-base font-bold">${formatCurrency(total)}</div>
-                            </div>
-                          </div>
+                          ))}
                         </div>
+                      )}
+
+                      {/* Notes Overflow - show label only on first notes page */}
+                      {page.isNotesOverflow && page.notesLines && page.notesLines.length > 0 && (
+                        <div className="mt-3" style={{ width: '100%' }}>
+                          {page.isFirstNotesPage && (
+                            <p className="text-[10px] font-bold mb-1">Notes:</p>
+                          )}
+                          <p className="text-[10px] leading-relaxed text-gray-700 whitespace-pre-wrap break-words m-0">
+                            {page.notesLines.join(' ')}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Bottom Section - only on pages with showTerms */}
+                      {page.showTerms && (
+                        <>
+                          <div className="grid grid-cols-2 gap-8 mt-2 pt-2 border-t-2 border-dashed border-gray-300">
+                            {/* Terms & Conditions */}
+                            <div className="pr-4">
+                              <h3 className="font-bold text-[10px] mb-2 mt-1">Terms & Conditions</h3>
+                              <p className="text-[10px] leading-relaxed mb-2 text-gray-700">
+                                We acknowledge that the above goods are received in good condition. Please inform us of any issues within 24 hours. Otherwise, kindly note no return or refunds accepted.
+                              </p>
+                              <p className="text-[10px] leading-relaxed mb-4 text-gray-700">
+                                We are not liable for any damage to products once stored at your premises. Please keep frozen products (gelato and / or popsicles) frozen at -18 degree Celsius and below.
+                              </p>
+                              <div className="border-t border-black pt-1 mt-8" style={{ width: '250px' }}>
+                                <p className="text-[10px]">Client&apos;s Signature & Company Stamp</p>
+                              </div>
+                            </div>
+
+                            {/* Totals */}
+                            <div className="text-right">
+                              <div className="flex justify-end mb-1.5 text-[10px]">
+                                <div className="w-32 text-right pr-4 font-bold">SUBTOTAL</div>
+                                <div className="w-24 text-right">{formatCurrency(subtotal)}</div>
+                              </div>
+                              <div className="flex justify-end mb-1.5 text-[10px]">
+                                <div className="w-32 text-right pr-4 font-bold">GST {currentInvoiceGstPercent}%</div>
+                                <div className="w-24 text-right">{formatCurrency(gst)}</div>
+                              </div>
+                              <div className="flex justify-end mb-1.5 text-[10px]">
+                                <div className="w-32 text-right pr-4 font-bold">TOTAL</div>
+                                <div className="w-24 text-right font-medium">{formatCurrency(total)}</div>
+                              </div>
+                              <div className="flex justify-end mt-2 pt-0">
+                                <div className="w-32 text-right pr-4 font-bold text-[10px]">BALANCE DUE</div>
+                                <div className="w-24 text-right text-base font-bold">${formatCurrency(total)}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Notes Section - FULL PAGE WIDTH, outside the 2-column grid */}
+                          {page.notesLines && page.notesLines.length > 0 && (
+                            <div className="mt-4" style={{ width: '100%' }}>
+                              {page.isFirstNotesPage && (
+                                <p className="text-[10px] font-bold mb-1">Notes:</p>
+                              )}
+                              <p className="text-[10px] leading-relaxed text-gray-700 whitespace-pre-wrap break-words">
+                                {page.notesLines.join(' ')}
+                              </p>
+                            </div>
+                          )}
+                        </>
                       )}
 
                       {/* Footer - centered at bottom of each page */}

@@ -871,7 +871,7 @@ const renderFooterInPDF = (doc, selectedFooter) => {
 
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  let footerY = 275;
+  let footerY = 268; // Footer positioned within bottom margin
   const lineHeight = 4;
 
   const lines = [
@@ -1873,37 +1873,173 @@ const handlePrintInvoice = async () => {
     // Each line is approximately 4mm in PDF
     const headerOffset = (7 - headerLineCount) * 4;
 
-    // Pagination thresholds
-    const maxItemsSinglePage = 10;
-    const maxItemsFirstPage = 15;
-    const maxItemsPerContinuationPage = 20;
-    const totalItems = orderItems.length;
+    // Dynamic pagination with precise space calculation
+    // Page dimensions - A4 size
+    const pageHeight = 297; // A4 height in mm
+    const footerY = 268; // Footer positioned within bottom margin
+    const maxContentY = footerY - 2; // Leave 2mm buffer before footer (content stops at Y=266)
+    const firstPageStartY = 104 - headerOffset; // Y position after header on first page
+    const continuationPageStartY = 20; // Y position on continuation pages
+    const tableHeaderHeight = 13; // Height of table header row
+    const termsBaseHeight = 58; // Height for terms, totals, signature (without notes)
+    const lineHeight = 4; // Height per line of text
 
-    // Determine page structure
+    // Calculate notes lines for pagination - full page width
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const notesText = selectedOrder.notes || '';
+    const notesWidth = 170; // Full page width (210mm - 20mm margins)
+    const notesLines = notesText ? doc.splitTextToSize(notesText, notesWidth) : [];
+
+    // Pre-calculate height for each item based on text wrapping
+    const calculateItemHeight = (item: typeof orderItems[0]) => {
+      const productText = `${item.product_type || item.product_name}`;
+      const productLines = doc.splitTextToSize(productText, 30);
+      const descriptionText = item.product_billingName || productText;
+      const descLines = doc.splitTextToSize(descriptionText, 50);
+      const maxLines = Math.max(productLines.length, descLines.length);
+      return (maxLines * lineHeight) + 1;
+    };
+
+    // Build pages dynamically
     interface PageStructure {
       items: typeof orderItems;
       showHeader: boolean;
       showTerms: boolean;
+      notesLines?: string[];
+      isNotesOverflow?: boolean;
+      isFirstNotesPage?: boolean;
     }
     const pages: PageStructure[] = [];
 
-    if (totalItems <= maxItemsSinglePage) {
-      pages.push({ items: orderItems, showHeader: true, showTerms: true });
-    } else if (totalItems <= maxItemsFirstPage) {
-      pages.push({ items: orderItems, showHeader: true, showTerms: false });
-      pages.push({ items: [], showHeader: false, showTerms: true });
-    } else {
-      pages.push({ items: orderItems.slice(0, maxItemsFirstPage), showHeader: true, showTerms: false });
-      let remaining = orderItems.slice(maxItemsFirstPage);
-      while (remaining.length > 0) {
-        const isLastBatch = remaining.length <= maxItemsPerContinuationPage;
+    let currentPageItems: typeof orderItems = [];
+    let currentY = firstPageStartY + tableHeaderHeight;
+    let isFirstPage = true;
+    let itemIndex = 0;
+
+    // STEP 1: Process all items - fit as many as possible on each page
+    while (itemIndex < orderItems.length) {
+      const item = orderItems[itemIndex];
+      const itemHeight = calculateItemHeight(item);
+
+      if (currentY + itemHeight <= maxContentY) {
+        currentPageItems.push(item);
+        currentY += itemHeight;
+        itemIndex++;
+      } else if (currentPageItems.length === 0) {
+        // Page is empty but item doesn't fit - add anyway
+        currentPageItems.push(item);
+        currentY += itemHeight;
+        itemIndex++;
+      } else {
+        // Page full, start new page
         pages.push({
-          items: remaining.slice(0, maxItemsPerContinuationPage),
-          showHeader: false,
-          showTerms: isLastBatch
+          items: currentPageItems,
+          showHeader: isFirstPage,
+          showTerms: false
         });
-        remaining = remaining.slice(maxItemsPerContinuationPage);
+        currentPageItems = [];
+        currentY = continuationPageStartY + tableHeaderHeight;
+        isFirstPage = false;
       }
+    }
+
+    // STEP 2: Calculate remaining space and determine terms/notes placement
+    // Terms section: dotted line at currentY, content ends at currentY + termsBaseHeight
+    const termsEndY = currentY + termsBaseHeight;
+    const spaceForNotes = maxContentY - termsEndY; // No extra buffer needed
+    const maxNotesLinesOnPage = Math.max(0, Math.floor(spaceForNotes / lineHeight));
+
+    // Track if we've shown the "Notes:" label yet
+    let notesLabelShown = false;
+    const hasNotes = notesLines.length > 0;
+
+    const termsAndNotesWillFit = termsEndY <= maxContentY;
+
+    if (termsAndNotesWillFit) {
+      // Terms fit on same page as items
+      const firstPageNotesLines = notesLines.slice(0, maxNotesLinesOnPage);
+      const overflowNotesLines = notesLines.slice(maxNotesLinesOnPage);
+
+      const showNotesLabel = hasNotes && firstPageNotesLines.length > 0;
+      if (showNotesLabel) notesLabelShown = true;
+      pages.push({
+        items: currentPageItems,
+        showHeader: isFirstPage,
+        showTerms: true,
+        notesLines: firstPageNotesLines.length > 0 ? firstPageNotesLines : undefined,
+        isFirstNotesPage: showNotesLabel
+      });
+
+      // Add overflow notes pages if needed
+      if (overflowNotesLines.length > 0) {
+        const linesPerOverflowPage = Math.floor((maxContentY - continuationPageStartY) / lineHeight);
+        for (let i = 0; i < overflowNotesLines.length; i += linesPerOverflowPage) {
+          const isFirst = !notesLabelShown && i === 0;
+          if (isFirst) notesLabelShown = true;
+          pages.push({
+            items: [],
+            showHeader: false,
+            showTerms: false,
+            notesLines: overflowNotesLines.slice(i, i + linesPerOverflowPage),
+            isNotesOverflow: true,
+            isFirstNotesPage: isFirst
+          });
+        }
+      }
+    } else {
+      // Terms don't fit - save items page, put terms on next page
+      if (currentPageItems.length > 0) {
+        pages.push({
+          items: currentPageItems,
+          showHeader: isFirstPage,
+          showTerms: false
+        });
+      }
+
+      // Calculate space for notes on the new terms page
+      const termsPageNotesSpace = maxContentY - continuationPageStartY - termsBaseHeight;
+      const maxNotesOnTermsPage = Math.max(0, Math.floor(termsPageNotesSpace / lineHeight));
+      const firstPageNotesLines = notesLines.slice(0, maxNotesOnTermsPage);
+      const remainingAfterTermsPage = notesLines.slice(maxNotesOnTermsPage);
+
+      const showNotesLabel = hasNotes && firstPageNotesLines.length > 0;
+      if (showNotesLabel) notesLabelShown = true;
+      pages.push({
+        items: [],
+        showHeader: false,
+        showTerms: true,
+        notesLines: firstPageNotesLines.length > 0 ? firstPageNotesLines : undefined,
+        isFirstNotesPage: showNotesLabel
+      });
+
+      if (remainingAfterTermsPage.length > 0) {
+        const linesPerOverflowPage = Math.floor((maxContentY - continuationPageStartY) / lineHeight);
+        for (let i = 0; i < remainingAfterTermsPage.length; i += linesPerOverflowPage) {
+          const isFirst = !notesLabelShown && i === 0;
+          if (isFirst) notesLabelShown = true;
+          pages.push({
+            items: [],
+            showHeader: false,
+            showTerms: false,
+            notesLines: remainingAfterTermsPage.slice(i, i + linesPerOverflowPage),
+            isNotesOverflow: true,
+            isFirstNotesPage: isFirst
+          });
+        }
+      }
+    }
+
+    // Handle edge case: no items
+    if (orderItems.length === 0 && pages.length === 0) {
+      const maxNotesOnPage = Math.floor((maxContentY - firstPageStartY - termsBaseHeight) / lineHeight);
+      pages.push({
+        items: [],
+        showHeader: true,
+        showTerms: true,
+        notesLines: notesLines.slice(0, maxNotesOnPage),
+        isFirstNotesPage: notesLines.length > 0
+      });
     }
 
     // Helper function to render table header
@@ -1922,8 +2058,8 @@ const handlePrintInvoice = async () => {
       doc.text('AMOUNT', 185, startY + 5, { align: 'right' });
     };
 
-    // Helper function to render terms and totals
-    const renderTermsAndTotals = (startY: number) => {
+    // Helper function to render terms and totals - notes use full page width (170mm)
+    const renderTermsAndTotals = (startY: number, notesLines?: string[], isFirstNotesPage?: boolean) => {
       doc.setDrawColor('#e0e0e0');
       doc.setLineWidth(0.2);
       for (let i = 20; i < 190; i += 1.5) {
@@ -1952,6 +2088,19 @@ const handlePrintInvoice = async () => {
       doc.line(20, yPos + 50, 85, yPos + 50);
       doc.text("Client's Signature & Company Stamp", 20, yPos + 55);
 
+      // Notes Section - full page width (170mm), label only on first notes page
+      if (notesLines && notesLines.length > 0) {
+        if (isFirstNotesPage) {
+          doc.setFont('helvetica', 'bold');
+          doc.text('Notes:', 20, yPos + 62);
+          doc.setFont('helvetica', 'normal');
+          doc.text(notesLines, 20, yPos + 67);
+        } else {
+          doc.setFont('helvetica', 'normal');
+          doc.text(notesLines, 20, yPos + 62);
+        }
+      }
+
       const totalsLabelX = 100;
       const totalsValueX = 185;
       doc.text('SUBTOTAL', totalsLabelX, yPos + 5);
@@ -1967,6 +2116,15 @@ const handlePrintInvoice = async () => {
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
       doc.text(`$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+    };
+
+    // Helper function to render notes overflow page - NO label, just continue text
+    const renderNotesOverflow = (notesLines: string[]) => {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(0, 0, 0);
+      // No label - just continue the notes text from top of page
+      doc.text(notesLines, 20, 20);
     };
 
     // Render each page
@@ -2077,7 +2235,12 @@ const handlePrintInvoice = async () => {
 
       // Render terms and totals on designated page
       if (page.showTerms) {
-        renderTermsAndTotals(yPos + 2);
+        renderTermsAndTotals(yPos + 2, page.notesLines, page.isFirstNotesPage);
+      }
+
+      // Render notes overflow page
+      if (page.isNotesOverflow && page.notesLines) {
+        renderNotesOverflow(page.notesLines);
       }
 
       // Render footer on every page
@@ -2144,37 +2307,173 @@ const handleDownloadPDF = async () => {
     // Each line is approximately 4mm in PDF
     const headerOffset = (7 - headerLineCount) * 4;
 
-    // Pagination thresholds
-    const maxItemsSinglePage = 10;
-    const maxItemsFirstPage = 15;
-    const maxItemsPerContinuationPage = 20;
-    const totalItems = orderItems.length;
+    // Dynamic pagination with precise space calculation
+    // Page dimensions - A4 size
+    const pageHeight = 297; // A4 height in mm
+    const footerY = 268; // Footer positioned within bottom margin
+    const maxContentY = footerY - 2; // Leave 2mm buffer before footer (content stops at Y=266)
+    const firstPageStartY = 104 - headerOffset; // Y position after header on first page
+    const continuationPageStartY = 20; // Y position on continuation pages
+    const tableHeaderHeight = 13; // Height of table header row
+    const termsBaseHeight = 58; // Height for terms, totals, signature (without notes)
+    const lineHeight = 4; // Height per line of text
 
-    // Determine page structure
+    // Calculate notes lines for pagination - full page width
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const notesText = selectedOrder.notes || '';
+    const notesWidth = 170; // Full page width (210mm - 20mm margins)
+    const notesLines = notesText ? doc.splitTextToSize(notesText, notesWidth) : [];
+
+    // Pre-calculate height for each item based on text wrapping
+    const calculateItemHeight = (item: typeof orderItems[0]) => {
+      const productText = `${item.product_type || item.product_name}`;
+      const productLines = doc.splitTextToSize(productText, 30);
+      const descriptionText = item.product_billingName || productText;
+      const descLines = doc.splitTextToSize(descriptionText, 50);
+      const maxLines = Math.max(productLines.length, descLines.length);
+      return (maxLines * lineHeight) + 1;
+    };
+
+    // Build pages dynamically
     interface PageStructure {
       items: typeof orderItems;
       showHeader: boolean;
       showTerms: boolean;
+      notesLines?: string[];
+      isNotesOverflow?: boolean;
+      isFirstNotesPage?: boolean;
     }
     const pages: PageStructure[] = [];
 
-    if (totalItems <= maxItemsSinglePage) {
-      pages.push({ items: orderItems, showHeader: true, showTerms: true });
-    } else if (totalItems <= maxItemsFirstPage) {
-      pages.push({ items: orderItems, showHeader: true, showTerms: false });
-      pages.push({ items: [], showHeader: false, showTerms: true });
-    } else {
-      pages.push({ items: orderItems.slice(0, maxItemsFirstPage), showHeader: true, showTerms: false });
-      let remaining = orderItems.slice(maxItemsFirstPage);
-      while (remaining.length > 0) {
-        const isLastBatch = remaining.length <= maxItemsPerContinuationPage;
+    let currentPageItems: typeof orderItems = [];
+    let currentY = firstPageStartY + tableHeaderHeight;
+    let isFirstPage = true;
+    let itemIndex = 0;
+
+    // STEP 1: Process all items - fit as many as possible on each page
+    while (itemIndex < orderItems.length) {
+      const item = orderItems[itemIndex];
+      const itemHeight = calculateItemHeight(item);
+
+      if (currentY + itemHeight <= maxContentY) {
+        currentPageItems.push(item);
+        currentY += itemHeight;
+        itemIndex++;
+      } else if (currentPageItems.length === 0) {
+        // Page is empty but item doesn't fit - add anyway
+        currentPageItems.push(item);
+        currentY += itemHeight;
+        itemIndex++;
+      } else {
+        // Page full, start new page
         pages.push({
-          items: remaining.slice(0, maxItemsPerContinuationPage),
-          showHeader: false,
-          showTerms: isLastBatch
+          items: currentPageItems,
+          showHeader: isFirstPage,
+          showTerms: false
         });
-        remaining = remaining.slice(maxItemsPerContinuationPage);
+        currentPageItems = [];
+        currentY = continuationPageStartY + tableHeaderHeight;
+        isFirstPage = false;
       }
+    }
+
+    // STEP 2: Calculate remaining space and determine terms/notes placement
+    // Terms section: dotted line at currentY, content ends at currentY + termsBaseHeight
+    const termsEndY = currentY + termsBaseHeight;
+    const spaceForNotes = maxContentY - termsEndY; // No extra buffer needed
+    const maxNotesLinesOnPage = Math.max(0, Math.floor(spaceForNotes / lineHeight));
+
+    // Track if we've shown the "Notes:" label yet
+    let notesLabelShown = false;
+    const hasNotes = notesLines.length > 0;
+
+    const termsAndNotesWillFit = termsEndY <= maxContentY;
+
+    if (termsAndNotesWillFit) {
+      // Terms fit on same page as items
+      const firstPageNotesLines = notesLines.slice(0, maxNotesLinesOnPage);
+      const overflowNotesLines = notesLines.slice(maxNotesLinesOnPage);
+
+      const showNotesLabel = hasNotes && firstPageNotesLines.length > 0;
+      if (showNotesLabel) notesLabelShown = true;
+      pages.push({
+        items: currentPageItems,
+        showHeader: isFirstPage,
+        showTerms: true,
+        notesLines: firstPageNotesLines.length > 0 ? firstPageNotesLines : undefined,
+        isFirstNotesPage: showNotesLabel
+      });
+
+      // Add overflow notes pages if needed
+      if (overflowNotesLines.length > 0) {
+        const linesPerOverflowPage = Math.floor((maxContentY - continuationPageStartY) / lineHeight);
+        for (let i = 0; i < overflowNotesLines.length; i += linesPerOverflowPage) {
+          const isFirst = !notesLabelShown && i === 0;
+          if (isFirst) notesLabelShown = true;
+          pages.push({
+            items: [],
+            showHeader: false,
+            showTerms: false,
+            notesLines: overflowNotesLines.slice(i, i + linesPerOverflowPage),
+            isNotesOverflow: true,
+            isFirstNotesPage: isFirst
+          });
+        }
+      }
+    } else {
+      // Terms don't fit - save items page, put terms on next page
+      if (currentPageItems.length > 0) {
+        pages.push({
+          items: currentPageItems,
+          showHeader: isFirstPage,
+          showTerms: false
+        });
+      }
+
+      // Calculate space for notes on the new terms page
+      const termsPageNotesSpace = maxContentY - continuationPageStartY - termsBaseHeight;
+      const maxNotesOnTermsPage = Math.max(0, Math.floor(termsPageNotesSpace / lineHeight));
+      const firstPageNotesLines = notesLines.slice(0, maxNotesOnTermsPage);
+      const remainingAfterTermsPage = notesLines.slice(maxNotesOnTermsPage);
+
+      const showNotesLabel = hasNotes && firstPageNotesLines.length > 0;
+      if (showNotesLabel) notesLabelShown = true;
+      pages.push({
+        items: [],
+        showHeader: false,
+        showTerms: true,
+        notesLines: firstPageNotesLines.length > 0 ? firstPageNotesLines : undefined,
+        isFirstNotesPage: showNotesLabel
+      });
+
+      if (remainingAfterTermsPage.length > 0) {
+        const linesPerOverflowPage = Math.floor((maxContentY - continuationPageStartY) / lineHeight);
+        for (let i = 0; i < remainingAfterTermsPage.length; i += linesPerOverflowPage) {
+          const isFirst = !notesLabelShown && i === 0;
+          if (isFirst) notesLabelShown = true;
+          pages.push({
+            items: [],
+            showHeader: false,
+            showTerms: false,
+            notesLines: remainingAfterTermsPage.slice(i, i + linesPerOverflowPage),
+            isNotesOverflow: true,
+            isFirstNotesPage: isFirst
+          });
+        }
+      }
+    }
+
+    // Handle edge case: no items
+    if (orderItems.length === 0 && pages.length === 0) {
+      const maxNotesOnPage = Math.floor((maxContentY - firstPageStartY - termsBaseHeight) / lineHeight);
+      pages.push({
+        items: [],
+        showHeader: true,
+        showTerms: true,
+        notesLines: notesLines.slice(0, maxNotesOnPage),
+        isFirstNotesPage: notesLines.length > 0
+      });
     }
 
     // Helper function to render table header
@@ -2193,8 +2492,8 @@ const handleDownloadPDF = async () => {
       doc.text('AMOUNT', 185, startY + 5, { align: 'right' });
     };
 
-    // Helper function to render terms and totals
-    const renderTermsAndTotals = (startY: number) => {
+    // Helper function to render terms and totals - notes use full page width (170mm)
+    const renderTermsAndTotals = (startY: number, notesLines?: string[], isFirstNotesPage?: boolean) => {
       doc.setDrawColor('#e0e0e0');
       doc.setLineWidth(0.2);
       for (let i = 20; i < 190; i += 1.5) {
@@ -2223,6 +2522,19 @@ const handleDownloadPDF = async () => {
       doc.line(20, yPos + 50, 85, yPos + 50);
       doc.text("Client's Signature & Company Stamp", 20, yPos + 55);
 
+      // Notes Section - full page width (170mm), label only on first notes page
+      if (notesLines && notesLines.length > 0) {
+        if (isFirstNotesPage) {
+          doc.setFont('helvetica', 'bold');
+          doc.text('Notes:', 20, yPos + 62);
+          doc.setFont('helvetica', 'normal');
+          doc.text(notesLines, 20, yPos + 67);
+        } else {
+          doc.setFont('helvetica', 'normal');
+          doc.text(notesLines, 20, yPos + 62);
+        }
+      }
+
       const totalsLabelX = 100;
       const totalsValueX = 185;
       doc.text('SUBTOTAL', totalsLabelX, yPos + 5);
@@ -2238,6 +2550,15 @@ const handleDownloadPDF = async () => {
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
       doc.text(`$${selectedOrder.total_amount.toFixed(2)}`, totalsValueX, yPos + 23, { align: 'right' });
+    };
+
+    // Helper function to render notes overflow page - NO label, just continue text
+    const renderNotesOverflow = (notesLines: string[]) => {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(0, 0, 0);
+      // No label - just continue the notes text from top of page
+      doc.text(notesLines, 20, 20);
     };
 
     // Render each page
@@ -2348,7 +2669,12 @@ const handleDownloadPDF = async () => {
 
       // Render terms and totals on designated page
       if (page.showTerms) {
-        renderTermsAndTotals(yPos + 2);
+        renderTermsAndTotals(yPos + 2, page.notesLines, page.isFirstNotesPage);
+      }
+
+      // Render notes overflow page
+      if (page.isNotesOverflow && page.notesLines) {
+        renderNotesOverflow(page.notesLines);
       }
 
       // Render footer on every page

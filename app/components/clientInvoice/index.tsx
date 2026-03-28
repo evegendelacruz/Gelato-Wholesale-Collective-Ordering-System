@@ -90,38 +90,178 @@ export default function ClientInvoice({
   const displayGstPercentage = gstPercentage;
 
   const allItems = order.items;
-  const totalItems = allItems.length;
 
-  // Thresholds
-  const maxItemsSinglePage = 10; // Up to 10 items = single page
-  const maxItemsFirstPage = 15; // First page can hold up to 15 items
-  const maxItemsPerContinuationPage = 20; // Continuation pages can hold more items
+  // Dynamic pagination with notes overflow handling for HTML preview
+  // Page dimensions (A4 in approximate px at 96dpi)
+  const pageContentHeight = 730; // Usable content height (leaving space for footer ~70px)
+  const headerHeight = 260; // Height of header section
+  const termsBaseHeight = 160; // Height for terms, totals, signature (without notes)
+  const tableHeaderHeight = 30; // Height of table header
+  const itemRowHeight = 22; // Height per item row
+  const notesLineHeight = 16; // Approximate height per line of notes text
+  const charsPerLine = 120; // Approximate characters per line at 10px font
 
-  // Determine page structure
-  const pages: { items: OrderItem[]; showHeader: boolean; showTerms: boolean }[] = [];
+  const notesText = order.notes || '';
 
-  if (totalItems <= maxItemsSinglePage) {
-    // Single page with everything
-    pages.push({ items: allItems, showHeader: true, showTerms: true });
-  } else if (totalItems <= maxItemsFirstPage) {
-    // 11-15 items: Page 1 has all items, Page 2 has terms/totals only
-    pages.push({ items: allItems, showHeader: true, showTerms: false });
-    pages.push({ items: [], showHeader: false, showTerms: true });
-  } else {
-    // 16+ items: Split items across pages
-    // Page 1: First 15 items
-    pages.push({ items: allItems.slice(0, maxItemsFirstPage), showHeader: true, showTerms: false });
+  // Split notes into lines for pagination
+  const splitNotesIntoLines = (text: string): string[] => {
+    if (!text) return [];
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let currentLine = '';
 
-    // Remaining items
-    let remaining = allItems.slice(maxItemsFirstPage);
-    while (remaining.length > 0) {
-      const isLastBatch = remaining.length <= maxItemsPerContinuationPage;
+    for (const word of words) {
+      if ((currentLine + ' ' + word).trim().length <= charsPerLine) {
+        currentLine = (currentLine + ' ' + word).trim();
+      } else {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  };
+
+  const allNotesLines = splitNotesIntoLines(notesText);
+
+  // Build pages dynamically
+  const pages: { items: OrderItem[]; showHeader: boolean; showTerms: boolean; notesLines?: string[]; isNotesOverflow?: boolean; isFirstNotesPage?: boolean }[] = [];
+
+  let currentPageItems: OrderItem[] = [];
+  let currentHeight = headerHeight + tableHeaderHeight;
+  let isFirstPage = true;
+  let itemIndex = 0;
+
+  // Process all items - fit as many as possible
+  while (itemIndex < allItems.length) {
+    if (currentHeight + itemRowHeight <= pageContentHeight) {
+      currentPageItems.push(allItems[itemIndex]);
+      currentHeight += itemRowHeight;
+      itemIndex++;
+    } else if (currentPageItems.length === 0) {
+      currentPageItems.push(allItems[itemIndex]);
+      currentHeight += itemRowHeight;
+      itemIndex++;
+    } else {
       pages.push({
-        items: remaining.slice(0, maxItemsPerContinuationPage),
-        showHeader: false,
-        showTerms: isLastBatch
+        items: currentPageItems,
+        showHeader: isFirstPage,
+        showTerms: false
       });
-      remaining = remaining.slice(maxItemsPerContinuationPage);
+      currentPageItems = [];
+      currentHeight = tableHeaderHeight;
+      isFirstPage = false;
+    }
+  }
+
+  // Check if terms fit on the same page
+  const termsEndHeight = currentHeight + termsBaseHeight;
+  const termsWillFit = termsEndHeight <= pageContentHeight;
+
+  // Calculate space for notes
+  const spaceForNotesOnTermsPage = termsWillFit ? pageContentHeight - termsEndHeight - 10 : 0;
+  const maxNotesLinesOnTermsPage = Math.max(0, Math.floor(spaceForNotesOnTermsPage / notesLineHeight));
+  const firstPageNotesLines = allNotesLines.slice(0, maxNotesLinesOnTermsPage);
+  const overflowNotesLines = allNotesLines.slice(maxNotesLinesOnTermsPage);
+
+  // Lines per overflow page (full page minus some margin)
+  const linesPerOverflowPage = Math.floor((pageContentHeight - 20) / notesLineHeight);
+
+  // Track if we've shown the "Notes:" label yet
+  let notesLabelShown = false;
+  const hasNotes = allNotesLines.length > 0;
+
+  if (termsWillFit) {
+    const showNotesLabel = hasNotes && firstPageNotesLines.length > 0;
+    if (showNotesLabel) notesLabelShown = true;
+    pages.push({
+      items: currentPageItems,
+      showHeader: isFirstPage,
+      showTerms: true,
+      notesLines: firstPageNotesLines.length > 0 ? firstPageNotesLines : undefined,
+      isFirstNotesPage: showNotesLabel
+    });
+  } else {
+    if (currentPageItems.length > 0) {
+      pages.push({
+        items: currentPageItems,
+        showHeader: isFirstPage,
+        showTerms: false
+      });
+    }
+    // Calculate notes for separate terms page
+    const termsPageNotesSpace = pageContentHeight - termsBaseHeight - 20;
+    const maxNotesOnTermsPage = Math.max(0, Math.floor(termsPageNotesSpace / notesLineHeight));
+    const termsPageNotes = allNotesLines.slice(0, maxNotesOnTermsPage);
+    const remainingAfterTermsPage = allNotesLines.slice(maxNotesOnTermsPage);
+
+    const showNotesLabel = hasNotes && termsPageNotes.length > 0;
+    if (showNotesLabel) notesLabelShown = true;
+    pages.push({
+      items: [],
+      showHeader: false,
+      showTerms: true,
+      notesLines: termsPageNotes.length > 0 ? termsPageNotes : undefined,
+      isFirstNotesPage: showNotesLabel
+    });
+
+    // Add overflow pages for remaining notes
+    if (remainingAfterTermsPage.length > 0) {
+      for (let i = 0; i < remainingAfterTermsPage.length; i += linesPerOverflowPage) {
+        const isFirst = !notesLabelShown && i === 0;
+        if (isFirst) notesLabelShown = true;
+        pages.push({
+          items: [],
+          showHeader: false,
+          showTerms: false,
+          notesLines: remainingAfterTermsPage.slice(i, i + linesPerOverflowPage),
+          isNotesOverflow: true,
+          isFirstNotesPage: isFirst
+        });
+      }
+    }
+  }
+
+  // Add overflow pages for notes if terms fit but notes overflow
+  if (termsWillFit && overflowNotesLines.length > 0) {
+    for (let i = 0; i < overflowNotesLines.length; i += linesPerOverflowPage) {
+      const isFirst = !notesLabelShown && i === 0;
+      if (isFirst) notesLabelShown = true;
+      pages.push({
+        items: [],
+        showHeader: false,
+        showTerms: false,
+        notesLines: overflowNotesLines.slice(i, i + linesPerOverflowPage),
+        isNotesOverflow: true,
+        isFirstNotesPage: isFirst
+      });
+    }
+  }
+
+  // Handle no items case
+  if (allItems.length === 0 && pages.length === 0) {
+    const emptyPageNotesSpace = pageContentHeight - headerHeight - termsBaseHeight - 20;
+    const maxNotesOnEmpty = Math.max(0, Math.floor(emptyPageNotesSpace / notesLineHeight));
+    pages.push({
+      items: [],
+      showHeader: true,
+      showTerms: true,
+      notesLines: allNotesLines.slice(0, maxNotesOnEmpty),
+      isFirstNotesPage: allNotesLines.length > 0
+    });
+    // Add overflow if needed
+    const remainingNotes = allNotesLines.slice(maxNotesOnEmpty);
+    if (remainingNotes.length > 0) {
+      for (let i = 0; i < remainingNotes.length; i += linesPerOverflowPage) {
+        pages.push({
+          items: [],
+          showHeader: false,
+          showTerms: false,
+          notesLines: remainingNotes.slice(i, i + linesPerOverflowPage),
+          isNotesOverflow: true,
+          isFirstNotesPage: false
+        });
+      }
     }
   }
 
@@ -179,57 +319,80 @@ export default function ClientInvoice({
     </div>
   );
 
-  // Render terms and totals
-  const renderTermsAndTotals = () => (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: '35px',
-      marginTop: '10px',
-      borderTop: '2px dotted #e0e0e0'
-    }}>
-      {/* Terms & Conditions */}
-      <div style={{ paddingRight: '18px' }}>
-        <h3 style={{ fontSize: '10px', marginBottom: '8px', marginTop: '3.5px' }}>Terms & Conditions</h3>
-        <p style={{ fontSize: '10px', lineHeight: '1.6', marginBottom: '10px' }}>
-          We acknowledge that the above goods are received in good condition. Please inform us of any issues
-          within 24 hours. Otherwise, kindly note no return or refunds accepted.
-        </p>
-        <p style={{ fontSize: '10px', lineHeight: '1.6', marginBottom: '10px' }}>
-          We are not liable for any damage to products once stored at your premises. Please keep frozen products
-          (gelato and / or popsicles) frozen at -18 degree Celsius and below.
-        </p>
-        <div style={{
-          marginTop: '35px',
-          paddingTop: '5px',
-          borderTop: '1px solid #000',
-          width: '250px',
-          fontSize: '10px'
-        }}>
-          Client&apos;s Signature & Company Stamp
+  // Render terms and totals - notes use full page width (outside grid), label only on first notes page
+  const renderTermsAndTotals = (notesLines?: string[], isFirstNotesPage?: boolean) => (
+    <>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '35px',
+        marginTop: '10px',
+        borderTop: '2px dotted #e0e0e0'
+      }}>
+        {/* Terms & Conditions */}
+        <div style={{ paddingRight: '18px' }}>
+          <h3 style={{ fontSize: '10px', marginBottom: '8px', marginTop: '3.5px' }}>Terms & Conditions</h3>
+          <p style={{ fontSize: '10px', lineHeight: '1.6', marginBottom: '10px' }}>
+            We acknowledge that the above goods are received in good condition. Please inform us of any issues
+            within 24 hours. Otherwise, kindly note no return or refunds accepted.
+          </p>
+          <p style={{ fontSize: '10px', lineHeight: '1.6', marginBottom: '10px' }}>
+            We are not liable for any damage to products once stored at your premises. Please keep frozen products
+            (gelato and / or popsicles) frozen at -18 degree Celsius and below.
+          </p>
+          <div style={{
+            marginTop: '35px',
+            paddingTop: '5px',
+            borderTop: '1px solid #000',
+            width: '250px',
+            fontSize: '10px'
+          }}>
+            Client&apos;s Signature & Company Stamp
+          </div>
+        </div>
+
+        {/* Totals */}
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10px' }}>
+            <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>SUBTOTAL</div>
+            <div style={{ width: '90px', textAlign: 'right' }}>{subtotal.toFixed(2)}</div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10px' }}>
+            <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>GST {displayGstPercentage}%</div>
+            <div style={{ width: '90px', textAlign: 'right' }}>{gst.toFixed(2)}</div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10px' }}>
+            <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>TOTAL</div>
+            <div style={{ width: '90px', textAlign: 'right' }}>{order.total_amount.toFixed(2)}</div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px', fontSize: '10px' }}>
+            <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>BALANCE DUE</div>
+            <div style={{ width: '90px', textAlign: 'right', fontSize: '16px', fontWeight: 'bold' }}>${order.total_amount.toFixed(2)}</div>
+          </div>
         </div>
       </div>
 
-      {/* Totals */}
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10px' }}>
-          <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>SUBTOTAL</div>
-          <div style={{ width: '90px', textAlign: 'right' }}>{subtotal.toFixed(2)}</div>
+      {/* Notes Section - FULL PAGE WIDTH, outside the 2-column grid */}
+      {notesLines && notesLines.length > 0 && (
+        <div style={{
+          marginTop: '15px',
+          fontSize: '10px',
+          lineHeight: '1.6',
+          width: '100%'
+        }}>
+          {isFirstNotesPage && (
+            <strong style={{ display: 'block', marginBottom: '5px' }}>Notes:</strong>
+          )}
+          <p style={{
+            margin: 0,
+            whiteSpace: 'pre-wrap',
+            wordWrap: 'break-word'
+          }}>
+            {notesLines.join(' ')}
+          </p>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10px' }}>
-          <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>GST {displayGstPercentage}%</div>
-          <div style={{ width: '90px', textAlign: 'right' }}>{gst.toFixed(2)}</div>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '7px 0', fontSize: '10px' }}>
-          <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>TOTAL</div>
-          <div style={{ width: '90px', textAlign: 'right' }}>{order.total_amount.toFixed(2)}</div>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px', fontSize: '10px' }}>
-          <div style={{ width: '130px', textAlign: 'right', paddingRight: '18px', fontWeight: 'bold' }}>BALANCE DUE</div>
-          <div style={{ width: '90px', textAlign: 'right', fontSize: '16px', fontWeight: 'bold' }}>${order.total_amount.toFixed(2)}</div>
-        </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 
   return (
@@ -402,10 +565,31 @@ export default function ClientInvoice({
           )}
 
           {/* Terms & Totals - only on designated page */}
-          {page.showTerms && renderTermsAndTotals()}
+          {page.showTerms && renderTermsAndTotals(page.notesLines, page.isFirstNotesPage)}
+
+          {/* Notes Overflow - show label only on first notes page */}
+          {page.isNotesOverflow && page.notesLines && page.notesLines.length > 0 && (
+            <div style={{
+              marginTop: '10px',
+              width: '100%'
+            }}>
+              {page.isFirstNotesPage && (
+                <strong style={{ display: 'block', marginBottom: '5px', fontSize: '10px' }}>Notes:</strong>
+              )}
+              <p style={{
+                margin: 0,
+                fontSize: '10px',
+                lineHeight: '1.6',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word'
+              }}>
+                {page.notesLines?.join(' ')}
+              </p>
+            </div>
+          )}
 
           {/* Audit Trail — shown at bottom of last page, synced to Xero as a history note */}
-          {page.showTerms && (order.last_modified_by_name || order.xero_invoice_id) && (
+          {(page.showTerms || page.isNotesOverflow) && (order.last_modified_by_name || order.xero_invoice_id) && (
             <div style={{
               marginTop: '8px',
               paddingTop: '6px',
