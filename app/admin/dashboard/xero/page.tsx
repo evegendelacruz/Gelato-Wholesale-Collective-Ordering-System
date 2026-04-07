@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Sidepanel from '@/app/components/sidepanel/page';
 import Header from '@/app/components/header/page';
-import { CheckCircle, XCircle, RefreshCw, Link, Link2Off, FileText, Users, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle, XCircle, RefreshCw, Link, Link2Off, FileText, Search, ChevronDown, ChevronUp } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 
@@ -192,7 +192,7 @@ function XeroPageContent() {
   );
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: '#FCF0E3' }}>
+    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: '#FCF0E3', fontFamily: '"Roboto Condensed", sans-serif' }}>
       <Sidepanel />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
@@ -209,7 +209,7 @@ function XeroPageContent() {
             {/* Title */}
             <div>
               <h1 className="text-2xl font-bold" style={{ color: '#0D909A' }}>Xero Integration</h1>
-              <p className="text-sm text-gray-500 mt-1">Sync invoices, contacts and audit trail between GWC and Xero.</p>
+              <p className="text-sm text-gray-500 mt-1">Sync invoices and audit trail between GWC and Xero.</p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -312,16 +312,6 @@ function XeroPageContent() {
                         <li>• Order total & GST</li>
                         <li>• Due date & status</li>
                         <li>• Audit trail (last modified by)</li>
-                      </ul>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-600 mb-2 flex items-center gap-1.5">
-                        <Users size={14} />Contacts
-                      </h3>
-                      <ul className="text-xs text-gray-500 space-y-1">
-                        <li>• Business name & email</li>
-                        <li>• Phone & addresses</li>
-                        <li>• Person in charge</li>
                       </ul>
                     </div>
                   </div>

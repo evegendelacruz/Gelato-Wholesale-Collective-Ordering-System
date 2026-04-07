@@ -320,7 +320,7 @@ export default function Sidepanel() {
         className={`shadow-lg flex flex-col transition-all duration-300 ease-in-out relative ${
           isCollapsed ? 'w-20' : 'w-64'
         }`}
-        style={{ backgroundColor: '#7A1F1F', minHeight: '100vh' }}
+        style={{ backgroundColor: '#7A1F1F', minHeight: '100vh', fontFamily: '"Roboto Condensed", sans-serif' }}
       >
         {/* Header */}
         <div
