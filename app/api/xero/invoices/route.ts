@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { syncInvoiceToXero, syncAllPendingInvoices, getXeroInvoice } from '@/lib/xeroSync';
+import { syncInvoiceToXero, syncOnlineOrderToXero, syncAllPendingInvoices, getXeroInvoice } from '@/lib/xeroSync';
 import { createClient } from '@supabase/supabase-js';
 
 function adminSupabase() {
@@ -24,10 +24,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(result);
     }
 
-    // Single order sync
+    // Single online order sync
+    if (body.onlineOrderId) {
+      const supabase = adminSupabase();
+      const { data: order, error: orderError } = await supabase
+        .from('customer_order')
+        .select('*, items:customer_order_item(*)')
+        .eq('id', body.onlineOrderId)
+        .single();
+
+      if (orderError || !order) {
+        return NextResponse.json({ error: 'Online order not found' }, { status: 404 });
+      }
+
+      const xeroInvoiceId = await syncOnlineOrderToXero(order, order.items ?? []);
+      return NextResponse.json({ success: true, xeroInvoiceId });
+    }
+
+    // Single client order sync
     const { orderId } = body;
     if (!orderId) {
-      return NextResponse.json({ error: 'orderId is required' }, { status: 400 });
+      return NextResponse.json({ error: 'orderId or onlineOrderId is required' }, { status: 400 });
     }
 
     const supabase = adminSupabase();

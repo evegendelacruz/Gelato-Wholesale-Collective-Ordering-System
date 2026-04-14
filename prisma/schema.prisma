@@ -257,6 +257,10 @@ model CustomerOrder {
   invoice_id       String?
   gst_percentage   Decimal?  @default(9.00) @db.Decimal(5, 2)
 
+  // Xero sync tracking
+  xero_invoice_id  String?
+  xero_synced_at   DateTime?
+
   // Relations
   items CustomerOrderItem[]
 

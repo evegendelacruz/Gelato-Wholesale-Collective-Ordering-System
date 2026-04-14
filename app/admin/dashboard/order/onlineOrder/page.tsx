@@ -46,6 +46,8 @@ interface Order {
   total_amount: number;
   invoice_id: string;
   gst_percentage?: number;
+  xero_invoice_id?: string;
+  xero_synced_at?: string;
 }
 interface OrderItem {
   id: number;
@@ -274,6 +276,9 @@ export default function OnlineOrderPage() {
   const [itemStickerDropdownPosition, setItemStickerDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   const [itemStickerDropdownData, setItemStickerDropdownData] = useState<{ item: OrderItem; orderId: number; orderDate: string } | null>(null);
 
+
+  // Xero sync state for online orders
+  const [syncingRowXero, setSyncingRowXero] = useState<Record<number, boolean>>({});
 
   // Use ref for GPBN to avoid closure issues - this stores the starting code for current order
   const gpbnStartCodeRef = useRef<string | null>(null);
@@ -1323,6 +1328,31 @@ export default function OnlineOrderPage() {
     } catch (error) {
       console.error("Error fetching order items for labels:", error);
       alert("Failed to load order items");
+    }
+  };
+
+  // Sync a single online order row to Xero
+  const handleSyncRowToXero = async (order: Order) => {
+    setSyncingRowXero(prev => ({ ...prev, [order.id]: true }));
+    try {
+      const res = await fetch('/api/xero/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ onlineOrderId: order.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Sync failed');
+      setOrders(prev =>
+        prev.map(o =>
+          o.id === order.id
+            ? { ...o, xero_invoice_id: data.xeroInvoiceId, xero_synced_at: new Date().toISOString() }
+            : o
+        )
+      );
+    } catch (e) {
+      alert(`Xero sync failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setSyncingRowXero(prev => ({ ...prev, [order.id]: false }));
     }
   };
 
@@ -3230,6 +3260,9 @@ export default function OnlineOrderPage() {
                           INVOICE
                         </th>
                         <th className="text-left py-3 px-2 font-bold text-xs w-[70px]" style={{ color: "#5C2E1F" }}>
+                          XERO
+                        </th>
+                        <th className="text-left py-3 px-2 font-bold text-xs w-[70px]" style={{ color: "#5C2E1F" }}>
                           LABEL
                         </th>
                         <th className="text-left py-3 px-2 font-bold text-xs w-[90px]" style={{ color: "#5C2E1F" }}>
@@ -3361,6 +3394,20 @@ export default function OnlineOrderPage() {
                                   -
                                 </span>
                               )}
+                            </td>
+                            <td className="py-3 px-2 w-[70px]">
+                              <button
+                                onClick={() => handleSyncRowToXero(order)}
+                                disabled={syncingRowXero[order.id]}
+                                className={`px-2 py-1 text-xs rounded text-white transition-colors ${
+                                  order.xero_invoice_id
+                                    ? 'bg-teal-600 hover:bg-teal-700'
+                                    : 'bg-[#0D909A] hover:bg-[#0a7a82]'
+                                } ${syncingRowXero[order.id] ? 'opacity-50 cursor-wait' : ''}`}
+                                title={order.xero_invoice_id ? `Synced to Xero (${order.xero_invoice_id}) — click to re-sync` : 'Sync to Xero'}
+                              >
+                                {syncingRowXero[order.id] ? '...' : order.xero_invoice_id ? 'Synced' : 'Sync'}
+                              </button>
                             </td>
                             <td className="py-3 px-2 w-[70px]">
                               <button

@@ -29,6 +29,14 @@ interface OrderItem {
   subtotal: number;
 }
 
+interface OnlineOrderItem {
+  id: number;
+  product_name: string;
+  product_description?: string;
+  quantity: number;
+  product_price: number; // unit price for online orders
+}
+
 interface Order {
   id: number;
   order_id: string;
@@ -42,6 +50,21 @@ interface Order {
   notes?: string;
   last_modified_by?: string;
   last_modified_by_name?: string;
+  xero_invoice_id?: string;
+  updated_at: string;
+}
+
+interface OnlineOrder {
+  id: number;
+  order_id: string;
+  invoice_id?: string;
+  customer_name: string;
+  order_date: string;
+  delivery_date: string;
+  total_amount: number;
+  gst_percentage?: number;
+  status: string;
+  notes?: string;
   xero_invoice_id?: string;
   updated_at: string;
 }
@@ -297,15 +320,133 @@ export async function getXeroInvoice(xeroInvoiceId: string) {
   return data.Invoices?.[0] ?? null;
 }
 
+// ─── Online Order Invoice Sync ────────────────────────────────────────────────
+
+/**
+ * Push a GWC online (customer) order → Xero Invoice.
+ * Online orders use customer_name as the contact (no client_user linked).
+ * Returns the Xero InvoiceID.
+ */
+export async function syncOnlineOrderToXero(
+  order: OnlineOrder,
+  items: OnlineOrderItem[],
+): Promise<string> {
+  const supabase = getAdminSupabase();
+
+  // Find or create a Xero contact by customer name
+  const contactRes = await xeroFetch('/Contacts', {
+    method: 'POST',
+    body: JSON.stringify({
+      Contacts: [{
+        Name: order.customer_name,
+      }],
+    }),
+  });
+
+  if (!contactRes.ok) {
+    const err = await contactRes.text();
+    throw new Error(`Xero contact sync failed for online order: ${err}`);
+  }
+
+  const contactData = await contactRes.json();
+  const contactId: string = contactData.Contacts?.[0]?.ContactID;
+  if (!contactId) throw new Error('Xero did not return a ContactID for online order');
+
+  // Calculate GST
+  const gstRate = order.gst_percentage ?? 9;
+  const subtotal = items.reduce((sum, i) => sum + i.product_price * i.quantity, 0);
+  const gstAmount = subtotal * (gstRate / 100);
+
+  // Build line items
+  const lineItems = items.map((item) => ({
+    Description: item.product_description
+      ? `${item.product_name} – ${item.product_description}`
+      : item.product_name,
+    Quantity: item.quantity,
+    UnitAmount: item.product_price,
+    LineAmount: item.product_price * item.quantity,
+    TaxType: gstRate > 0 ? 'OUTPUT' : 'NONE',
+  }));
+
+  // Due date: 30 days from order date
+  const d = new Date(order.order_date);
+  d.setDate(d.getDate() + 30);
+  const dueDate = d.toISOString().split('T')[0];
+
+  const gstLine = gstRate > 0
+    ? ` | GST ${gstRate}%: SGD ${gstAmount.toFixed(2)} | Total incl. GST: SGD ${order.total_amount.toFixed(2)}`
+    : '';
+  const auditNote = `Synced from GWC on ${new Date().toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })}${gstLine}`;
+
+  const invoiceNumber = order.invoice_id || order.order_id;
+
+  const payload = {
+    Type: 'ACCREC',
+    Contact: { ContactID: contactId },
+    InvoiceNumber: invoiceNumber,
+    Reference: order.notes ? `${order.order_id} | ${order.notes}` : order.order_id,
+    Date: order.order_date,
+    DueDate: dueDate,
+    Status: mapStatusToXero(order.status),
+    LineItems: lineItems,
+    CurrencyCode: 'SGD',
+    Url: `${process.env.NEXT_PUBLIC_APP_URL}/admin/dashboard/order/onlineOrder`,
+  };
+
+  let xeroInvoiceId = order.xero_invoice_id;
+  let res: Response;
+
+  if (xeroInvoiceId) {
+    res = await xeroFetch(`/Invoices/${xeroInvoiceId}`, {
+      method: 'POST',
+      body: JSON.stringify({ Invoices: [{ ...payload, InvoiceID: xeroInvoiceId }] }),
+    });
+  } else {
+    res = await xeroFetch('/Invoices', {
+      method: 'PUT',
+      body: JSON.stringify({ Invoices: [payload] }),
+    });
+  }
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Xero invoice sync failed for online order: ${err}`);
+  }
+
+  const data = await res.json();
+  xeroInvoiceId = data.Invoices?.[0]?.InvoiceID;
+
+  if (!xeroInvoiceId) throw new Error('Xero did not return an InvoiceID for online order');
+
+  // Add audit note
+  await addXeroInvoiceNote(xeroInvoiceId, auditNote);
+
+  // Persist xero fields back to customer_order
+  await supabase
+    .from('customer_order')
+    .update({
+      xero_invoice_id: xeroInvoiceId,
+      xero_synced_at: new Date().toISOString(),
+    })
+    .eq('id', order.id);
+
+  return xeroInvoiceId;
+}
+
 // ─── Bulk Sync ────────────────────────────────────────────────────────────────
 
 /**
- * Sync all un-synced or recently changed orders to Xero.
+ * Sync all un-synced client orders and online orders to Xero.
  * Returns sync results.
  */
 export async function syncAllPendingInvoices(): Promise<{ synced: number; failed: number; errors: string[] }> {
   const supabase = getAdminSupabase();
 
+  let synced = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  // ── Client orders ──
   const { data: orders, error } = await supabase
     .from('client_order')
     .select(`
@@ -318,17 +459,32 @@ export async function syncAllPendingInvoices(): Promise<{ synced: number; failed
 
   if (error) throw error;
 
-  let synced = 0;
-  let failed = 0;
-  const errors: string[] = [];
-
   for (const order of orders ?? []) {
     try {
       await syncInvoiceToXero(order, order.items ?? [], order.client);
       synced++;
     } catch (e) {
       failed++;
-      errors.push(`Order ${order.invoice_id}: ${(e as Error).message}`);
+      errors.push(`Client Order ${order.invoice_id}: ${(e as Error).message}`);
+    }
+  }
+
+  // ── Online (customer) orders ──
+  const { data: onlineOrders, error: onlineError } = await supabase
+    .from('customer_order')
+    .select(`*, items:customer_order_item(*)`)
+    .neq('status', 'Cancelled')
+    .is('xero_invoice_id', null);
+
+  if (onlineError) throw onlineError;
+
+  for (const order of onlineOrders ?? []) {
+    try {
+      await syncOnlineOrderToXero(order, order.items ?? []);
+      synced++;
+    } catch (e) {
+      failed++;
+      errors.push(`Online Order ${order.invoice_id || order.order_id}: ${(e as Error).message}`);
     }
   }
 
