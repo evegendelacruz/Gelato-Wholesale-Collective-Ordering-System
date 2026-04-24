@@ -65,7 +65,7 @@ interface SupabaseOrderResponse {
   tracking_no: string;
   created_at: string;
   updated_at: string;
-  client_user?: { client_businessName?: string } | Array<{ client_businessName?: string }>;
+  client_user?: { client_operationName?: string } | Array<{ client_operationName?: string }>;
   billing_address?: string;
   ad_streetName?: string;
   ad_country?: string;
@@ -434,7 +434,7 @@ useEffect(() => {
           last_modified_by_name,
           xero_invoice_id,
           xero_synced_at,
-          client_user!client_order_client_auth_id_fkey(client_businessName)
+          client_user!client_order_client_auth_id_fkey(client_operationName)
         `)
         .order('order_date', { ascending: false });
 
@@ -456,9 +456,9 @@ useEffect(() => {
 
           if (order.client_user) {
             if (Array.isArray(order.client_user)) {
-              companyName = order.client_user[0]?.client_businessName || 'N/A';
+              companyName = order.client_user[0]?.client_operationName || 'N/A';
             } else {
-              companyName = order.client_user.client_businessName || 'N/A';
+              companyName = order.client_user.client_operationName || 'N/A';
             }
           }
 
@@ -959,7 +959,7 @@ const handleDelete = async () => {
         tracking_no,
         created_at,
         updated_at,
-        client_user!client_order_client_auth_id_fkey(client_businessName)
+        client_user!client_order_client_auth_id_fkey(client_operationName)
       `)
       .order('order_date', { ascending: false });
 
@@ -968,9 +968,9 @@ const handleDelete = async () => {
         let companyName = 'N/A';
         if (order.client_user) {
           if (Array.isArray(order.client_user)) {
-            companyName = order.client_user[0]?.client_businessName || 'N/A';
+            companyName = order.client_user[0]?.client_operationName || 'N/A';
           } else {
-            companyName = order.client_user.client_businessName || 'N/A';
+            companyName = order.client_user.client_operationName || 'N/A';
           }
         }
         return { ...order, company_name: companyName };
@@ -1059,7 +1059,7 @@ const handleDelete = async () => {
     // Fetch client data
     const { data: client, error: clientError } = await supabase
       .from('client_user')
-      .select('client_businessName, client_delivery_address')
+      .select('client_operationName, client_delivery_address')
       .eq('client_auth_id', order.client_auth_id)
       .single();
 
@@ -2147,14 +2147,14 @@ const handlePrintInvoice = async () => {
         doc.setFont('helvetica', 'bold');
         doc.text('BILL TO', 20, 67 - headerOffset);
         doc.setFont('helvetica', 'normal');
-        doc.text(clientData.client_businessName || 'N/A', 20, 72 - headerOffset);
+        doc.text(clientData.client_operationName || 'N/A', 20, 72 - headerOffset);
         const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
         doc.text(billAddress, 20, 77 - headerOffset);
 
         doc.setFont('helvetica', 'bold');
         doc.text('SHIP TO', 75, 67 - headerOffset);
         doc.setFont('helvetica', 'normal');
-        doc.text(clientData.client_businessName || 'N/A', 75, 72 - headerOffset);
+        doc.text(clientData.client_operationName || 'N/A', 75, 72 - headerOffset);
         const shipAddressParts = [
           clientData.ad_streetName,
           clientData.ad_country,
@@ -2581,14 +2581,14 @@ const handleDownloadPDF = async () => {
         doc.setFont('helvetica', 'bold');
         doc.text('BILL TO', 20, 67 - headerOffset);
         doc.setFont('helvetica', 'normal');
-        doc.text(clientData.client_businessName || 'N/A', 20, 72 - headerOffset);
+        doc.text(clientData.client_operationName || 'N/A', 20, 72 - headerOffset);
         const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
         doc.text(billAddress, 20, 77 - headerOffset);
 
         doc.setFont('helvetica', 'bold');
         doc.text('SHIP TO', 75, 67 - headerOffset);
         doc.setFont('helvetica', 'normal');
-        doc.text(clientData.client_businessName || 'N/A', 75, 72 - headerOffset);
+        doc.text(clientData.client_operationName || 'N/A', 75, 72 - headerOffset);
         const shipAddressParts = [
           clientData.ad_streetName,
           clientData.ad_country,
@@ -2712,7 +2712,7 @@ const handleViewInvoice = async (order) => {
     // Fetch client data with address details
     const { data: client } = await supabase
       .from('client_user')
-      .select('client_businessName, client_billing_address, client_person_incharge, ad_streetName, ad_country, ad_postal')
+      .select('client_operationName, client_billing_address, client_person_incharge, ad_streetName, ad_country, ad_postal')
       .eq('client_auth_id', order.client_auth_id)
       .single();
 
@@ -2784,6 +2784,8 @@ const handleViewInvoice = async (order) => {
     // Combine client data - use order's addresses if available, otherwise fall back to client's
     const combinedClientData = {
       ...client,
+      // Map client_operationName to client_businessName for invoice display
+      client_businessName: client?.client_operationName || '',
       // Use order's billing_address for Bill To if available
       client_billing_address: order.billing_address || client?.client_billing_address || '',
       // Use order's Ship To address fields if available
@@ -3010,7 +3012,7 @@ const handleViewInvoice = async (order) => {
           tracking_no,
           created_at,
           updated_at,
-          client_user!client_order_client_auth_id_fkey(client_businessName)
+          client_user!client_order_client_auth_id_fkey(client_operationName)
         `)
         .order('order_date', { ascending: false });
 
@@ -3020,9 +3022,9 @@ const handleViewInvoice = async (order) => {
           let companyName = 'N/A';
           if (order.client_user) {
             if (Array.isArray(order.client_user)) {
-              companyName = order.client_user[0]?.client_businessName || 'N/A';
+              companyName = order.client_user[0]?.client_operationName || 'N/A';
             } else {
-              companyName = order.client_user.client_businessName || 'N/A';
+              companyName = order.client_user.client_operationName || 'N/A';
             }
           }
           return { ...order, company_name: companyName };
@@ -4407,7 +4409,7 @@ const handleViewInvoice = async (order) => {
                     tracking_no,
                     created_at,
                     updated_at,
-                    client_user!client_order_client_auth_id_fkey(client_businessName)
+                    client_user!client_order_client_auth_id_fkey(client_operationName)
                   `)
                   .order('order_date', { ascending: false });
 
@@ -4419,9 +4421,9 @@ const handleViewInvoice = async (order) => {
                     let companyName = 'N/A';
                     if (order.client_user) {
                       if (Array.isArray(order.client_user)) {
-                        companyName = order.client_user[0]?.client_businessName || 'N/A';
+                        companyName = order.client_user[0]?.client_operationName || 'N/A';
                       } else {
-                        companyName = order.client_user.client_businessName || 'N/A';
+                        companyName = order.client_user.client_operationName || 'N/A';
                       }
                     }
                     return { ...order, company_name: companyName };
@@ -4552,7 +4554,7 @@ const handleViewInvoice = async (order) => {
                       tracking_no,
                       created_at,
                       updated_at,
-                      client_user!client_order_client_auth_id_fkey(client_businessName)
+                      client_user!client_order_client_auth_id_fkey(client_operationName)
                     `)
                     .order('order_date', { ascending: false });
 
@@ -4563,9 +4565,9 @@ const handleViewInvoice = async (order) => {
                       let companyName = 'N/A';
                       if (order.client_user) {
                         if (Array.isArray(order.client_user)) {
-                          companyName = order.client_user[0]?.client_businessName || 'N/A';
+                          companyName = order.client_user[0]?.client_operationName || 'N/A';
                         } else {
-                          companyName = order.client_user.client_businessName || 'N/A';
+                          companyName = order.client_user.client_operationName || 'N/A';
                         }
                       }
                       return { ...order, company_name: companyName };

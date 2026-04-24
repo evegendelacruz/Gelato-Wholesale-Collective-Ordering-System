@@ -181,7 +181,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         invoice_id,
         client_auth_id,
         client_user!client_order_client_auth_id_fkey(
-          client_businessName,
+          client_operationName,
           client_delivery_address,
           ad_streetName,
           ad_country,
@@ -320,7 +320,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
       const existingData = existingOrderData[order.invoice_id] || {};
 
       return {
-        company: clientData?.client_businessName || 'N/A',
+        company: clientData?.client_operationName || 'N/A',
         address: combinedAddress,
         invoice: order.invoice_id,
         order_type: 'client' as const,
@@ -390,7 +390,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
         // **MODIFIED: Check both client_order and customer_order**
         const { data: stillExistingClientOrders } = await supabase
           .from('client_order')
-          .select('invoice_id, client_user!client_order_client_auth_id_fkey(client_businessName)')
+          .select('invoice_id, client_user!client_order_client_auth_id_fkey(client_operationName)')
           .in('invoice_id', invoiceIds)
           .eq('delivery_date', existingDate);
 

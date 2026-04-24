@@ -29,7 +29,7 @@ interface ConsolidatedItem {
 } 
 
 interface ClientUser {
-  client_businessName?: string;
+  client_operationName?: string;
 }
 interface DeliveryDateData {
   delivery_date: string;
@@ -280,7 +280,7 @@ export default function ReportClientPage() {
           id,
           delivery_date,
           client_auth_id,
-          client_user!client_order_client_auth_id_fkey(client_businessName)
+          client_user!client_order_client_auth_id_fkey(client_operationName)
         `)
         .eq('delivery_date', deliveryDate)
         .not('status', 'eq', 'Cancelled')
@@ -325,8 +325,8 @@ export default function ReportClientPage() {
 
         clientOrders.forEach((order: Order) => {
           const companyName = Array.isArray(order.client_user)
-            ? order.client_user[0]?.client_businessName || 'N/A'
-            : order.client_user?.client_businessName || 'N/A';
+            ? order.client_user[0]?.client_operationName || 'N/A'
+            : order.client_user?.client_operationName || 'N/A';
 
           const orderItemsList = clientOrderItems?.filter((item: OrderItem) => item.order_id === order.id) || [];
 

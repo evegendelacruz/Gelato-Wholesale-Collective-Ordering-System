@@ -1896,7 +1896,7 @@ const handleUpdate = async () => {
                       PERSON INCHARGE
                     </th>
                     <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
-                      BUSINESS NAME
+                      OPERATION NAME
                     </th>
                     <th className="text-left py-2 px-3 font-bold text-xs" style={{ color: '#5C2E1F' }}>
                       EMAIL
@@ -1943,7 +1943,7 @@ const handleUpdate = async () => {
                           />
                         </td>
                         <td className="py-2 px-3 text-xs">{client.client_person_incharge}</td>
-                        <td className="py-2 px-3 text-xs">{client.client_businessName}</td>
+                        <td className="py-2 px-3 text-xs">{client.client_operationName || client.client_businessName}</td>
                         <td className="py-2 px-3 text-xs">{client.client_email}</td>
                         <td className="py-2 px-3 text-xs">{client.client_person_contact}</td>
                         <td className="py-2 px-3 text-xs">
