@@ -216,7 +216,10 @@ export default function OrderPage() {
   const [isGeneratingNewSticker, setIsGeneratingNewSticker] = useState(false);
   const [totalStickerCount, setTotalStickerCount] = useState(0);
   const [showStickerDropdown, setShowStickerDropdown] = useState<number | null>(null);
+  const [stickerDropdownPosition, setStickerDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   const [showItemStickerDropdown, setShowItemStickerDropdown] = useState<string | null>(null); // format: "orderId-itemIndex"
+  const [itemStickerDropdownPosition, setItemStickerDropdownPosition] = useState<{ top: number; left: number } | null>(null);
+  const [itemStickerDropdownData, setItemStickerDropdownData] = useState<{ item: { id?: number; display_product_name: string; product_name?: string; product_id?: number; quantity: number; product_ingredient?: string | null; label_ingredients?: string | null; product_shelflife?: string | null }; orderId: number; orderDate: string } | null>(null);
 
   // Xero sync state
   const [syncingToXero, setSyncingToXero] = useState(false);
@@ -1074,7 +1077,10 @@ const handleDelete = async () => {
     }
 
     setSelectedOrderItems(itemsWithDetails);
-    setSelectedClientData(client);
+    setSelectedClientData({
+      ...client,
+      client_businessName: client.client_operationName
+    });
     setShowLabelGenerator(true);
   } catch (error) {
     console.error('Error loading data for labels:', error);
@@ -3529,7 +3535,19 @@ const handleViewInvoice = async (order) => {
                         <td className="py-3 px-2 w-[90px] relative">
                           <div className="relative inline-block">
                             <button
-                              onClick={() => setShowStickerDropdown(showStickerDropdown === order.id ? null : order.id)}
+                              onClick={(e) => {
+                                if (showStickerDropdown === order.id) {
+                                  setShowStickerDropdown(null);
+                                  setStickerDropdownPosition(null);
+                                } else {
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setStickerDropdownPosition({
+                                    top: rect.bottom + 4,
+                                    left: rect.left
+                                  });
+                                  setShowStickerDropdown(order.id);
+                                }
+                              }}
                               className="flex items-center gap-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
                               title="Sticker Options"
                             >
@@ -3537,28 +3555,6 @@ const handleViewInvoice = async (order) => {
                               Sticker
                               <ChevronDown size={12} />
                             </button>
-                            {showStickerDropdown === order.id && (
-                              <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[140px]">
-                                <button
-                                  onClick={() => {
-                                    handleOpenNewStickerModal(order.id, "barcode");
-                                    setShowStickerDropdown(null);
-                                  }}
-                                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
-                                >
-                                  Barcode Sticker
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    handleOpenNewStickerModal(order.id, "product");
-                                    setShowStickerDropdown(null);
-                                  }}
-                                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
-                                >
-                                  Product Sticker
-                                </button>
-                              </div>
-                            )}
                           </div>
                         </td>
                         <td className="py-3 px-2 w-[70px]">
@@ -3646,7 +3642,25 @@ const handleViewInvoice = async (order) => {
                             <td className="py-2 px-2 text-center relative">
                               <div className="relative inline-block">
                                 <button
-                                  onClick={() => setShowItemStickerDropdown(showItemStickerDropdown === `${order.id}-${index}` ? null : `${order.id}-${index}`)}
+                                  onClick={(e) => {
+                                    if (showItemStickerDropdown === `${order.id}-${index}`) {
+                                      setShowItemStickerDropdown(null);
+                                      setItemStickerDropdownPosition(null);
+                                      setItemStickerDropdownData(null);
+                                    } else {
+                                      const rect = e.currentTarget.getBoundingClientRect();
+                                      setItemStickerDropdownPosition({
+                                        top: rect.bottom + 4,
+                                        left: rect.left - 80
+                                      });
+                                      setShowItemStickerDropdown(`${order.id}-${index}`);
+                                      setItemStickerDropdownData({
+                                        item,
+                                        orderId: order.id,
+                                        orderDate: order.order_date
+                                      });
+                                    }
+                                  }}
                                   className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white rounded hover:opacity-80 transition-opacity"
                                   style={{ backgroundColor: '#10B981' }}
                                   title={`Generate ${item.quantity} sticker(s)`}
@@ -3655,22 +3669,6 @@ const handleViewInvoice = async (order) => {
                                   <span>x{item.quantity}</span>
                                   <ChevronDown size={10} />
                                 </button>
-                                {showItemStickerDropdown === `${order.id}-${index}` && (
-                                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[140px]">
-                                    <button
-                                      onClick={() => handleItemStickerModal(item, order.id, order.order_date, "barcode")}
-                                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
-                                    >
-                                      Barcode Sticker
-                                    </button>
-                                    <button
-                                      onClick={() => handleItemStickerModal(item, order.id, order.order_date, "product")}
-                                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
-                                    >
-                                      Product Sticker
-                                    </button>
-                                  </div>
-                                )}
                               </div>
                             </td>
                           </tr>
@@ -5562,6 +5560,103 @@ const handleViewInvoice = async (order) => {
             </div>
           )}
         </main>
+
+        {/* Fixed Sticker Dropdown - Rendered outside container */}
+        {showStickerDropdown !== null && stickerDropdownPosition && (
+          <>
+            {/* Backdrop to close dropdown when clicking outside */}
+            <div
+              className="fixed inset-0 z-[9998]"
+              onClick={() => {
+                setShowStickerDropdown(null);
+                setStickerDropdownPosition(null);
+              }}
+            />
+            <div
+              className="fixed bg-white border border-gray-200 rounded-lg shadow-xl z-[9999] min-w-[140px]"
+              style={{
+                top: stickerDropdownPosition.top,
+                left: stickerDropdownPosition.left
+              }}
+            >
+              <button
+                onClick={() => {
+                  handleOpenNewStickerModal(showStickerDropdown, "barcode");
+                  setShowStickerDropdown(null);
+                  setStickerDropdownPosition(null);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
+              >
+                Barcode Sticker
+              </button>
+              <button
+                onClick={() => {
+                  handleOpenNewStickerModal(showStickerDropdown, "product");
+                  setShowStickerDropdown(null);
+                  setStickerDropdownPosition(null);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
+              >
+                Product Sticker
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Fixed Item Sticker Dropdown - Rendered outside container */}
+        {showItemStickerDropdown !== null && itemStickerDropdownPosition && itemStickerDropdownData && (
+          <>
+            {/* Backdrop to close dropdown when clicking outside */}
+            <div
+              className="fixed inset-0 z-[9998]"
+              onClick={() => {
+                setShowItemStickerDropdown(null);
+                setItemStickerDropdownPosition(null);
+                setItemStickerDropdownData(null);
+              }}
+            />
+            <div
+              className="fixed bg-white border border-gray-200 rounded-lg shadow-xl z-[9999] min-w-[140px]"
+              style={{
+                top: itemStickerDropdownPosition.top,
+                left: itemStickerDropdownPosition.left
+              }}
+            >
+              <button
+                onClick={() => {
+                  handleItemStickerModal(
+                    itemStickerDropdownData.item,
+                    itemStickerDropdownData.orderId,
+                    itemStickerDropdownData.orderDate,
+                    "barcode"
+                  );
+                  setShowItemStickerDropdown(null);
+                  setItemStickerDropdownPosition(null);
+                  setItemStickerDropdownData(null);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-t-lg"
+              >
+                Barcode Sticker
+              </button>
+              <button
+                onClick={() => {
+                  handleItemStickerModal(
+                    itemStickerDropdownData.item,
+                    itemStickerDropdownData.orderId,
+                    itemStickerDropdownData.orderDate,
+                    "product"
+                  );
+                  setShowItemStickerDropdown(null);
+                  setItemStickerDropdownPosition(null);
+                  setItemStickerDropdownData(null);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded-b-lg"
+              >
+                Product Sticker
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
