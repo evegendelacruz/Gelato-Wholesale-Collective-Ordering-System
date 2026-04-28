@@ -210,6 +210,12 @@ export async function syncInvoiceToXero(
     contactId = await syncContactToXero(client);
   }
 
+  // Un-archive the contact if it has been archived in Xero
+  await xeroFetch('/Contacts', {
+    method: 'POST',
+    body: JSON.stringify({ Contacts: [{ ContactID: contactId, ContactStatus: 'ACTIVE' }] }),
+  });
+
   // Calculate GST
   const gstRate = order.gst_percentage ?? 9;
   const subtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
