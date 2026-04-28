@@ -211,10 +211,17 @@ export async function syncInvoiceToXero(
   }
 
   // Un-archive the contact if it has been archived in Xero
-  await xeroFetch('/Contacts', {
+  const unarchiveRes = await xeroFetch('/Contacts', {
     method: 'POST',
     body: JSON.stringify({ Contacts: [{ ContactID: contactId, ContactStatus: 'ACTIVE' }] }),
   });
+  if (!unarchiveRes.ok) {
+    const unarchiveErr = await unarchiveRes.text();
+    console.error('[xeroSync] Failed to un-archive contact:', unarchiveErr);
+    throw new Error(`Xero contact un-archive failed: ${unarchiveErr}`);
+  }
+  const unarchiveData = await unarchiveRes.json();
+  console.log('[xeroSync] Un-archive result:', JSON.stringify(unarchiveData?.Contacts?.[0]?.ContactStatus));
 
   // Calculate GST
   const gstRate = order.gst_percentage ?? 9;
