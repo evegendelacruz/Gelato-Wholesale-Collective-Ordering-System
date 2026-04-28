@@ -215,7 +215,8 @@ export async function syncInvoiceToXero(
   const subtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
   const gstAmount = subtotal * (gstRate / 100);
 
-  // Build line items — pre-tax amounts, Xero calculates totals
+  // Build line items — pre-tax amounts, Xero calculates totals.
+  // TaxType is intentionally omitted so Xero uses the org's default tax rate.
   const lineItems = items.map((item) => ({
     Description: item.product_description
       ? `${item.product_name} – ${item.product_description}`
@@ -223,7 +224,6 @@ export async function syncInvoiceToXero(
     Quantity: item.quantity,
     UnitAmount: item.unit_price,
     LineAmount: item.subtotal,
-    TaxType: gstRate > 0 ? 'OUTPUT' : 'NONE',
   }));
 
   // Due date: invoice_due_date or 30 days from order_date
@@ -402,7 +402,7 @@ export async function syncOnlineOrderToXero(
   const subtotal = items.reduce((sum, i) => sum + i.product_price * i.quantity, 0);
   const gstAmount = subtotal * (gstRate / 100);
 
-  // Build line items
+  // Build line items — TaxType omitted so Xero uses the org's default tax rate.
   const lineItems = items.map((item) => ({
     Description: item.product_description
       ? `${item.product_name} – ${item.product_description}`
@@ -410,7 +410,6 @@ export async function syncOnlineOrderToXero(
     Quantity: item.quantity,
     UnitAmount: item.product_price,
     LineAmount: item.product_price * item.quantity,
-    TaxType: gstRate > 0 ? 'OUTPUT' : 'NONE',
   }));
 
   // Due date: 30 days from order date
