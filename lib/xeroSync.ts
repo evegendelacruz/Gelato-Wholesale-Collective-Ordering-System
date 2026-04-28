@@ -215,7 +215,8 @@ export async function syncInvoiceToXero(
   const subtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
   const gstAmount = subtotal * (gstRate / 100);
 
-  // Build line items — pre-tax amounts, Xero calculates totals
+  // Build line items — pre-tax amounts, Xero calculates totals.
+  // TaxType is intentionally omitted so Xero uses the org's default tax rate.
   const lineItems = items.map((item) => ({
     Description: item.product_description
       ? `${item.product_name} – ${item.product_description}`
@@ -223,7 +224,6 @@ export async function syncInvoiceToXero(
     Quantity: item.quantity,
     UnitAmount: item.unit_price,
     LineAmount: item.subtotal,
-    TaxType: gstRate > 0 ? 'OUTPUT' : 'NONE',
   }));
 
   // Due date: invoice_due_date or 30 days from order_date
@@ -272,12 +272,43 @@ export async function syncInvoiceToXero(
   }
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Xero invoice sync failed: ${err}`);
+    const errText = await res.text();
+    // If creating a new invoice failed, check if one already exists in Xero
+    // with this InvoiceNumber (e.g. from a previous partial sync).
+    if (!xeroInvoiceId) {
+      const existing = await findXeroInvoiceByNumber(order.invoice_id);
+      if (existing) {
+        xeroInvoiceId = existing;
+        // Retry as an update now that we have the real ID
+        const retryRes = await xeroFetch(`/Invoices/${xeroInvoiceId}`, {
+          method: 'POST',
+          body: JSON.stringify({ Invoices: [{ ...payload, InvoiceID: xeroInvoiceId }] }),
+        });
+        if (!retryRes.ok) {
+          const retryErr = await retryRes.text();
+          throw new Error(`Xero invoice sync failed: ${retryErr}`);
+        }
+        const retryData = await retryRes.json();
+        const retryInvoice = retryData.Invoices?.[0];
+        if (retryInvoice?.HasErrors || !retryInvoice?.InvoiceID || retryInvoice.InvoiceID === '00000000-0000-0000-0000-000000000000') {
+          throw new Error(`Xero invoice sync failed: ${JSON.stringify(retryInvoice)}`);
+        }
+        xeroInvoiceId = retryInvoice.InvoiceID;
+      } else {
+        throw new Error(`Xero invoice sync failed: ${errText}`);
+      }
+    } else {
+      throw new Error(`Xero invoice sync failed: ${errText}`);
+    }
+  } else {
+    const data = await res.json();
+    const invoice = data.Invoices?.[0];
+    // Xero can return HTTP 200 with HasErrors:true and a null GUID — treat as failure
+    if (invoice?.HasErrors || !invoice?.InvoiceID || invoice.InvoiceID === '00000000-0000-0000-0000-000000000000') {
+      throw new Error(`Xero invoice sync failed: ${JSON.stringify(invoice)}`);
+    }
+    xeroInvoiceId = invoice.InvoiceID;
   }
-
-  const data = await res.json();
-  xeroInvoiceId = data.Invoices?.[0]?.InvoiceID;
 
   if (!xeroInvoiceId) throw new Error('Xero did not return an InvoiceID');
 
@@ -312,6 +343,20 @@ export async function addXeroInvoiceNote(xeroInvoiceId: string, note: string): P
 }
 
 // ─── Fetch Xero Invoice ───────────────────────────────────────────────────────
+
+/**
+ * Search Xero for an invoice by InvoiceNumber.
+ * Returns the InvoiceID if found, null otherwise.
+ * Used to recover from partial syncs where the ID was never stored locally.
+ */
+async function findXeroInvoiceByNumber(invoiceNumber: string): Promise<string | null> {
+  const res = await xeroFetch(`/Invoices?InvoiceNumbers=${encodeURIComponent(invoiceNumber)}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  const invoice = data.Invoices?.[0];
+  if (!invoice?.InvoiceID || invoice.InvoiceID === '00000000-0000-0000-0000-000000000000') return null;
+  return invoice.InvoiceID;
+}
 
 export async function getXeroInvoice(xeroInvoiceId: string) {
   const res = await xeroFetch(`/Invoices/${xeroInvoiceId}`);
@@ -357,7 +402,7 @@ export async function syncOnlineOrderToXero(
   const subtotal = items.reduce((sum, i) => sum + i.product_price * i.quantity, 0);
   const gstAmount = subtotal * (gstRate / 100);
 
-  // Build line items
+  // Build line items — TaxType omitted so Xero uses the org's default tax rate.
   const lineItems = items.map((item) => ({
     Description: item.product_description
       ? `${item.product_name} – ${item.product_description}`
@@ -365,7 +410,6 @@ export async function syncOnlineOrderToXero(
     Quantity: item.quantity,
     UnitAmount: item.product_price,
     LineAmount: item.product_price * item.quantity,
-    TaxType: gstRate > 0 ? 'OUTPUT' : 'NONE',
   }));
 
   // Due date: 30 days from order date
@@ -409,12 +453,39 @@ export async function syncOnlineOrderToXero(
   }
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Xero invoice sync failed for online order: ${err}`);
+    const errText = await res.text();
+    if (!xeroInvoiceId) {
+      const existing = await findXeroInvoiceByNumber(invoiceNumber);
+      if (existing) {
+        xeroInvoiceId = existing;
+        const retryRes = await xeroFetch(`/Invoices/${xeroInvoiceId}`, {
+          method: 'POST',
+          body: JSON.stringify({ Invoices: [{ ...payload, InvoiceID: xeroInvoiceId }] }),
+        });
+        if (!retryRes.ok) {
+          const retryErr = await retryRes.text();
+          throw new Error(`Xero invoice sync failed for online order: ${retryErr}`);
+        }
+        const retryData = await retryRes.json();
+        const retryInvoice = retryData.Invoices?.[0];
+        if (retryInvoice?.HasErrors || !retryInvoice?.InvoiceID || retryInvoice.InvoiceID === '00000000-0000-0000-0000-000000000000') {
+          throw new Error(`Xero invoice sync failed for online order: ${JSON.stringify(retryInvoice)}`);
+        }
+        xeroInvoiceId = retryInvoice.InvoiceID;
+      } else {
+        throw new Error(`Xero invoice sync failed for online order: ${errText}`);
+      }
+    } else {
+      throw new Error(`Xero invoice sync failed for online order: ${errText}`);
+    }
+  } else {
+    const data = await res.json();
+    const invoice = data.Invoices?.[0];
+    if (invoice?.HasErrors || !invoice?.InvoiceID || invoice.InvoiceID === '00000000-0000-0000-0000-000000000000') {
+      throw new Error(`Xero invoice sync failed for online order: ${JSON.stringify(invoice)}`);
+    }
+    xeroInvoiceId = invoice.InvoiceID;
   }
-
-  const data = await res.json();
-  xeroInvoiceId = data.Invoices?.[0]?.InvoiceID;
 
   if (!xeroInvoiceId) throw new Error('Xero did not return an InvoiceID for online order');
 
