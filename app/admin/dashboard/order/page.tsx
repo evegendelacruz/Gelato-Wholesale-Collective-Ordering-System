@@ -70,6 +70,7 @@ interface SupabaseOrderResponse {
   ad_streetName?: string;
   ad_country?: string;
   ad_postal?: string;
+  gst_percentage?: number;
 }
 
 // Helper function to load image as base64 for PDF
@@ -226,6 +227,9 @@ export default function OrderPage() {
   const [xeroSyncMessage, setXeroSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncingRowXero, setSyncingRowXero] = useState<Record<number, boolean>>({});
   const [xeroInvoiceMap, setXeroInvoiceMap] = useState<Record<string, { Status: string; AmountDue: number; AmountPaid: number }>>({});
+
+  // Ref to track if order totals have been corrected
+  const hasCorrectedTotals = useRef(false);
 
   // Edit Invoice state
   const [showEditInvoiceModal, setShowEditInvoiceModal] = useState(false);
@@ -532,6 +536,88 @@ useEffect(() => {
 
   fetchOrders();
 }, []);
+
+// Auto-correct order totals to include GST
+useEffect(() => {
+  const correctOrderTotals = async () => {
+    // Prevent running multiple times
+    if (hasCorrectedTotals.current || orders.length === 0 || loading) return;
+    hasCorrectedTotals.current = true;
+
+    // Get default GST percentage
+    const savedGst = localStorage.getItem('defaultGstPercent_client');
+    const defaultGstPercent = savedGst ? parseFloat(savedGst) : 9;
+
+    // Find orders that might need correction (no gst_percentage stored)
+    const ordersToCheck = orders.filter(order =>
+      order.gst_percentage === null || order.gst_percentage === undefined
+    );
+
+    if (ordersToCheck.length === 0) return;
+
+    // Fetch all order items for orders that need checking
+    const orderIds = ordersToCheck.map(o => o.id);
+    const { data: allItems } = await supabase
+      .from('client_order_item')
+      .select('order_id, subtotal')
+      .in('order_id', orderIds);
+
+    if (!allItems) return;
+
+    // Group items by order_id
+    const itemsByOrder: Record<number, number> = {};
+    allItems.forEach(item => {
+      if (!itemsByOrder[item.order_id]) {
+        itemsByOrder[item.order_id] = 0;
+      }
+      itemsByOrder[item.order_id] += item.subtotal || 0;
+    });
+
+    // Check each order and update if needed
+    const updatedOrders: Order[] = [...orders];
+    let hasUpdates = false;
+
+    for (const order of ordersToCheck) {
+      const subtotal = itemsByOrder[order.id] || 0;
+      if (subtotal === 0) continue;
+
+      const gstPercent = defaultGstPercent;
+      const correctTotal = subtotal * (1 + gstPercent / 100);
+      const storedTotal = order.total_amount || 0;
+      const totalDifference = Math.abs(storedTotal - correctTotal);
+
+      // Update if total is off by more than $0.01
+      if (totalDifference > 0.01) {
+        const { error } = await supabase
+          .from('client_order')
+          .update({
+            total_amount: correctTotal,
+            gst_percentage: gstPercent
+          })
+          .eq('id', order.id);
+
+        if (!error) {
+          // Update local state
+          const orderIndex = updatedOrders.findIndex(o => o.id === order.id);
+          if (orderIndex !== -1) {
+            updatedOrders[orderIndex] = {
+              ...updatedOrders[orderIndex],
+              total_amount: correctTotal,
+              gst_percentage: gstPercent
+            };
+            hasUpdates = true;
+          }
+        }
+      }
+    }
+
+    if (hasUpdates) {
+      setOrders(updatedOrders);
+    }
+  };
+
+  correctOrderTotals();
+}, [orders, loading]); // Run when orders are loaded and loading is complete
 
   const filteredOrders = orders.filter(order => {
   const searchLower = searchQuery.toLowerCase();
@@ -2802,18 +2888,63 @@ const handleViewInvoice = async (order) => {
 
     setClientData(combinedClientData);
     setOrderItems(itemsWithDetails);
-    setSelectedOrder(order);
-    // Calculate GST percentage from stored total if possible, otherwise use default from localStorage or 9%
+
+    // Calculate subtotal from items
     const subtotal = itemsWithDetails.reduce((sum, item) => sum + item.subtotal, 0);
-    if (subtotal > 0 && order.total_amount > subtotal) {
-      const derivedGst = ((order.total_amount - subtotal) / subtotal) * 100;
-      setCurrentInvoiceGstPercent(Math.round(derivedGst * 100) / 100); // Round to 2 decimal places
+
+    // Determine GST percentage: use stored value, or derive from total, or use default
+    let gstPercent: number;
+    if (order.gst_percentage !== null && order.gst_percentage !== undefined) {
+      // Use stored GST percentage
+      gstPercent = order.gst_percentage;
+    } else if (subtotal > 0 && order.total_amount > subtotal) {
+      // Try to derive GST from stored total
+      gstPercent = Math.round(((order.total_amount - subtotal) / subtotal) * 10000) / 100;
     } else {
       // Use saved default GST or fallback to 9%
       const savedGst = localStorage.getItem('defaultGstPercent_client');
       const defaultGst = savedGst ? parseFloat(savedGst) : 9;
-      setCurrentInvoiceGstPercent(!isNaN(defaultGst) ? defaultGst : 9);
+      gstPercent = !isNaN(defaultGst) ? defaultGst : 9;
     }
+
+    setCurrentInvoiceGstPercent(gstPercent);
+
+    // Calculate correct total with GST
+    const gstAmount = subtotal * (gstPercent / 100);
+    const correctTotal = subtotal + gstAmount;
+
+    // If stored total doesn't include GST correctly, auto-update the order
+    const storedTotal = order.total_amount || 0;
+    const totalDifference = Math.abs(storedTotal - correctTotal);
+
+    // Update if total is off by more than $0.01 (to account for rounding)
+    if (subtotal > 0 && totalDifference > 0.01) {
+      // Update database with correct total and GST percentage
+      const { error: updateError } = await supabase
+        .from('client_order')
+        .update({
+          total_amount: correctTotal,
+          gst_percentage: gstPercent
+        })
+        .eq('id', order.id);
+
+      if (!updateError) {
+        // Update the order object with correct values
+        order.total_amount = correctTotal;
+        order.gst_percentage = gstPercent;
+
+        // Update orders list
+        setOrders(prevOrders =>
+          prevOrders.map(o =>
+            o.id === order.id
+              ? { ...o, total_amount: correctTotal, gst_percentage: gstPercent }
+              : o
+          )
+        );
+      }
+    }
+
+    setSelectedOrder(order);
 
     // Load saved header for this specific invoice, or use default
     const savedHeaderId = invoiceHeaders[order.invoice_id];
@@ -2932,7 +3063,8 @@ const handleViewInvoice = async (order) => {
       const { error: orderError } = await supabase
         .from('client_order')
         .update({
-          total_amount: newTotal
+          total_amount: newTotal,
+          gst_percentage: editInvoiceGstPercent
         })
         .eq('id', selectedOrder.id);
 
@@ -2949,7 +3081,8 @@ const handleViewInvoice = async (order) => {
 
       setSelectedOrder(prev => ({
         ...prev,
-        total_amount: newTotal
+        total_amount: newTotal,
+        gst_percentage: editInvoiceGstPercent
       }));
 
       // Update the current invoice GST percentage
@@ -3018,6 +3151,7 @@ const handleViewInvoice = async (order) => {
           tracking_no,
           created_at,
           updated_at,
+          gst_percentage,
           client_user!client_order_client_auth_id_fkey(client_operationName)
         `)
         .order('order_date', { ascending: false });
