@@ -43,7 +43,7 @@ export default function Calendar() {
         order_id,
         client_auth_id,
         delivery_date,
-        client_user!client_order_client_auth_id_fkey(client_businessName)
+        client_user!client_order_client_auth_id_fkey(client_operationName, client_businessName)
       `)
       .order('delivery_date', { ascending: true });
 
@@ -64,7 +64,7 @@ export default function Calendar() {
         order_id: string;
         client_auth_id: string;
         delivery_date: string;
-        client_user: { client_businessName: string } | { client_businessName: string }[] | null;
+        client_user: { client_operationName?: string; client_businessName?: string } | { client_operationName?: string; client_businessName?: string }[] | null;
       }) => {
         const { data: items } = await supabase
           .from('client_order_item')
@@ -76,9 +76,11 @@ export default function Calendar() {
         let companyName = 'N/A';
         if (order.client_user) {
           if (Array.isArray(order.client_user)) {
-            companyName = order.client_user[0]?.client_businessName || 'N/A';
+            // Prefer operation name, fallback to business name
+            companyName = order.client_user[0]?.client_operationName || order.client_user[0]?.client_businessName || 'N/A';
           } else {
-            companyName = order.client_user.client_businessName || 'N/A';
+            // Prefer operation name, fallback to business name
+            companyName = order.client_user.client_operationName || order.client_user.client_businessName || 'N/A';
           }
         }
 
