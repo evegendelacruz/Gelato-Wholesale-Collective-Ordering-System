@@ -257,6 +257,11 @@ export async function syncInvoiceToXero(
   let xeroInvoiceId = order.xero_invoice_id;
   let res: Response;
 
+  // Xero does not allow creating a new invoice directly as VOIDED.
+  // For new invoices, create as DRAFT first then void in a follow-up call.
+  const isNewAndVoided = !xeroInvoiceId && payload.Status === 'VOIDED';
+  const createPayload = isNewAndVoided ? { ...payload, Status: 'DRAFT' } : payload;
+
   if (xeroInvoiceId) {
     // Update existing invoice
     res = await xeroFetch(`/Invoices/${xeroInvoiceId}`, {
@@ -267,12 +272,13 @@ export async function syncInvoiceToXero(
     // Create new invoice
     res = await xeroFetch('/Invoices', {
       method: 'PUT',
-      body: JSON.stringify({ Invoices: [payload] }),
+      body: JSON.stringify({ Invoices: [createPayload] }),
     });
   }
 
   if (!res.ok) {
     const errText = await res.text();
+    console.error('[xeroSync] PUT /Invoices 400 body:', errText);
     // If creating a new invoice failed, check if one already exists in Xero
     // with this InvoiceNumber (e.g. from a previous partial sync).
     if (!xeroInvoiceId) {
@@ -336,6 +342,14 @@ export async function syncInvoiceToXero(
   }
 
   if (!xeroInvoiceId) throw new Error('Xero did not return an InvoiceID');
+
+  // If we created the invoice as DRAFT but it should be VOIDED, void it now
+  if (isNewAndVoided) {
+    await xeroFetch(`/Invoices/${xeroInvoiceId}`, {
+      method: 'POST',
+      body: JSON.stringify({ Invoices: [{ InvoiceID: xeroInvoiceId, Status: 'VOIDED' }] }),
+    });
+  }
 
   // Add audit trail as a history note on the Xero invoice
   await addXeroInvoiceNote(xeroInvoiceId, auditNote);
