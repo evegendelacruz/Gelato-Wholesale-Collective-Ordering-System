@@ -5,6 +5,9 @@ import {Check, Printer} from 'lucide-react';
 import { generateAutoPrintPDF } from '@/lib/bartenderAutoPrint';
 import { printLabelsWithBarTender, checkBarTenderStatus, LabelData } from '@/lib/bartenderAPI';
 
+// Fixed allergen text for all labels
+const DEFAULT_ALLERGEN = 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.';
+
 const LabelGenerator = ({ orderItems, clientData, onUpdate }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -142,7 +145,7 @@ const _handlePrintLabels = async () => {
           companyName: clientData?.client_businessName || 'Company Name',
           productName: item.product_name || 'Product Name',
           ingredients: item.ingredients || 'Ingredients not available',
-          allergen: item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+          allergen: DEFAULT_ALLERGEN,
           bestBefore: calculateBestBefore(item.order_date || new Date()),
           batchNumber: ''
         };
@@ -205,7 +208,7 @@ const _handlePrintLabels = async () => {
         doc.setFontSize(4.5);
         doc.setFont(fontsLoaded ? 'Arial' : 'helvetica', 'bold');
 
-        const allergenLines = doc.splitTextToSize(data.allergen, 32);
+        const allergenLines = doc.splitTextToSize(DEFAULT_ALLERGEN, 32);
         const allergenTextHeight = allergenLines.length * 2;
 
         const allergenContentEndY = storageFixedY - 1;
@@ -381,7 +384,7 @@ const handleBarTenderSDKPrint = async () => {
         companyName: clientData?.client_businessName || 'Company Name',
         productName: item.product_name || 'Product Name',
         ingredients: item.ingredients || 'Ingredients not available',
-        allergen: item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+        allergen: DEFAULT_ALLERGEN,
         bestBefore: calculateBestBefore(item.order_date || new Date()),
         batchNumber: ''
       };
@@ -392,7 +395,7 @@ const handleBarTenderSDKPrint = async () => {
           companyName: data.companyName,
           productName: data.productName,
           ingredients: data.ingredients,
-          allergen: data.allergen,
+          allergen: DEFAULT_ALLERGEN,
           bestBefore: data.bestBefore,
           batchNumber: data.batchNumber
         });
@@ -442,11 +445,11 @@ const handleBarTenderSDKPrint = async () => {
       companyName: clientData?.client_businessName || 'Company Name',
       productName: item.product_name || 'Product Name',
       ingredients: item.ingredients || 'Ingredients not available',
-      allergen: item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+      allergen: DEFAULT_ALLERGEN,
       bestBefore: calculateBestBefore(item.order_date || new Date()),
       batchNumber: ''
     };
-    
+
     const storageInfo = `Keep frozen. Store below -18 degree Celsius. Do not re-freeze once thawed.`;
 
 
@@ -457,7 +460,7 @@ const handleBarTenderSDKPrint = async () => {
             <div class="company-name">${data.companyName}</div>
             <div class="product-name">${data.productName}</div>
             <div class="ingredients-text">${data.ingredients}</div>
-            <div class="allergen-text">${data.allergen}</div>
+            <div class="allergen-text">${DEFAULT_ALLERGEN}</div>
             <div class="storage-info">
               ${storageInfo}
             </div>
@@ -710,10 +713,11 @@ const handleBarTenderSDKPrint = async () => {
       productName: item.product_name || 'Product Name',
       // Use saved label data if available, otherwise use product defaults
       ingredients: item.label_ingredients || item.ingredients || 'Ingredients not available',
-      allergen: item.label_allergens || item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+      // Always use default allergen, only use saved label_allergens if user has edited it
+      allergen: DEFAULT_ALLERGEN,
       // Use saved best_before if available, otherwise calculate
-      bestBefore: item.best_before 
-        ? formatDateDisplay(item.best_before) 
+      bestBefore: item.best_before
+        ? formatDateDisplay(item.best_before)
         : (item.bestBefore || calculateBestBefore(item.order_date || new Date())),
       // Use saved batch_number if available
       batchNumber: item.batch_number ? String(item.batch_number) : (item.batchNumber || '')
@@ -769,7 +773,7 @@ useEffect(() => {
         companyName: clientData?.client_businessName || 'Company Name',
         productName: item.product_name || 'Product Name',
         ingredients: item.ingredients || 'Ingredients not available',
-        allergen: item.allergen || 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.',
+        allergen: DEFAULT_ALLERGEN,
         bestBefore: calculateBestBefore(item.order_date || new Date()),
         batchNumber: ''
       };
@@ -777,7 +781,7 @@ useEffect(() => {
       const companyName = data.companyName;
       const productName = data.productName;
       const ingredients = data.ingredients;
-      const allergenInfo = data.allergen;
+      const allergenInfo = DEFAULT_ALLERGEN;
       ctx.fillStyle = '#000000';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
@@ -1259,7 +1263,7 @@ allergenLines.forEach((line, idx) => {
                             Allergen Information
                           </label>
                           <textarea
-                            value={data.allergen}
+                            value={DEFAULT_ALLERGEN}
                             onChange={(e) => {
                               const newData = [...editableData];
                               newData[index].allergen = e.target.value;
@@ -1378,7 +1382,7 @@ allergenLines.forEach((line, idx) => {
                       const updateData = {
                         product_name: data.productName || null,  // ADD THIS LINE
                         label_ingredients: data.ingredients || null,
-                        label_allergens: data.allergen || null,
+                        label_allergens: DEFAULT_ALLERGEN,
                         best_before: convertToPostgresDate(data.bestBefore),
                         batch_number: batchNumberValue
                       };
@@ -1417,12 +1421,12 @@ allergenLines.forEach((line, idx) => {
                       product_name: editableData[index].productName,
                       // Display format
                       ingredients: editableData[index].ingredients,
-                      allergen: editableData[index].allergen,
+                      allergen: DEFAULT_ALLERGEN,
                       bestBefore: editableData[index].bestBefore,
                       batchNumber: editableData[index].batchNumber,
                       // Database format
                       label_ingredients: editableData[index].ingredients,
-                      label_allergens: editableData[index].allergen,
+                      label_allergens: DEFAULT_ALLERGEN,
                       best_before: convertToPostgresDate(editableData[index].bestBefore),
                       batch_number: editableData[index].batchNumber
                     }));

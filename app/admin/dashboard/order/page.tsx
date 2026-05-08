@@ -1081,14 +1081,13 @@ const handleDelete = async () => {
 
   const handleGenerateLabels = async (order) => {
   try {
-    // Fetch order items with product details including ingredients and allergen
+    // Fetch order items with product details (allergen always uses default, not product allergen)
     const { data: items, error: fetchError } = await supabase
       .from('client_order_item')
       .select(`
         *,
         product_list(
-          product_ingredient,
-          product_allergen
+          product_ingredient
         )
       `)
       .eq('order_id', order.id);
@@ -1115,19 +1114,19 @@ const handleDelete = async () => {
     const gpbnNumber = deliveryDateGpbn[orderDateStr] || 3000;
     const gpbnCode = `GPBN${gpbnNumber}`;
 
+    // Fixed allergen text for all labels
+    const DEFAULT_ALLERGEN = 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.';
+
     // Map items to include product details at root level
     const itemsWithDetails = items?.map(item => {
       // Handle both array and object responses from Supabase
       let productIngredients = 'Ingredients not available';
-      let productAllergen = 'Our products are crafted in a facility that also processes dairy, gluten, and nuts.';
 
       if (item.product_list) {
         if (Array.isArray(item.product_list)) {
           productIngredients = item.product_list[0]?.product_ingredient || productIngredients;
-          productAllergen = item.product_list[0]?.product_allergen || productAllergen;
         } else {
           productIngredients = item.product_list.product_ingredient || productIngredients;
-          productAllergen = item.product_list.product_allergen || productAllergen;
         }
       }
 
@@ -1135,7 +1134,8 @@ const handleDelete = async () => {
         ...item,
         // Use saved label data if available, otherwise fall back to product data
         ingredients: item.label_ingredients || productIngredients,
-        allergen: item.label_allergens || productAllergen,
+        // Always use the same allergen text for all labels
+        allergen: DEFAULT_ALLERGEN,
         bestBefore: item.best_before ? formatDateDisplay(item.best_before) : '',
         // Use GPBN code as batch number (same as product sticker)
         batchNumber: gpbnCode,
@@ -2239,7 +2239,7 @@ const handlePrintInvoice = async () => {
         doc.setFont('helvetica', 'bold');
         doc.text('BILL TO', 20, 67 - headerOffset);
         doc.setFont('helvetica', 'normal');
-        doc.text(clientData.client_operationName || 'N/A', 20, 72 - headerOffset);
+        doc.text(clientData.client_businessName || 'N/A', 20, 72 - headerOffset);
         const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
         doc.text(billAddress, 20, 77 - headerOffset);
 
@@ -2673,7 +2673,7 @@ const handleDownloadPDF = async () => {
         doc.setFont('helvetica', 'bold');
         doc.text('BILL TO', 20, 67 - headerOffset);
         doc.setFont('helvetica', 'normal');
-        doc.text(clientData.client_operationName || 'N/A', 20, 72 - headerOffset);
+        doc.text(clientData.client_businessName || 'N/A', 20, 72 - headerOffset);
         const billAddress = doc.splitTextToSize(clientData.client_billing_address || 'N/A', 45);
         doc.text(billAddress, 20, 77 - headerOffset);
 
@@ -2804,7 +2804,7 @@ const handleViewInvoice = async (order) => {
     // Fetch client data with address details
     const { data: client } = await supabase
       .from('client_user')
-      .select('client_operationName, client_billing_address, client_person_incharge, ad_streetName, ad_country, ad_postal')
+      .select('client_businessName, client_operationName, client_billing_address, client_person_incharge, ad_streetName, ad_country, ad_postal')
       .eq('client_auth_id', order.client_auth_id)
       .single();
 
@@ -2876,8 +2876,10 @@ const handleViewInvoice = async (order) => {
     // Combine client data - use order's addresses if available, otherwise fall back to client's
     const combinedClientData = {
       ...client,
-      // Map client_operationName to client_businessName for invoice display
-      client_businessName: client?.client_operationName || '',
+      // Use client_businessName for Bill To
+      client_businessName: client?.client_businessName || '',
+      // Use client_operationName for Ship To
+      client_operationName: client?.client_operationName || '',
       // Use order's billing_address for Bill To if available
       client_billing_address: order.billing_address || client?.client_billing_address || '',
       // Use order's Ship To address fields if available

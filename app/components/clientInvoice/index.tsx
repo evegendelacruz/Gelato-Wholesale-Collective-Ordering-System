@@ -36,6 +36,7 @@ interface Order {
 
 interface ClientData {
   client_businessName: string;
+  client_operationName: string;
   client_delivery_address: string;
   client_billing_address: string;
   client_person_incharge: string;
@@ -503,7 +504,7 @@ export default function ClientInvoice({
 
                 <div>
                   <h3 style={{ fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>SHIP TO</h3>
-                  <p style={{ fontSize: '10px', margin: 0 }}><strong>{clientData?.client_businessName || 'N/A'}</strong></p>
+                  <p style={{ fontSize: '10px', margin: 0 }}><strong>{clientData?.client_operationName || 'N/A'}</strong></p>
                   <p style={{ fontSize: '10px', margin: 0, maxWidth: '150px', wordWrap: 'break-word' }}>
                     {[clientData?.ad_streetName, clientData?.ad_country, clientData?.ad_postal]
                       .filter(Boolean)
