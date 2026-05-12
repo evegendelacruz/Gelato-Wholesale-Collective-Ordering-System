@@ -591,7 +591,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
     // Header section with MOMOLATO branding
     worksheet.mergeCells('A1:F1');
     const headerCell = worksheet.getCell('A1');
-    headerCell.value = 'MOMOLATO';
+    headerCell.value = 'GELATO WHOLESALE COLLECTIVE';
     headerCell.font = { name: 'Arial Black', size: 24, bold: true };
     headerCell.alignment = { horizontal: 'left', vertical: 'middle' };
 
@@ -1267,7 +1267,7 @@ const generateAndSaveReport = async (deliveryDate: string) => {
                         <div className="w-full">
                             {/* Header Section */}
                             <div className="mb-4 pb-4 border-b-2 border-gray-300">
-                            <h1 className="text-3xl font-bold">MOMOLATO</h1>
+                            <h1 className="text-3xl font-bold">GELATO WHOLESALE COLLECTIVE</h1>
                             <div className="flex justify-between items-start mt-2">
                                 <div className="text-sm">
                                 <p className="font-bold">Date: {formatDateFull(previewDate)}</p>

@@ -386,27 +386,46 @@ export default function ClientStatementPage() {
 
     console.log(`Grouped into ${Object.keys(groupedOrders).length} unique client-month combinations`);
 
+    // Get default GST percentage
+    const savedGst = localStorage.getItem('defaultGstPercent_client');
+    const defaultGstPercent = savedGst ? parseFloat(savedGst) : 9;
+
     for (const [monthKey, orders] of Object.entries(groupedOrders)) {
       try {
         // Sort orders by delivery_date to get the first invoice of the month
-        const sortedOrders = orders.sort((a, b) => 
+        const sortedOrders = orders.sort((a, b) =>
           new Date(a.delivery_date).getTime() - new Date(b.delivery_date).getTime()
         );
-        
+
         const firstOrder = sortedOrders[0];
         const firstDeliveryDate = new Date(firstOrder.delivery_date);
-        
+
         // Set statement_month to the first day of the month from the first delivery
         const statementMonth = new Date(
-          firstDeliveryDate.getFullYear(), 
-          firstDeliveryDate.getMonth(), 
+          firstDeliveryDate.getFullYear(),
+          firstDeliveryDate.getMonth(),
           1
         );
-        
-        // Calculate total amount
-        const totalAmount = orders.reduce((sum, order) => 
-          sum + parseFloat(order.total_amount.toString()), 0
-        );
+
+        // Calculate total amount with GST for each order
+        let totalAmount = 0;
+        for (const order of orders) {
+          // Fetch order items to calculate subtotal
+          const { data: orderItems } = await supabase
+            .from('client_order_item')
+            .select('quantity, unit_price')
+            .eq('order_id', order.id);
+
+          const subtotal = orderItems?.reduce((sum, item) => {
+            return sum + (item.quantity * parseFloat(item.unit_price?.toString() || '0'));
+          }, 0) || 0;
+
+          // Calculate correct total with GST
+          const gstAmount = subtotal * (defaultGstPercent / 100);
+          const correctTotal = subtotal > 0 ? subtotal + gstAmount : parseFloat(order.total_amount.toString());
+
+          totalAmount += correctTotal;
+        }
 
         console.log(`Processing statement for client ${firstOrder.client_auth_id}`);
         console.log(`First delivery date: ${firstDeliveryDate.toISOString()}`);
@@ -436,31 +455,48 @@ export default function ClientStatementPage() {
           // Use existing statement
           statementId = existingStatement.statement_id;
           console.log(`Using existing statement: ${statementId}`);
-          
-          // Recalculate total by getting all orders for this statement
+
+          // Recalculate total by getting all orders for this statement with GST
           const { data: allOrders, error: allOrdersError } = await supabase
             .from('client_order')
-            .select('total_amount')
+            .select('id, total_amount, gst_percentage')
             .eq('statement_id', statementId)
             .neq('status', 'Cancelled'); // Exclude cancelled orders
 
           if (!allOrdersError && allOrders) {
-            const currentTotal = allOrders.reduce((sum, order) => 
-              sum + parseFloat(order.total_amount.toString()), 0
-            );
-            
+            let currentTotal = 0;
+            for (const ord of allOrders) {
+              // Fetch order items to calculate subtotal
+              const { data: ordItems } = await supabase
+                .from('client_order_item')
+                .select('quantity, unit_price')
+                .eq('order_id', ord.id);
+
+              const ordSubtotal = ordItems?.reduce((sum, item) => {
+                return sum + (item.quantity * parseFloat(item.unit_price?.toString() || '0'));
+              }, 0) || 0;
+
+              const ordGstPercent = ord.gst_percentage !== null && ord.gst_percentage !== undefined
+                ? parseFloat(ord.gst_percentage.toString())
+                : defaultGstPercent;
+
+              const ordGstAmount = ordSubtotal * (ordGstPercent / 100);
+              const ordCorrectTotal = ordSubtotal > 0 ? ordSubtotal + ordGstAmount : parseFloat(ord.total_amount.toString());
+              currentTotal += ordCorrectTotal;
+            }
+
             // Add the new orders' total
             const newTotal = currentTotal + totalAmount;
-            
+
             // Update the total amount
             const { error: updateError } = await supabase
               .from('client_statement')
-              .update({ 
+              .update({
                 total_amount: newTotal,
                 date_generated: new Date().toISOString()
               })
               .eq('statement_id', statementId);
-              
+
             if (updateError) {
               console.error('Error updating statement total:', updateError);
               continue;
@@ -820,7 +856,28 @@ const handleViewStatement = async (statement: Statement) => {
       return;
     }
 
-    setSelectedStatement(statement);
+    // Recalculate statement total from corrected invoice amounts
+    const correctedTotal = invoices.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+
+    // Update statement in database if total has changed
+    if (Math.abs(correctedTotal - statement.total_amount) > 0.01) {
+      await supabase
+        .from('client_statement')
+        .update({ total_amount: correctedTotal })
+        .eq('statement_id', statement.statement_id);
+
+      // Update local statements list
+      setStatements(prev => prev.map(stmt =>
+        stmt.statement_id === statement.statement_id
+          ? { ...stmt, total_amount: correctedTotal }
+          : stmt
+      ));
+
+      console.log(`Updated statement ${statement.statement_id} total from ${statement.total_amount} to ${correctedTotal}`);
+    }
+
+    // Use corrected total for the selected statement
+    setSelectedStatement({ ...statement, total_amount: correctedTotal });
     setStatementInvoices(invoices);
     setAgingCategory(statement.aging_category || '1-30_days');
 
@@ -1365,6 +1422,10 @@ const fetchStatements = async () => {
         }>;
       }
 
+      // Get default GST percentage for recalculation
+      const savedGst = localStorage.getItem('defaultGstPercent_client');
+      const defaultGstPercent = savedGst ? parseFloat(savedGst) : 9;
+
       const transformedStatements = await Promise.all(data.map(async (stmt: RawStatement) => {
         let clientData = {
           client_businessName: 'N/A',
@@ -1397,16 +1458,58 @@ const fetchStatements = async () => {
         let displayMonth: string;
         if (firstOrder && firstOrder.delivery_date) {
           const deliveryDate = new Date(firstOrder.delivery_date);
-          displayMonth = deliveryDate.toLocaleDateString('en-US', { 
-            month: 'long', 
-            year: 'numeric' 
+          displayMonth = deliveryDate.toLocaleDateString('en-US', {
+            month: 'long',
+            year: 'numeric'
           });
         } else {
           // Fallback to statement_month from database
-          displayMonth = new Date(stmt.statement_month).toLocaleDateString('en-US', { 
-            month: 'long', 
-            year: 'numeric' 
+          displayMonth = new Date(stmt.statement_month).toLocaleDateString('en-US', {
+            month: 'long',
+            year: 'numeric'
           });
+        }
+
+        // Recalculate total from orders with GST
+        const { data: statementOrders } = await supabase
+          .from('client_order')
+          .select('id, total_amount, gst_percentage')
+          .eq('statement_id', stmt.statement_id)
+          .neq('status', 'Cancelled');
+
+        let recalculatedTotal = 0;
+        if (statementOrders && statementOrders.length > 0) {
+          for (const ord of statementOrders) {
+            // Fetch order items to calculate subtotal
+            const { data: ordItems } = await supabase
+              .from('client_order_item')
+              .select('quantity, unit_price')
+              .eq('order_id', ord.id);
+
+            const ordSubtotal = ordItems?.reduce((sum, item) => {
+              return sum + (item.quantity * parseFloat(item.unit_price?.toString() || '0'));
+            }, 0) || 0;
+
+            const ordGstPercent = ord.gst_percentage !== null && ord.gst_percentage !== undefined
+              ? parseFloat(ord.gst_percentage.toString())
+              : defaultGstPercent;
+
+            const ordGstAmount = ordSubtotal * (ordGstPercent / 100);
+            const ordCorrectTotal = ordSubtotal > 0 ? ordSubtotal + ordGstAmount : parseFloat(ord.total_amount.toString());
+            recalculatedTotal += ordCorrectTotal;
+          }
+        } else {
+          recalculatedTotal = typeof stmt.total_amount === 'string' ? parseFloat(stmt.total_amount) : stmt.total_amount;
+        }
+
+        // Update statement in database if total has changed
+        const storedTotal = typeof stmt.total_amount === 'string' ? parseFloat(stmt.total_amount) : stmt.total_amount;
+        if (Math.abs(recalculatedTotal - storedTotal) > 0.01) {
+          await supabase
+            .from('client_statement')
+            .update({ total_amount: recalculatedTotal })
+            .eq('statement_id', stmt.statement_id);
+          console.log(`Updated statement ${stmt.statement_id} total from ${storedTotal} to ${recalculatedTotal}`);
         }
 
         return {
@@ -1415,7 +1518,7 @@ const fetchStatements = async () => {
           company_name: clientData.client_businessName,
           date_generated: stmt.date_generated,
           statement_month: displayMonth,
-          total_amount: typeof stmt.total_amount === 'string' ? parseFloat(stmt.total_amount) : stmt.total_amount,
+          total_amount: recalculatedTotal,
           invoice_count: 0,
           client_email: clientData.client_email,
           client_person_incharge: clientData.client_person_incharge,
@@ -1456,10 +1559,11 @@ const fetchStatements = async () => {
   const fetchStatementInvoices = async (statementId: string) => {
   try {
     console.log('Fetching invoices for statement:', statementId);
-    
+
+    // Fetch orders with gst_percentage and id for recalculation
     const { data, error: supabaseError } = await supabase
       .from('client_order')
-      .select('invoice_id, order_date, delivery_date, total_amount, status')
+      .select('id, invoice_id, order_date, delivery_date, total_amount, status, gst_percentage')
       .eq('statement_id', statementId)
       .order('order_date', { ascending: true });
 
@@ -1467,8 +1571,63 @@ const fetchStatements = async () => {
       throw new Error(`${supabaseError.message} (Code: ${supabaseError.code})`);
     }
 
-    console.log('Fetched invoices:', data);
-    return data || [];
+    if (!data || data.length === 0) {
+      return [];
+    }
+
+    // Get default GST percentage
+    const savedGst = localStorage.getItem('defaultGstPercent_client');
+    const defaultGstPercent = savedGst ? parseFloat(savedGst) : 9;
+
+    // Recalculate each invoice's total with GST
+    const correctedInvoices = await Promise.all(data.map(async (order) => {
+      // Fetch order items to calculate subtotal
+      const { data: orderItems } = await supabase
+        .from('client_order_item')
+        .select('quantity, unit_price')
+        .eq('order_id', order.id);
+
+      const subtotal = orderItems?.reduce((sum, item) => {
+        return sum + (item.quantity * parseFloat(item.unit_price?.toString() || '0'));
+      }, 0) || 0;
+
+      // Determine GST percentage
+      const gstPercent = order.gst_percentage !== null && order.gst_percentage !== undefined
+        ? parseFloat(order.gst_percentage.toString())
+        : defaultGstPercent;
+
+      // Calculate correct total with GST
+      const gstAmount = subtotal * (gstPercent / 100);
+      const correctTotal = subtotal + gstAmount;
+
+      // If stored total doesn't match, update it
+      const storedTotal = order.total_amount || 0;
+      const totalDifference = Math.abs(storedTotal - correctTotal);
+
+      if (subtotal > 0 && totalDifference > 0.01) {
+        // Update the order with correct total
+        await supabase
+          .from('client_order')
+          .update({
+            total_amount: correctTotal,
+            gst_percentage: gstPercent
+          })
+          .eq('id', order.id);
+
+        console.log(`Updated order ${order.id} total from ${storedTotal} to ${correctTotal} (GST: ${gstPercent}%)`);
+      }
+
+      return {
+        invoice_id: order.invoice_id,
+        order_date: order.order_date,
+        delivery_date: order.delivery_date,
+        total_amount: subtotal > 0 ? correctTotal : storedTotal,
+        status: order.status
+      };
+    }));
+
+    console.log('Fetched and corrected invoices:', correctedInvoices);
+    return correctedInvoices;
   } catch (error) {
     console.error('Error fetching invoices:', error);
     return [];
